@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GREEN AGRI-EXPORTS · Quản lý Xuất khẩu Nông sản</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Be Vietnam Pro"', '"Segoe UI"', 'system-ui', 'sans-serif'],
+            display: ['"Be Vietnam Pro"', '"Segoe UI"', 'system-ui', 'sans-serif'],
+            mono: ['ui-monospace', 'Consolas', 'monospace']
+          },
+          colors: {
+            brand: {
+              workspace: '#84b8a1',
+              card: '#547d59',
+              border: '#186635',
+              'shadow-base': '#124d28',
+              deep: '#07281c',
+              forest: '#0f4a33',
+              'forest-dark': '#07281c',
+              teal: '#16977f',
+              'teal-dark': '#0f4a33',
+              leaf: '#2f7d3e',
+              lime: '#6aa63f',
+              gold: '#f4d98a',
+              sun: '#f4d98a',
+              sidebar: '#07281c',
+              'sidebar-deep': '#07281c',
+              canvas: '#84b8a1',
+              'table-head': '#547d59',
+              danger: '#8c3b3b'
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <?!= include('CSS_Giao_Dien'); ?>
+</head>
+<body data-company-logo-id="<?= (typeof COMPANY_LOGO_ID !== 'undefined' ? COMPANY_LOGO_ID : '') ?>" class="min-h-screen bg-[#84b8a1] text-[#0b2418] antialiased">
+  <?!= include('Khung_Suon_Chung'); ?>
+  <?!= include('JS_He_Thong_Loi'); ?>
+  <?!= include('JS_Nghiep_Vu_Logic'); ?>
+</body>
+</html>

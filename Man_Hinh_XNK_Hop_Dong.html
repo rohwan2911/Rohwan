@@ -1,0 +1,1275 @@
+<!-- 3.2. VIEW: XNK - HỢP ĐỒNG NGOẠI THƯƠNG -->
+<section id="view-xnk-contract" class="app-view hidden space-y-6">
+  <div class="flex flex-wrap items-center justify-between gap-4">
+    <div>
+      <h2 class="text-2xl font-extrabold text-[#0b2418] font-display">Hợp đồng ngoại thương</h2>
+    </div>
+    <button type="button" onclick="openContractFormModal(null)"
+      class="px-4 py-2.5 bg-[#0f4a33] hover:bg-[#16977f] text-[#fff5d6] border border-[#186635] text-sm font-bold rounded-xl shadow-[0_3px_0_#07281c] transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer">
+      <i data-lucide="plus" class="w-4 h-4"></i>
+      <span>Thêm hợp đồng mới</span>
+    </button>
+  </div>
+
+  <!-- Đơn hàng đã chốt từ Kinh doanh chờ XNK lập hợp đồng -->
+  <div id="confirmed-pending-contract-box" class="mint-amber-card overflow-hidden hidden">
+    <div class="card-header-3d px-5 py-3 flex items-center justify-between gap-2">
+      <h3 class="text-sm font-bold text-[#fff5d6]">Đơn hàng Kinh doanh đã chốt chờ lập hợp đồng</h3>
+      <span id="confirmed-pending-count" class="text-xs font-bold text-[#f4d98a] bg-[#07281c]/70 px-2.5 py-0.5 rounded-lg border border-[#f4d98a]/60">0 đơn</span>
+    </div>
+    <div id="confirmed-pending-list" class="p-4 bg-[#547d59] grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+  </div>
+
+  <div class="mint-card overflow-hidden">
+    <div class="card-header-3d px-5 py-3 flex items-center justify-between gap-2">
+      <h3 class="text-sm font-bold text-[#fff5d6]">Danh sách Hợp đồng Ngoại thương &amp; 6 Bước Thực hiện</h3>
+    </div>
+    <div class="agri-table-scroll">
+      <table class="agri-table text-left text-xs">
+        <colgroup>
+          <col style="width: 13%;" />
+          <col style="width: 14%;" />
+          <col style="width: 13%;" />
+          <col style="width: 10%;" />
+          <col style="width: 11%;" />
+          <col style="width: 11%;" />
+          <col style="width: 14%;" />
+          <col style="width: 14%;" />
+        </colgroup>
+        <thead>
+          <tr class="text-xs font-bold">
+            <th>Mã đơn &amp; Số HĐ</th>
+            <th>Khách hàng &amp; Phụ trách</th>
+            <th>Sản phẩm &amp; KL (KG)</th>
+            <th>ĐK &amp; Thanh toán</th>
+            <th>Tuyến cảng</th>
+            <th>Giá trị (USD)</th>
+            <th>Tiến độ 6 bước</th>
+            <th>Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="contract-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- 3.4. VIEW: XNK - BỘ CHỨNG TỪ XUẤT KHẨU (INVOICE, PACKING LIST, C/O, B/L) -->
+<section id="view-xnk-documents" class="app-view hidden space-y-6">
+  <div class="flex flex-wrap items-center justify-between gap-4">
+    <div>
+      <h2 class="text-2xl font-extrabold text-[#0b2418] font-display">Bộ chứng từ xuất khẩu (Invoice, Packing List, C/O, B/L)</h2>
+    </div>
+    <button type="button" onclick="switchTab('xnk-contract')"
+      class="px-4 py-2.5 bg-[#0f4a33] hover:bg-[#16977f] text-[#fff5d6] border border-[#186635] text-sm font-bold rounded-xl shadow-[0_3px_0_#07281c] transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer">
+      <i data-lucide="file-signature" class="w-4 h-4"></i>
+      <span>Quản lý Hợp đồng Ngoại thương</span>
+    </button>
+  </div>
+
+  <div class="mint-card overflow-hidden">
+    <div class="card-header-3d px-5 py-3 flex items-center justify-between gap-2">
+      <h3 class="text-sm font-bold text-[#fff5d6]">Tìm kiếm Hồ sơ Chứng từ Xuất khẩu</h3>
+      <span class="text-xs font-semibold text-[#d2ebe0]">Tự động đồng bộ Form C/O &amp; Thanh toán</span>
+    </div>
+    <div class="p-4 bg-[#547d59]">
+      <input id="filter-docs-search" type="text" oninput="renderDocumentsHub()"
+        placeholder="Tìm số hợp đồng, mã đơn, khách hàng, số Booking, Form C/O..."
+        class="w-full sm:w-96 px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/70 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+    </div>
+  </div>
+
+  <div class="mint-card overflow-hidden">
+    <div class="card-header-3d px-5 py-3">
+      <h3 class="text-sm font-bold text-[#fff5d6]">Danh sách Bộ Chứng từ theo Hợp đồng Ngoại thương</h3>
+    </div>
+    <div class="agri-table-scroll">
+      <table class="agri-table text-left text-xs sm:text-sm">
+        <colgroup>
+          <col style="width: 13%;" />
+          <col style="width: 15%;" />
+          <col style="width: 15%;" />
+          <col style="width: 22%;" />
+          <col style="width: 11%;" />
+          <col style="width: 24%;" />
+        </colgroup>
+        <thead>
+          <tr class="text-xs font-bold">
+            <th>Số Hợp đồng / Mã đơn</th>
+            <th>Khách hàng</th>
+            <th>Tuyến &amp; Tàu / Chuyến</th>
+            <th>C/O · Booking &amp; Cut-off</th>
+            <th>Giá trị (USD)</th>
+            <th>Chứng từ xuất khẩu</th>
+          </tr>
+        </thead>
+        <tbody id="documents-hub-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- MODAL: THÊM / SỬA HỢP ĐỒNG NGOẠI THƯƠNG -->
+<div id="modal-contract-form" class="hidden fixed inset-0 z-50 bg-[#07281c]/70 backdrop-blur-[2px] flex items-center justify-center p-4">
+  <div class="bg-[#547d59] border-2 border-[#186635] rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-[0_6px_0_#124d28,0_16px_32px_rgba(7,40,28,0.45)] text-[#fff5d6]">
+    <div class="flex items-center justify-between pb-4 border-b border-[#186635]/70">
+      <h3 id="modal-contract-title" class="text-lg font-extrabold text-[#fff5d6] font-display">Thông tin hợp đồng ngoại thương</h3>
+      <button type="button" onclick="closeModal('modal-contract-form')" class="text-[#d2ebe0] hover:text-[#f4d98a] cursor-pointer">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+    <form id="form-contract" class="mt-4 space-y-4" onsubmit="handleSaveContract(event)">
+      <input type="hidden" id="ctr-is-edit" value="0" />
+      <div id="ctr-locked-banner" class="hidden px-3.5 py-2.5 rounded-xl bg-[#0f4a33] border-[1.5px] border-[#f4d98a] text-xs font-medium text-[#fff5d6] flex items-center gap-2">
+        <i data-lucide="lock" class="w-4 h-4 text-[#f4d98a] shrink-0"></i>
+        <span>Hợp đồng đã được ký &amp; khóa số liệu thương mại. Bạn có thể cập nhật thông tin vận tải (Container/Seal, Tàu, Booking Hãng tàu/FWD, 6 mốc Cut-off, C/O).</span>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Mã đơn hàng</label>
+          <input id="ctr-order-id" type="text" required placeholder="VD: ORD-001"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Số hợp đồng</label>
+          <input id="ctr-no" type="text" required placeholder="VD: SC-2026-001/GAE"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Ngày ký hợp đồng</label>
+          <input id="ctr-date" type="date" required
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Nhân viên phụ trách</label>
+          <input id="ctr-staff" type="text" required
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Mã khách hàng</label>
+          <input id="ctr-consignee" type="text" required oninput="onContractPortOrCustomerChange()"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Mã sản phẩm</label>
+          <input id="ctr-sku" type="text" required
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Khối lượng xác nhận (KG)</label>
+          <input id="ctr-nw" type="number" min="1" required
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Điều kiện giao hàng</label>
+          <select id="ctr-incoterm" required
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]"></select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Giá trị hợp đồng (USD)</label>
+          <input id="ctr-value" type="number" step="0.01" min="0" required
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Điều khoản thanh toán</label>
+          <input id="ctr-payment" type="text" list="dl-payment-terms" required placeholder="VD: T/T at sight hoặc tự nhập..."
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Cảng đi</label>
+          <input id="ctr-pol" type="text" list="dl-pol" required
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Cảng đến</label>
+          <input id="ctr-pod" type="text" list="dl-pod" required oninput="onContractPortOrCustomerChange()"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Form C/O (tự gợi ý theo POD)</label>
+          <select id="ctr-co-form"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+            <option value="Form B">Form B</option>
+            <option value="Form E">Form E</option>
+            <option value="Form D">Form D</option>
+            <option value="Form AJ">Form AJ</option>
+            <option value="Form AK">Form AK</option>
+            <option value="EUR.1">EUR.1</option>
+            <option value="Form AANZ">Form AANZ</option>
+            <option value="Form AI">Form AI</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Mẫu hợp đồng xuất khẩu</label>
+          <select id="ctr-template-id"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+            <option value="">-- Tự động chọn theo nhóm sản phẩm --</option>
+          </select>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Số Container / Seal</label>
+          <input id="ctr-cont-seal" type="text" placeholder="VD: MSKU1234567 / SEAL9988"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Tên tàu / Số chuyến</label>
+          <input id="ctr-ves-voy" type="text" placeholder="VD: MSC AURORA V.412E"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Loại Vận đơn</label>
+          <select id="ctr-bl-type"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+            <option value="">-- Chưa chọn --</option>
+            <option value="MBL">Master B/L (MBL - Hãng tàu)</option>
+            <option value="HBL">House B/L (HBL - Forwarder)</option>
+          </select>
+        </div>
+
+        <!-- Khối Booking Hãng tàu vs Forwarder & 6 mốc Cut-off -->
+        <div class="sm:col-span-2 p-3.5 bg-[#9bccb8] border-[1.5px] border-[#186635] rounded-xl space-y-3 text-[#0b2418]">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-extrabold text-[#07281c]">Thông tin Booking &amp; 6 Mốc Cut-off (Bước 3–5)</span>
+            <input type="hidden" id="ctr-bk-no" value="" />
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Nguồn Booking chính</label>
+              <select id="ctr-bk-source"
+                class="w-full px-3 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+                <option value="CARRIER">Hãng tàu (Carrier)</option>
+                <option value="FWD">Forwarder (FWD)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Hình thức đóng hàng</label>
+              <select id="ctr-cargo-mode"
+                class="w-full px-3 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+                <option value="FCL">FCL (Nguyên Container · CY)</option>
+                <option value="LCL">LCL (Hàng lẻ · CFS)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Số Booking Hãng tàu (Carrier)</label>
+              <input id="ctr-carrier-bk-no" type="text" placeholder="VD: MAEU987654321"
+                class="w-full px-3 py-2 text-sm font-mono font-bold border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Số Booking Forwarder (FWD)</label>
+              <input id="ctr-fwd-bk-no" type="text" placeholder="VD: FWD-SGN-2026-088"
+                class="w-full px-3 py-2 text-sm font-mono font-bold border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+          </div>
+
+          <div class="pt-2 border-t border-[#186635]/40 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">S/I Cut-off</label>
+              <input id="ctr-si-cutoff" type="datetime-local"
+                class="w-full px-3 py-1.5 text-xs font-mono font-bold border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">VGM Cut-off</label>
+              <input id="ctr-vgm-cutoff" type="datetime-local"
+                class="w-full px-3 py-1.5 text-xs font-mono font-bold border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">CFS Cut-off (LCL)</label>
+              <input id="ctr-cfs-cutoff" type="datetime-local"
+                class="w-full px-3 py-1.5 text-xs font-mono font-bold border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">CY Cut-off (FCL)</label>
+              <input id="ctr-cy-cutoff" type="datetime-local"
+                class="w-full px-3 py-1.5 text-xs font-mono font-bold border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Customs / Vào sổ tàu Cut-off</label>
+              <input id="ctr-customs-cutoff" type="datetime-local"
+                class="w-full px-3 py-1.5 text-xs font-mono font-bold border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Draft B/L Cut-off</label>
+              <input id="ctr-draft-bl-cutoff" type="datetime-local"
+                class="w-full px-3 py-1.5 text-xs font-mono font-bold border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+          </div>
+        </div>
+
+        <div id="ctr-contract-link-wrap" class="sm:col-span-2 hidden">
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Link Hợp đồng đã ký</label>
+          <input id="ctr-contract-link" type="url" placeholder="https://drive.google.com/file/d/..."
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 pt-4 border-t border-[#186635]/70">
+        <button type="button" onclick="closeModal('modal-contract-form')"
+          class="px-4 py-2 text-sm font-semibold text-[#0b2418] bg-[#9bccb8] border-[1.5px] border-[#186635] rounded-xl hover:bg-[#aed6c6] cursor-pointer">Hủy</button>
+        <button type="submit"
+          class="px-4 py-2 text-sm font-bold text-[#fff5d6] bg-[#0f4a33] border border-[#186635] rounded-xl hover:bg-[#16977f] shadow-[0_3px_0_#07281c] cursor-pointer">Lưu hợp đồng</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var xnkContractOverridesReady = false;
+    window.EDITED_CONTRACTS_RESEND_ENABLED = window.EDITED_CONTRACTS_RESEND_ENABLED || {};
+
+    function normStatusText(st) {
+      var s = String(st || "").trim();
+      if (typeof window.foldViText === "function") return window.foldViText(s);
+      return s.toLowerCase();
+    }
+
+    function suggestCoFormClient(pod, country) {
+      var hay = (String(pod || "") + " " + String(country || "")).toLowerCase();
+      if (typeof window.foldViText === "function") hay = window.foldViText(hay);
+      if (!hay.trim()) return "Form B";
+      if (/singapore|malaysia|thailand|thai lan|indonesia|philippines|brunei|myanmar|cambodia|laos|port klang|laem chabang|jakarta|tanjung priok|manila|bangkok|pasir gudang|asean/.test(hay)) {
+        return "Form D";
+      }
+      if (/china|trung quoc|shanghai|ningbo|shenzhen|qingdao|guangzhou|xiamen|tianjin|shekou|yantian|huangpu|dalian|hong kong/.test(hay)) {
+        return "Form E";
+      }
+      if (/korea|han quoc|busan|incheon|gwangyang|seoul|pyeongtaek/.test(hay)) {
+        return "Form AK";
+      }
+      if (/japan|nhat ban|tokyo|yokohama|osaka|kobe|nagoya|hakata|moji|shimizu/.test(hay)) {
+        return "Form AJ";
+      }
+      if (/rotterdam|hamburg|antwerp|le havre|felixstowe|southampton|london|genoa|trieste|valencia|barcelona|algeciras|bremerhaven|gdansk|netherlands|ha lan|germany|duc|france|phap|belgium|bi|italy|spain|poland|sweden|denmark|united kingdom|\buk\b|\beu\b|europe|chau au/.test(hay)) {
+        return "EUR.1";
+      }
+      if (/australia|uc|sydney|melbourne|brisbane|fremantle|adelaide|new zealand|auckland|tauranga/.test(hay)) {
+        return "Form AANZ";
+      }
+      if (/india|an do|nhava sheva|chennai|mundra|mumbai|kolkata|cochin/.test(hay)) {
+        return "Form AI";
+      }
+      return "Form B";
+    }
+
+    function resolveCountryForContractForm() {
+      var cid = String((document.getElementById("ctr-consignee") || {}).value || "").trim().toUpperCase();
+      var pod = String((document.getElementById("ctr-pod") || {}).value || "").trim().toLowerCase();
+      var cus = (window.APP_DATA && window.APP_DATA.consignees || []).find(function (c) {
+        return String(c["Consignee_ID"] || "").trim().toUpperCase() === cid;
+      });
+      if (cus && cus["Country"]) return String(cus["Country"]);
+      var sch = (window.APP_DATA && window.APP_DATA.schedules || []).find(function (s) {
+        return pod && String(s["POD"] || "").trim().toLowerCase().indexOf(pod) !== -1;
+      });
+      return sch ? String(sch["Country"] || "") : "";
+    }
+
+    window.onContractPortOrCustomerChange = function () {
+      var coSel = document.getElementById("ctr-co-form");
+      if (!coSel) return;
+      var podVal = String((document.getElementById("ctr-pod") || {}).value || "").trim();
+      var countryVal = resolveCountryForContractForm();
+      var suggested = suggestCoFormClient(podVal, countryVal);
+      coSel.value = suggested;
+      if (typeof window.syncSearchableCombo === "function") window.syncSearchableCombo(coSel);
+    };
+
+    window.isOrderPendingSalesSign = function (o) {
+      if (!o) return false;
+      var f = normStatusText(o["Fulfillment_Status"]);
+      return (
+        f.indexOf("cho sales dua ky") !== -1 ||
+        f.indexOf("cho sales dua di ky") !== -1 ||
+        f.indexOf("chuyen hd cho sales") !== -1 ||
+        f.indexOf("cho gui khach ky") !== -1 ||
+        f.indexOf("contract sent to sales") !== -1
+      );
+    };
+
+    window.isOrderContractSigned = function (o) {
+      if (!o) return false;
+      var rawLock = o["Contract_Locked"];
+      if (rawLock === true || String(rawLock || "").trim().toUpperCase() === "TRUE") return true;
+      var f = normStatusText(o["Fulfillment_Status"]);
+      if (
+        /^3\s*[.:)\-\/]|^(?:moc|buoc|stage)\s*3\b/.test(f) ||
+        /^4\s*[.:)\-\/]|^(?:moc|buoc|stage)\s*4\b/.test(f) ||
+        /^5\s*[.:)\-\/]|^(?:moc|buoc|stage)\s*5\b/.test(f) ||
+        /^6\s*[.:)\-\/]|^(?:moc|buoc|stage)\s*6\b/.test(f) ||
+        f.indexOf("booking") !== -1 ||
+        f.indexOf("dong cont") !== -1 ||
+        f.indexOf("chung tu") !== -1 ||
+        f.indexOf("hai quan") !== -1 ||
+        f.indexOf("van don") !== -1 ||
+        f.indexOf("b/l") !== -1 ||
+        f.indexOf("quyet toan") !== -1 ||
+        f.indexOf("hoan tat") !== -1 ||
+        f.indexOf("hoan thanh") !== -1
+      ) {
+        return true;
+      }
+      return false;
+    };
+
+    function getCurrentUserRoleNorm() {
+      if (typeof window.normalizeRole === "function" && window.CURRENT_USER) {
+        return window.normalizeRole(window.CURRENT_USER.Department);
+      }
+      var dept = String((window.CURRENT_USER && window.CURRENT_USER.Department) || "").toUpperCase();
+      if (dept.indexOf("ADMIN") !== -1 || dept.indexOf("QUAN") !== -1) return "ADMIN";
+      if (dept.indexOf("XNK") !== -1 || dept.indexOf("LOGISTIC") !== -1) return "XNK";
+      return "SALES";
+    }
+
+    function syncSendContractToSalesBtn(orderObj) {
+      var btn = document.getElementById("btn-send-contract-to-sales");
+      if (!btn) return;
+      var role = getCurrentUserRoleNorm();
+      var isSigned = window.isOrderContractSigned(orderObj);
+      var isPendingSales = !isSigned && window.isOrderPendingSalesSign(orderObj);
+      var canXnkSend = (role === "XNK" || role === "ADMIN") && !isSigned;
+      btn.classList.toggle("hidden", !canXnkSend);
+      btn.classList.toggle("inline-flex", canXnkSend);
+      var spanEl = btn.querySelector("span");
+      if (spanEl) {
+        spanEl.textContent = isPendingSales
+          ? "Cập nhật & Gửi lại Sales ký"
+          : "Xác nhận & Gửi cho Sales đưa đi ký";
+      }
+    }
+
+    window.handleConfirmAndSendContractToSales = function (btnEl) {
+      var ctx = window.PREVIEW_MODAL_CTX || {};
+      var orderId = ctx.orderId;
+      if (!orderId) return;
+      var ctrOpts = Object.assign({}, ctx.contractOpts || {});
+      var tplSel = document.getElementById("doc-contract-tpl-select");
+      if (tplSel && tplSel.value) {
+        ctrOpts.templateId = String(tplSel.value).trim();
+      }
+      if (typeof window.setButtonLoading === "function") window.setButtonLoading(btnEl, true, "Đang lưu & gửi Sales...");
+      if (typeof window.startTopProgress === "function") window.startTopProgress();
+
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (typeof window.stopTopProgress === "function") window.stopTopProgress();
+          if (typeof window.setButtonLoading === "function") window.setButtonLoading(btnEl, false);
+          if (res && res.success) {
+            var ordObj = (window.APP_DATA && window.APP_DATA.orders || []).find(function (x) {
+              return String(x["Order_ID"] || "").trim().toUpperCase() === String(orderId || "").trim().toUpperCase();
+            });
+            if (ordObj) {
+              if (res.contractLink) ordObj["Contract_Link"] = res.contractLink;
+              ordObj["Fulfillment_Status"] = res.fulfillmentStatus || "Chờ Sales đưa ký";
+              if (res.templateId) ordObj["Template_ID"] = res.templateId;
+            }
+            try { if (typeof window.writeLocalAppCache === "function") window.writeLocalAppCache(window.APP_DATA); } catch (ce) {}
+            if (typeof window.syncContractSavedLinkUI === "function" && ordObj) window.syncContractSavedLinkUI(ordObj);
+            syncSendContractToSalesBtn(ordObj);
+            if (typeof window.renderContractsTable === "function") window.renderContractsTable();
+            if (typeof window.renderSalesContractsTable === "function") window.renderSalesContractsTable();
+            if (typeof window.updateSalesContractsNavBadge === "function") window.updateSalesContractsNavBadge();
+            if (typeof window.renderDashboard === "function") window.renderDashboard();
+            if (typeof window.showToast === "function") {
+              window.showToast("success", "Đã xuất file Hợp đồng và chuyển sang Sales (Chờ Sales đưa ký).");
+            }
+            if (typeof Swal !== "undefined") {
+              var safeLink = res.contractLink
+                ? (typeof window.escHtmlText === "function" ? window.escHtmlText(res.contractLink) : res.contractLink)
+                : "";
+              Swal.fire({
+                icon: "success",
+                title: "Đã gửi Hợp đồng cho Sales đưa đi ký!",
+                html:
+                  '<p class="text-sm text-[#0b2418] mb-3">Hợp đồng <strong>' + (res.contractNo || orderId) + '</strong> đã được lưu lên Drive và chuyển sang mục <strong>Hợp đồng chờ ký</strong> của phòng Sales.</p>' +
+                  (safeLink
+                    ? '<a href="' + safeLink + '" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-[#fff5d6] bg-[#16977f] hover:bg-[#0f4a33] border border-[#186635] rounded-lg">↗ Mở file Hợp đồng đã lưu</a>'
+                    : ''),
+                confirmButtonColor: "#0f4a33",
+                confirmButtonText: "Đóng"
+              });
+            }
+            if (typeof window.refreshAllData === "function") window.refreshAllData({ silent: true });
+          } else if (typeof Swal !== "undefined") {
+            Swal.fire("Không thể gửi Sales", (res && res.message) || "Không thể xuất và lưu file Hợp đồng.", "warning");
+          }
+        })
+        .withFailureHandler(function (err) {
+          if (typeof window.stopTopProgress === "function") window.stopTopProgress();
+          if (typeof window.setButtonLoading === "function") window.setButtonLoading(btnEl, false);
+          if (typeof Swal !== "undefined") {
+            Swal.fire("Lỗi kết nối", (err && err.message) || "Không thể gọi Google Apps Script.", "error");
+          }
+        })
+        .confirmAndSendContractToSales(orderId, ctrOpts);
+    };
+
+    function initXnkContractOverrides() {
+      if (xnkContractOverridesReady) return;
+      xnkContractOverridesReady = true;
+
+      // Đồng bộ isContractLockedFlag dựa trên Fulfillment_Status (do Order_Master giữ đúng 15 cột chuẩn)
+      window.isContractLockedFlag = function (orderObj) {
+        return window.isOrderContractSigned(orderObj);
+      };
+
+      function toDateTimeLocalInputValue(raw) {
+        var s = String(raw || "").trim();
+        if (!s) return "";
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return s.slice(0, 16);
+        if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(s)) return s.replace(/\s+/, "T").slice(0, 16);
+        var d = new Date(s);
+        if (isNaN(d.getTime())) return "";
+        var pad = function (n) { return n < 10 ? ("0" + n) : String(n); };
+        return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+      }
+
+      function getNextStep6Config(stageNum) {
+        if (stageNum === 3) return { nextStatus: "4. Đang làm chứng từ & HQ", buttonLabel: "Chuyển Bước 4: Chứng từ & HQ" };
+        if (stageNum === 4) return { nextStatus: "5. Đang vận chuyển (On Board)", buttonLabel: "Chuyển Bước 5: On Board" };
+        if (stageNum === 5) return { nextStatus: "6. Chờ thanh toán", buttonLabel: "Chuyển Bước 6: Chờ thanh toán" };
+        if (stageNum === 6) return { nextStatus: "Hoàn tất quyết toán", buttonLabel: "Xác nhận Hoàn tất quyết toán" };
+        return null;
+      }
+
+      function getMergedLogisticsForOrder(orderObj, orderId) {
+        var normOid = String((orderObj && orderObj["Order_ID"]) || orderId || "").trim().toUpperCase();
+        var metaMap = window.ORDER_LOGISTICS_META || {};
+        var meta = normOid && metaMap[normOid] ? metaMap[normOid] : {};
+        return Object.assign({}, orderObj || {}, meta);
+      }
+
+      // 0. Wrap openContractFormModal: nạp đầy đủ Booking Hãng tàu/FWD & 6 mốc Cut-off, giữ mở khóa các ô vận tải
+      var origOpenContractFormModal = window.openContractFormModal;
+      if (typeof origOpenContractFormModal === "function") {
+        window.openContractFormModal = function (orderId) {
+          var isEditMode = Boolean(orderId && String(orderId).trim());
+          origOpenContractFormModal.apply(this, arguments);
+
+          var linkWrap = document.getElementById("ctr-contract-link-wrap");
+          if (linkWrap) {
+            linkWrap.classList.toggle("hidden", !isEditMode);
+          }
+
+          var existingOrder = isEditMode
+            ? (window.APP_DATA && window.APP_DATA.orders || []).find(function (x) {
+                return String(x["Order_ID"] || "").trim().toUpperCase() === String(orderId || "").trim().toUpperCase();
+              })
+            : null;
+          var merged = getMergedLogisticsForOrder(existingOrder, orderId);
+
+          var coSel = document.getElementById("ctr-co-form");
+          if (coSel) {
+            var savedCo = existingOrder ? String(existingOrder["CO_Form"] || "").trim() : "";
+            if (!savedCo) {
+              var podVal = String((document.getElementById("ctr-pod") || {}).value || "").trim();
+              var countryVal = resolveCountryForContractForm();
+              coSel.value = suggestCoFormClient(podVal, countryVal);
+            } else {
+              coSel.value = savedCo;
+            }
+            if (typeof window.syncSearchableCombo === "function") window.syncSearchableCombo(coSel);
+          }
+
+          var tplSel = document.getElementById("ctr-template-id");
+          if (tplSel && tplSel.options) {
+            for (var i = 0; i < tplSel.options.length; i++) {
+              tplSel.options[i].textContent = String(tplSel.options[i].textContent || "").replace(/\s*\(TMP_[A-Z0-9_]+\)\s*/gi, "").trim();
+            }
+            if (merged["Template_ID"]) tplSel.value = String(merged["Template_ID"]);
+            if (typeof window.syncSearchableCombo === "function") window.syncSearchableCombo(tplSel);
+          }
+
+          var setField = function (elId, val, forceUnlock) {
+            var el = document.getElementById(elId);
+            if (!el) return;
+            el.value = val !== undefined && val !== null ? String(val) : "";
+            if (forceUnlock) el.disabled = false;
+          };
+
+          var bkSrc = String(merged["Booking_Source"] || "").trim().toUpperCase();
+          var mergedCarrier = String(merged["Carrier_BK_No"] || merged["Carrier_Booking_No"] || "").trim();
+          var mergedFwd = String(merged["FWD_BK_No"] || merged["FWD_Booking_No"] || "").trim();
+          if (bkSrc !== "FWD" && bkSrc !== "CARRIER") {
+            bkSrc = mergedFwd && !mergedCarrier ? "FWD" : "CARRIER";
+          }
+          var carrierBk = String(mergedCarrier || (bkSrc === "CARRIER" ? (merged["BK_No"] || merged["Booking_No"] || "") : "")).trim();
+          var fwdBk = String(mergedFwd || (bkSrc === "FWD" ? (merged["BK_No"] || merged["Booking_No"] || "") : "")).trim();
+          var cargoMode = String(merged["Cargo_Mode"] || "FCL").trim().toUpperCase();
+          if (cargoMode !== "LCL") cargoMode = "FCL";
+
+          setField("ctr-cont-seal", merged["Cont_Seal_List"] || merged["Container_Seal_No"] || merged["Cont_Seal_No"] || "", true);
+          setField("ctr-ves-voy", merged["Ves_Voy"] || merged["Vessel_Voyage"] || "", true);
+          setField("ctr-bl-type", merged["BL_Type"] || "", true);
+          setField("ctr-bk-source", bkSrc, true);
+          setField("ctr-cargo-mode", cargoMode, true);
+          setField("ctr-carrier-bk-no", carrierBk, true);
+          setField("ctr-fwd-bk-no", fwdBk, true);
+          setField("ctr-bk-no", merged["BK_No"] || merged["Booking_No"] || carrierBk || fwdBk || "", true);
+          setField("ctr-si-cutoff", toDateTimeLocalInputValue(merged["SI_Cutoff"]), true);
+          setField("ctr-vgm-cutoff", toDateTimeLocalInputValue(merged["VGM_Cutoff"]), true);
+          setField("ctr-cfs-cutoff", toDateTimeLocalInputValue(merged["CFS_Cutoff"]), true);
+          setField("ctr-cy-cutoff", toDateTimeLocalInputValue(merged["CY_Cutoff"]), true);
+          setField("ctr-customs-cutoff", toDateTimeLocalInputValue(merged["Customs_Cutoff"]), true);
+          setField("ctr-draft-bl-cutoff", toDateTimeLocalInputValue(merged["Draft_BL_Cutoff"]), true);
+        };
+      }
+
+      // 0b. Ghi đè handleSaveContract: lưu 15 cột Order_Master + PropertiesService logistics/6 Cut-offs
+      window.handleSaveContract = function (e) {
+        if (e && typeof e.preventDefault === "function") e.preventDefault();
+        var isEdit = String((document.getElementById("ctr-is-edit") || {}).value || "0") === "1";
+        var orderId = String((document.getElementById("ctr-order-id") || {}).value || "").trim();
+        var contractNo = String((document.getElementById("ctr-no") || {}).value || "").trim();
+        var contractDate = String((document.getElementById("ctr-date") || {}).value || "").trim();
+        var staff = String((document.getElementById("ctr-staff") || {}).value || "").trim();
+        var consigneeId = String((document.getElementById("ctr-consignee") || {}).value || "").trim();
+        var skuCode = String((document.getElementById("ctr-sku") || {}).value || "").trim();
+        var nwVal = Number((document.getElementById("ctr-nw") || {}).value || 0);
+        var incoterm = String((document.getElementById("ctr-incoterm") || {}).value || "").trim();
+        var ctrVal = Number((document.getElementById("ctr-value") || {}).value || 0);
+        var paymentTerms = String((document.getElementById("ctr-payment") || {}).value || "").trim();
+        var pol = String((document.getElementById("ctr-pol") || {}).value || "").trim();
+        var pod = String((document.getElementById("ctr-pod") || {}).value || "").trim();
+        var coForm = String((document.getElementById("ctr-co-form") || {}).value || "").trim() || suggestCoFormClient(pod, resolveCountryForContractForm());
+        var contractLink = isEdit ? String((document.getElementById("ctr-contract-link") || {}).value || "").trim() : "";
+        var templateId = String((document.getElementById("ctr-template-id") || {}).value || "").trim();
+        var contSeal = String((document.getElementById("ctr-cont-seal") || {}).value || "").trim();
+        var vesVoy = String((document.getElementById("ctr-ves-voy") || {}).value || "").trim();
+        var blType = String((document.getElementById("ctr-bl-type") || {}).value || "").trim();
+        var bkSource = String((document.getElementById("ctr-bk-source") || {}).value || "CARRIER").trim().toUpperCase();
+        var cargoMode = String((document.getElementById("ctr-cargo-mode") || {}).value || "FCL").trim().toUpperCase();
+        var carrierBkNo = String((document.getElementById("ctr-carrier-bk-no") || {}).value || "").trim();
+        var fwdBkNo = String((document.getElementById("ctr-fwd-bk-no") || {}).value || "").trim();
+        var bkNo = bkSource === "FWD" ? (fwdBkNo || carrierBkNo) : (carrierBkNo || fwdBkNo);
+        var siCutoff = String((document.getElementById("ctr-si-cutoff") || {}).value || "").trim();
+        var vgmCutoff = String((document.getElementById("ctr-vgm-cutoff") || {}).value || "").trim();
+        var cfsCutoff = String((document.getElementById("ctr-cfs-cutoff") || {}).value || "").trim();
+        var cyCutoff = String((document.getElementById("ctr-cy-cutoff") || {}).value || "").trim();
+        var customsCutoff = String((document.getElementById("ctr-customs-cutoff") || {}).value || "").trim();
+        var draftBlCutoff = String((document.getElementById("ctr-draft-bl-cutoff") || {}).value || "").trim();
+
+        if (!orderId || !contractNo) {
+          if (typeof Swal !== "undefined") Swal.fire("Thiếu thông tin", "Vui lòng nhập Mã đơn hàng và Số hợp đồng.", "warning");
+          return;
+        }
+
+        var existing = (window.APP_DATA && window.APP_DATA.orders || []).find(function (x) {
+          return String(x["Order_ID"] || "").trim().toUpperCase() === orderId.toUpperCase();
+        });
+
+        var logisticsPatch = {
+          Booking_Source: bkSource,
+          Carrier_BK_No: carrierBkNo,
+          Carrier_Booking_No: carrierBkNo,
+          FWD_BK_No: fwdBkNo,
+          FWD_Booking_No: fwdBkNo,
+          BK_No: bkNo,
+          Booking_No: bkNo,
+          Cargo_Mode: cargoMode,
+          Cont_Seal_List: contSeal,
+          Container_Seal_No: contSeal,
+          Cont_Seal_No: contSeal,
+          Vessel_Voyage: vesVoy,
+          Ves_Voy: vesVoy,
+          BL_Type: blType,
+          Template_ID: templateId,
+          SI_Cutoff: siCutoff,
+          VGM_Cutoff: vgmCutoff,
+          CFS_Cutoff: cfsCutoff,
+          CY_Cutoff: cyCutoff,
+          Customs_Cutoff: customsCutoff,
+          Draft_BL_Cutoff: draftBlCutoff
+        };
+
+        var payload = Object.assign({
+          Order_ID: orderId,
+          "Contract_No.": contractNo,
+          Contract_Date: contractDate,
+          In_Charge_Staff: staff,
+          Consignee_ID: consigneeId,
+          SKU_Code: skuCode,
+          NW_Confirmed_KGs: nwVal,
+          Applied_Incoterm: incoterm,
+          Contract_Value: ctrVal,
+          Payment_Terms: paymentTerms,
+          POL: pol,
+          POD: pod,
+          Fulfillment_Status: existing ? String(existing["Fulfillment_Status"] || "") : "",
+          CO_Form: coForm,
+          Contract_Link: contractLink
+        }, logisticsPatch);
+
+        var submitBtn = e && e.target ? e.target.querySelector('button[type="submit"]') : null;
+        if (typeof window.setButtonLoading === "function" && submitBtn) window.setButtonLoading(submitBtn, true, "Đang lưu...");
+        if (typeof window.startTopProgress === "function") window.startTopProgress();
+
+        google.script.run
+          .withSuccessHandler(function (res) {
+            if (typeof window.stopTopProgress === "function") window.stopTopProgress();
+            if (typeof window.setButtonLoading === "function" && submitBtn) window.setButtonLoading(submitBtn, false);
+            if (res && res.success) {
+              var saved = Object.assign({}, res.data || payload, logisticsPatch);
+              window.ORDER_LOGISTICS_META = window.ORDER_LOGISTICS_META || {};
+              window.ORDER_LOGISTICS_META[orderId.toUpperCase()] = Object.assign(
+                {},
+                window.ORDER_LOGISTICS_META[orderId.toUpperCase()] || {},
+                logisticsPatch
+              );
+              if (typeof window.saveLogisticsMetaCacheLocal === "function") window.saveLogisticsMetaCacheLocal();
+
+              var ordersArr = Array.isArray(window.APP_DATA && window.APP_DATA.orders) ? window.APP_DATA.orders : [];
+              var idx = ordersArr.findIndex(function (x) {
+                return String(x["Order_ID"] || "").trim().toUpperCase() === orderId.toUpperCase();
+              });
+              if (idx >= 0) {
+                ordersArr[idx] = Object.assign({}, ordersArr[idx], saved);
+              } else {
+                ordersArr.push(saved);
+              }
+              if (typeof window.mergeLogisticsMetaIntoOrders === "function") window.mergeLogisticsMetaIntoOrders();
+
+              if (isEdit) {
+                window.EDITED_CONTRACTS_RESEND_ENABLED[orderId.toUpperCase()] = true;
+              }
+              try { if (typeof window.writeLocalAppCache === "function") window.writeLocalAppCache(window.APP_DATA); } catch (ce) {}
+              if (typeof window.closeModal === "function") window.closeModal("modal-contract-form");
+              if (typeof window.renderContractsTable === "function") window.renderContractsTable();
+              if (typeof window.renderDocumentsHub === "function") window.renderDocumentsHub();
+              if (typeof window.renderDashboard === "function") window.renderDashboard();
+              if (typeof window.showToast === "function") {
+                window.showToast("success", isEdit ? "Đã lưu cập nhật Hợp đồng & thông tin Booking / Cut-off." : "Đã lưu hợp đồng mới.");
+              }
+            } else if (typeof Swal !== "undefined") {
+              Swal.fire("Không thể lưu hợp đồng", (res && res.message) || "Vui lòng thử lại.", "warning");
+            }
+          })
+          .withFailureHandler(function (err) {
+            if (typeof window.stopTopProgress === "function") window.stopTopProgress();
+            if (typeof window.setButtonLoading === "function" && submitBtn) window.setButtonLoading(submitBtn, false);
+            if (typeof Swal !== "undefined") Swal.fire("Lỗi kết nối", (err && err.message) || "Không thể lưu hợp đồng.", "error");
+          })
+          .saveSalesContract(payload, isEdit);
+      };
+
+      // 1. Render lại bảng Hợp đồng Ngoại thương (XNK) theo Tiến độ 6 bước
+      window.renderContractsTable = function () {
+        var ordersArr = Array.isArray(window.APP_DATA && window.APP_DATA.orders) ? window.APP_DATA.orders : [];
+        var inquiriesArr = Array.isArray(window.APP_DATA && window.APP_DATA.inquiries) ? window.APP_DATA.inquiries : [];
+        var proposalsArr = Array.isArray(window.APP_DATA && window.APP_DATA.proposals) ? window.APP_DATA.proposals : [];
+        var consigneesArr = Array.isArray(window.APP_DATA && window.APP_DATA.consignees) ? window.APP_DATA.consignees : [];
+
+        var orderIdsWithContract = {};
+        ordersArr.forEach(function (o) {
+          orderIdsWithContract[String(o["Order_ID"] || "").trim().toUpperCase()] = true;
+        });
+        var pendingConfirmed = inquiriesArr.filter(function (i) {
+          var normOid = String(i["Order_ID"] || "").trim().toUpperCase();
+          return typeof window.isConfirmedStatus === "function" && window.isConfirmedStatus(i["Inquiry_Status"]) && !orderIdsWithContract[normOid];
+        });
+
+        var pendingBox = document.getElementById("confirmed-pending-contract-box");
+        var pendingList = document.getElementById("confirmed-pending-list");
+        var pendingCount = document.getElementById("confirmed-pending-count");
+        if (pendingCount) pendingCount.textContent = pendingConfirmed.length + " đơn";
+        if (pendingBox && pendingList) {
+          if (pendingConfirmed.length > 0) {
+            pendingBox.classList.remove("hidden");
+            pendingList.innerHTML = pendingConfirmed.map(function (inq) {
+              var prop = proposalsArr.slice().reverse().find(function (p) {
+                return String(p["Order ID"] || p["Order_ID"] || "").trim().toUpperCase() === String(inq["Order_ID"] || "").trim().toUpperCase();
+              });
+              var safeInqOid = String(inq["Order_ID"] || "").replace(/'/g, "\\'");
+              return '<div class="flex items-center justify-between gap-3 bg-[#9bccb8] border-[1.5px] border-[#186635] rounded-xl p-3.5 shadow-[0_3px_0_#124d28]">' +
+                '<div class="min-w-0">' +
+                  '<div class="text-sm font-bold text-[#0b2418] font-mono">' + inq["Order_ID"] + ' · ' + inq["Consignee_ID"] + '</div>' +
+                  '<div class="text-xs text-[#1e4231] truncate font-medium">' + (typeof window.formatOrderItemsSummaryText === "function" ? window.formatOrderItemsSummaryText(inq) : (inq["Tên sản phẩm"] || "")) + ' · ' + window.fmtUSD(prop ? prop["Final_Selling Price"] : 0) + '</div>' +
+                '</div>' +
+                '<button type="button" onclick="handleCreateContractFromConfirmed(\'' + safeInqOid + '\', this)" class="px-3.5 py-1.5 bg-[#0f4a33] hover:bg-[#07281c] text-[#fff5d6] border border-[#186635] text-xs font-semibold rounded-xl shrink-0 transition-colors cursor-pointer">Khởi tạo Nháp HĐ</button>' +
+              '</div>';
+            }).join("");
+          } else {
+            pendingBox.classList.add("hidden");
+          }
+        }
+
+        var cSearch = String(window.GLOBAL_QUICK_SEARCH || "").toLowerCase();
+        var ordersList = ordersArr.filter(function (o) {
+          if (!cSearch) return true;
+          var hay = (o["Order_ID"] + " " + o["Contract_No."] + " " + o["Consignee_ID"] + " " + o["SKU_Code"] + " " + o["POD"]).toLowerCase();
+          return hay.indexOf(cSearch) !== -1;
+        });
+
+        var tbody = document.getElementById("contract-tbody");
+        if (!tbody) return;
+        if (ordersList.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="8" class="py-8 text-center text-[#1e4231] font-medium">Chưa có hợp đồng ngoại thương nào.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = ordersList.slice().reverse().map(function (o) {
+          var oid = String(o["Order_ID"] || "").trim();
+          var safeOid = oid.replace(/'/g, "\\'");
+          var cus = consigneesArr.find(function (c) { return c["Consignee_ID"] === o["Consignee_ID"]; });
+          var cusName = cus ? cus["Consignee_Name"] : (o["Consignee_ID"] || "-");
+          var isSigned = window.isOrderContractSigned(o);
+          var isPendingSales = !isSigned && window.isOrderPendingSalesSign(o);
+          var stLabel = typeof window.translateFulfillmentStatus === "function"
+            ? window.translateFulfillmentStatus(o["Fulfillment_Status"])
+            : String(o["Fulfillment_Status"] || "");
+          var stageNum = typeof window.getWorkflow6StageNumber === "function"
+            ? window.getWorkflow6StageNumber(o["Fulfillment_Status"], true, isSigned)
+            : (isSigned ? 3 : 2);
+          var isDone6 = typeof window.isOrderCompleted6Step === "function"
+            ? window.isOrderCompleted6Step(o["Fulfillment_Status"])
+            : (stageNum >= 7);
+          var nextStepObj = (isSigned && !isDone6) ? getNextStep6Config(stageNum) : null;
+
+          var badgeHtml = "";
+          var milestoneActionHtml = "";
+
+          if (!isSigned && !isPendingSales) {
+            badgeHtml = window.renderStatusBadge("Mốc 2/6 · Bản nháp - Chưa ký", "warning");
+            milestoneActionHtml = '<button type="button" onclick="openContractPreview(\'' + safeOid + '\')" class="w-full px-2 py-1 bg-[#0f4a33] hover:bg-[#07281c] text-[#fff5d6] border border-[#186635] rounded-lg text-[11px] font-semibold transition-colors cursor-pointer">Xem &amp; Gửi Sales ký</button>';
+          } else if (isPendingSales) {
+            badgeHtml = '<button type="button" onclick="openContractPreviewPdfOnly(\'' + safeOid + '\')" title="Bấm để xem bản PDF hợp đồng" class="inline-flex items-center justify-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#0f4a33] hover:bg-[#16977f] text-[#f4d98a] border border-[#186635] cursor-pointer transition-colors">Chờ Sales đưa ký</button>';
+            milestoneActionHtml = '<div class="text-center text-[10.5px] font-semibold text-[#0b2418]">Đang chờ Sales xác nhận khách ký</div>';
+          } else {
+            var badgeLabel = isDone6
+              ? (window.COMPLETED_ORDER_STATUS_6 || "Hoàn tất quyết toán")
+              : ("Mốc " + stageNum + "/6 · " + stLabel);
+            var badgeTone = isDone6 ? "success" : (stageNum >= 5 ? "info" : "warning");
+            badgeHtml = '<button type="button" onclick="openContractPreviewPdfOnly(\'' + safeOid + '\')" title="Bấm để xem bản PDF hợp đồng đã ký" class="inline-flex items-center justify-center bg-transparent border-0 p-0 cursor-pointer hover:opacity-85 transition-opacity">' + window.renderStatusBadge(badgeLabel, badgeTone) + '</button>';
+            if (nextStepObj) {
+              milestoneActionHtml = '<button type="button" onclick="handleAdvanceContractMilestone(\'' + safeOid + '\', \'' + nextStepObj.nextStatus.replace(/'/g, "\\'") + '\')" class="w-full px-2 py-1 bg-[#16977f] hover:bg-[#0f4a33] text-[#fff5d6] border border-[#186635] rounded-lg text-[11px] font-semibold transition-colors cursor-pointer">' + nextStepObj.buttonLabel + '</button>';
+            } else {
+              milestoneActionHtml = '<div class="text-center">' + window.renderStatusBadge("Hoàn tất", "success") + '</div>';
+            }
+          }
+
+          var canResend = Boolean(window.EDITED_CONTRACTS_RESEND_ENABLED && window.EDITED_CONTRACTS_RESEND_ENABLED[oid.toUpperCase()]);
+          var resendBtnHtml = canResend
+            ? '<button type="button" onclick="openContractPreview(\'' + safeOid + '\', { forceSplit: true })" class="w-full px-2 py-1 text-[11px] bg-[#0f4a33] hover:bg-[#07281c] border border-[#186635] rounded-lg text-[#fff5d6] font-semibold transition-colors text-center cursor-pointer">Gửi lại</button>'
+            : '<button type="button" disabled title="Chỉ bật sau khi bấm Sửa và lưu thay đổi" class="w-full px-2 py-1 text-[11px] bg-[#809c8f] text-[#1e4231]/50 border border-[#186635]/40 rounded-lg font-semibold text-center cursor-not-allowed">Gửi lại</button>';
+
+          return '<tr class="text-xs transition-colors">' +
+            '<td>' +
+              '<button type="button" onclick="openOrderTimelineModal(\'' + safeOid + '\')" class="font-mono font-bold text-[#0b2418] hover:underline cursor-pointer text-left">' + oid + '</button>' +
+              '<div class="font-mono font-semibold text-[#0b2418] mt-0.5">' + (o["Contract_No."] || "-") + '</div>' +
+              '<div class="font-mono text-[10px] text-[#1e4231]">' + (o["Contract_Date"] || "-") + '</div>' +
+            '</td>' +
+            '<td>' +
+              '<div class="font-bold text-[#0b2418] leading-snug">' + cusName + '</div>' +
+              '<div class="text-[11px] text-[#1e4231] mt-0.5">NV: ' + (o["In_Charge_Staff"] || "-") + '</div>' +
+            '</td>' +
+            '<td>' +
+              '<div class="font-mono font-bold text-[#0b2418]">' + (o["SKU_Code"] || "-") + '</div>' +
+              '<div class="font-mono text-[11px] font-semibold text-[#0f4a33] mt-0.5">' + window.fmtNumber(o["NW_Confirmed_KGs"]) + ' KG</div>' +
+            '</td>' +
+            '<td>' +
+              '<div class="font-bold text-[#0f4a33]">' + (o["Applied_Incoterm"] || "-") + '</div>' +
+              '<div class="text-[11px] text-[#1e4231] mt-0.5">' + (o["Payment_Terms"] || "-") + '</div>' +
+            '</td>' +
+            '<td class="text-xs text-[#0b2418] font-medium">' + (o["POL"] || "Cát Lái") + ' → ' + (o["POD"] || "-") + '</td>' +
+            '<td class="text-right font-mono font-bold text-[#07281c] tabular-nums">' + window.fmtUSD(window.getOrderContractValue(o)) + '</td>' +
+            '<td class="space-y-1.5">' +
+              '<div class="text-center">' + badgeHtml + '</div>' +
+              '<div>' + milestoneActionHtml + '</div>' +
+            '</td>' +
+            '<td class="space-y-1">' +
+              '<button type="button" onclick="openContractFormModal(\'' + safeOid + '\')" class="w-full px-2 py-1 text-[11px] bg-[#aed6c6] hover:bg-[#9bccb8] border border-[#186635] rounded-lg text-[#0b2418] font-semibold transition-colors text-center cursor-pointer">' + (isSigned ? 'B/K · Cut-off' : 'Sửa') + '</button>' +
+              resendBtnHtml +
+            '</td>' +
+          '</tr>';
+        }).join("");
+      };
+
+      // 1B. Nâng cấp Bộ chứng từ Xuất khẩu: hiển thị Booking Hãng tàu/FWD, 6 mốc Cut-off, nút Cập nhật B/K & Cut-off + 4 chứng từ
+      function formatCompactCutoffPill(label, rawDateStr) {
+        var s = String(rawDateStr || "").trim();
+        if (!s) return "";
+        var normalized = s.indexOf("T") !== -1 ? s : s.replace(/\s+/, "T");
+        var dt = new Date(normalized);
+        var cls = "bg-[#aed6c6] text-[#0b2418] border-[#186635]";
+        var shortTime = s.slice(5, 16).replace("T", " ");
+        if (!isNaN(dt.getTime())) {
+          var diffHours = (dt.getTime() - Date.now()) / (1000 * 60 * 60);
+          if (diffHours < 0) cls = "bg-[#8c3b3b] text-[#fdf2f2] border-[#6e2b2b]";
+          else if (diffHours <= 24) cls = "bg-[#b04a4a] text-[#fdf2f2] border-[#6e2b2b] font-bold";
+          else if (diffHours <= 72) cls = "bg-[#f4d98a] text-[#07281c] border-[#186635] font-semibold";
+          else cls = "bg-[#0f4a33] text-[#fff5d6] border-[#186635]";
+        }
+        return '<span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-mono border ' + cls + '" title="' + window.escHtmlText(label + ': ' + s) + '">' +
+          window.escHtmlText(label) + ': ' + window.escHtmlText(shortTime) + '</span>';
+      }
+
+      window.renderDocumentsHub = function () {
+        var tbody = document.getElementById("documents-hub-tbody");
+        if (!tbody) return;
+        if (typeof window.mergeLogisticsMetaIntoOrders === "function") {
+          window.mergeLogisticsMetaIntoOrders();
+        }
+        var qEl = document.getElementById("filter-docs-search");
+        var q = String((qEl && qEl.value) || window.GLOBAL_QUICK_SEARCH || "").trim().toLowerCase();
+        var ordersArr = Array.isArray(window.APP_DATA && window.APP_DATA.orders) ? window.APP_DATA.orders : [];
+        var consigneesArr = Array.isArray(window.APP_DATA && window.APP_DATA.consignees) ? window.APP_DATA.consignees : [];
+
+        var list = ordersArr.filter(function (o) {
+          if (!q) return true;
+          var cus = consigneesArr.find(function (c) { return c["Consignee_ID"] === o["Consignee_ID"]; });
+          var merged = getMergedLogisticsForOrder(o, o["Order_ID"]);
+          var hay = (
+            (o["Order_ID"] || "") + " " +
+            (o["Contract_No."] || "") + " " +
+            (o["Consignee_ID"] || "") + " " +
+            (cus ? cus["Consignee_Name"] : "") + " " +
+            (o["CO_Form"] || "") + " " +
+            (merged["BK_No"] || "") + " " +
+            (merged["Carrier_BK_No"] || merged["Carrier_Booking_No"] || "") + " " +
+            (merged["FWD_BK_No"] || merged["FWD_Booking_No"] || "")
+          ).toLowerCase();
+          return hay.indexOf(q) !== -1;
+        });
+
+        if (list.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" class="py-8 text-center text-[#1e4231] font-medium">Chưa có hợp đồng ngoại thương nào để lập bộ chứng từ.</td></tr>';
+          return;
+        }
+
+        var hlOid = String(window.__HIGHLIGHT_DOC_ORDER_ID__ || "").trim().toUpperCase();
+
+        tbody.innerHTML = list.slice().reverse().map(function (o) {
+          var oid = String(o["Order_ID"] || "").trim();
+          var safeOid = oid.replace(/'/g, "\\'");
+          var merged = getMergedLogisticsForOrder(o, oid);
+          var cus = consigneesArr.find(function (c) { return c["Consignee_ID"] === o["Consignee_ID"]; });
+          var coForm = o["CO_Form"] || suggestCoFormClient(o["POD"], cus ? cus["Country"] : "");
+          var bkSource = String(merged["Booking_Source"] || "CARRIER").toUpperCase();
+          var carrierBk = String(merged["Carrier_BK_No"] || merged["Carrier_Booking_No"] || "").trim();
+          var fwdBk = String(merged["FWD_BK_No"] || merged["FWD_Booking_No"] || "").trim();
+          var primaryBk = String(merged["BK_No"] || merged["Booking_No"] || carrierBk || fwdBk || "").trim();
+          var cargoMode = String(merged["Cargo_Mode"] || "FCL").toUpperCase();
+
+          var bkLines = [];
+          if (carrierBk) bkLines.push('<div class="font-mono text-[10.5px] text-[#0b2418]"><span class="font-bold text-[#0f4a33]">Hãng tàu:</span> ' + window.escHtmlText(carrierBk) + '</div>');
+          if (fwdBk) bkLines.push('<div class="font-mono text-[10.5px] text-[#0b2418]"><span class="font-bold text-[#0f4a33]">FWD:</span> ' + window.escHtmlText(fwdBk) + '</div>');
+          if (!bkLines.length && primaryBk) {
+            bkLines.push('<div class="font-mono text-[10.5px] text-[#0b2418]"><span class="font-bold text-[#0f4a33]">' + (bkSource === "FWD" ? "FWD" : "Hãng tàu") + ':</span> ' + window.escHtmlText(primaryBk) + '</div>');
+          }
+          if (!bkLines.length) {
+            bkLines.push('<div class="text-[10.5px] text-[#1e4231]/80 italic">Chưa nhập số Booking</div>');
+          }
+
+          var cutoffPills = [
+            formatCompactCutoffPill("S/I", merged["SI_Cutoff"]),
+            formatCompactCutoffPill("VGM", merged["VGM_Cutoff"]),
+            formatCompactCutoffPill("CFS", merged["CFS_Cutoff"]),
+            formatCompactCutoffPill("CY", merged["CY_Cutoff"]),
+            formatCompactCutoffPill("HQ", merged["Customs_Cutoff"]),
+            formatCompactCutoffPill("Draft B/L", merged["Draft_BL_Cutoff"])
+          ].filter(Boolean);
+
+          var isHighlighted = hlOid && oid.toUpperCase() === hlOid;
+          var trCls = isHighlighted
+            ? 'bg-[#f4d98a]/40 ring-2 ring-inset ring-[#186635] transition-colors'
+            : 'transition-colors';
+
+          return '<tr data-doc-order-id="' + window.escHtmlText(oid) + '" class="' + trCls + '">' +
+            '<td>' +
+              '<button type="button" onclick="openOrderTimelineModal(\'' + safeOid + '\')" class="font-mono font-bold text-[#0b2418] hover:underline cursor-pointer text-left">' + window.escHtmlText(o["Contract_No."] || "-") + '</button>' +
+              '<div class="text-xs font-mono text-[#1e4231]">' + window.escHtmlText(oid) + ' · ' + window.escHtmlText(o["Contract_Date"] || "-") + '</div>' +
+            '</td>' +
+            '<td>' +
+              '<div class="font-bold text-[#0b2418] leading-snug">' + window.escHtmlText(cus ? cus["Consignee_Name"] : (o["Consignee_ID"] || "-")) + '</div>' +
+              '<div class="text-xs text-[#1e4231]">' + window.escHtmlText((cus && cus["Country"]) || "") + ' · ' + window.escHtmlText(o["Applied_Incoterm"] || "-") + ' · ' + window.escHtmlText(cargoMode) + '</div>' +
+            '</td>' +
+            '<td class="text-xs">' +
+              '<div class="font-semibold text-[#0b2418]">' + window.escHtmlText(o["POL"] || "Cát Lái") + ' → ' + window.escHtmlText(o["POD"] || "-") + '</div>' +
+              '<div class="text-[#1e4231]">' + window.escHtmlText(merged["Vessel_Voyage"] || merged["Ves_Voy"] || "Tàu: Chưa cập nhật") + '</div>' +
+            '</td>' +
+            '<td class="text-xs space-y-1">' +
+              '<div class="flex flex-wrap items-center gap-1">' +
+                window.renderStatusBadge("C/O " + coForm, "info") +
+              '</div>' +
+              bkLines.join("") +
+              (cutoffPills.length
+                ? '<div class="flex flex-wrap gap-1 pt-0.5">' + cutoffPills.join("") + '</div>'
+                : '<div class="text-[10px] text-[#1e4231]/80">Chưa nhập lịch Cut-off</div>') +
+            '</td>' +
+            '<td class="text-right font-mono font-bold text-[#07281c] tabular-nums">' + window.fmtUSD(window.getOrderContractValue(o)) + '</td>' +
+            '<td class="space-y-1.5">' +
+              '<div class="grid grid-cols-2 gap-1">' +
+                '<button type="button" onclick="openExportDocPreview(\'' + safeOid + '\', \'INVOICE\')" class="px-2 py-1 text-[11px] font-semibold bg-[#0f4a33] hover:bg-[#07281c] text-[#fff5d6] border border-[#186635] rounded-lg transition-colors cursor-pointer">Invoice</button>' +
+                '<button type="button" onclick="openExportDocPreview(\'' + safeOid + '\', \'PACKING\')" class="px-2 py-1 text-[11px] font-semibold bg-[#16977f] hover:bg-[#0f4a33] text-[#fff5d6] border border-[#186635] rounded-lg transition-colors cursor-pointer">Packing List</button>' +
+                '<button type="button" onclick="openExportDocPreview(\'' + safeOid + '\', \'CO\')" class="px-2 py-1 text-[11px] font-semibold bg-[#2f7d3e] hover:bg-[#0f4a33] text-[#fff5d6] border border-[#186635] rounded-lg transition-colors cursor-pointer">C/O ' + window.escHtmlText(coForm) + '</button>' +
+                '<button type="button" onclick="openExportDocPreview(\'' + safeOid + '\', \'BL\')" class="px-2 py-1 text-[11px] font-semibold bg-[#aed6c6] hover:bg-[#9bccb8] text-[#0b2418] border border-[#186635] rounded-lg transition-colors cursor-pointer">Draft B/L</button>' +
+              '</div>' +
+              '<button type="button" onclick="openContractFormModal(\'' + safeOid + '\')" class="w-full px-2 py-1 text-[11px] font-bold bg-[#f4d98a] hover:bg-[#e8c668] text-[#07281c] border border-[#186635] rounded-lg transition-colors cursor-pointer text-center">Cập nhật B/K &amp; Cut-off</button>' +
+            '</td>' +
+          '</tr>';
+        }).join("");
+      };
+
+      function applyContractPreviewLayout(pdfOnlyMode) {
+        var gridEl = document.getElementById("doc-preview-workspace-grid");
+        var pdfBody = document.getElementById("doc-preview-body");
+        var compPanel = document.getElementById("doc-email-composer-panel");
+        var tplBar = document.getElementById("doc-contract-tpl-bar");
+        if (!gridEl) return;
+
+        if (pdfOnlyMode) {
+          gridEl.classList.remove("contract-preview-split");
+          gridEl.classList.add("contract-preview-pdf-only");
+          if (tplBar) tplBar.classList.add("hidden");
+          if (compPanel) compPanel.classList.add("hidden");
+          if (pdfBody) {
+            pdfBody.classList.remove("lg:col-span-6", "lg:col-span-8");
+            pdfBody.classList.add("lg:col-span-12");
+          }
+        } else {
+          gridEl.classList.remove("contract-preview-pdf-only");
+          gridEl.classList.add("contract-preview-split");
+          if (tplBar) tplBar.classList.remove("hidden");
+          if (compPanel) compPanel.classList.remove("hidden");
+          if (pdfBody) {
+            pdfBody.classList.remove("lg:col-span-12", "lg:col-span-8");
+            pdfBody.classList.add("lg:col-span-6");
+          }
+        }
+      }
+
+      function clearContractPreviewLayoutClasses() {
+        var gridEl = document.getElementById("doc-preview-workspace-grid");
+        if (gridEl) {
+          gridEl.classList.remove("contract-preview-split", "contract-preview-pdf-only");
+        }
+      }
+
+      var origPrepareForContractLayout = window.preparePdfPreviewLoading;
+      if (typeof origPrepareForContractLayout === "function") {
+        window.preparePdfPreviewLoading = function () {
+          clearContractPreviewLayoutClasses();
+          return origPrepareForContractLayout.apply(this, arguments);
+        };
+      }
+
+      var origSwitchDocPreviewTab = window.switchDocPreviewTab;
+      if (typeof origSwitchDocPreviewTab === "function") {
+        window.switchDocPreviewTab = function (tab) {
+          var res = origSwitchDocPreviewTab.apply(this, arguments);
+          if (window.PREVIEW_MODAL_CTX && window.PREVIEW_MODAL_CTX.mode === "CONTRACT") {
+            var usePdfOnly = Boolean(window.PREVIEW_MODAL_CTX.pdfOnly || tab === "PDF");
+            applyContractPreviewLayout(usePdfOnly);
+          } else {
+            clearContractPreviewLayoutClasses();
+          }
+          return res;
+        };
+      }
+
+      // 2. Modal Xem trước & Gửi Hợp đồng:
+      //    - Trước khi gửi ("Xem & Gửi Sales ký" hoặc "Gửi lại"): 2 cột ngang (PDF trái 1.15fr | Email phải 0.85fr)
+      //    - Đã gửi / Đã ký ("Chờ Sales đưa ký" / "Đã ký"): 1 cột căn giữa toàn chiều rộng, ẩn khung Email
+      window.openContractPreviewPdfOnly = function (orderId) {
+        return window.openContractPreview(orderId, { pdfOnly: true });
+      };
+
+      window.openContractPreview = function (orderId, modalOptions) {
+        var normTarget = String(orderId || "").trim().toUpperCase();
+        var ordersArr = Array.isArray(window.APP_DATA && window.APP_DATA.orders) ? window.APP_DATA.orders : [];
+        var o = ordersArr.find(function (item) {
+          return String(item["Order_ID"] || "").trim().toUpperCase() === normTarget;
+        });
+        if (!o) {
+          if (typeof Swal !== "undefined") {
+            Swal.fire("Không tìm thấy hợp đồng", "Không tìm thấy hồ sơ hợp đồng cho mã đơn " + (orderId || ""), "warning");
+          }
+          return;
+        }
+
+        var role = getCurrentUserRoleNorm();
+        var isAlreadySentOrSigned = window.isOrderContractSigned(o) || window.isOrderPendingSalesSign(o);
+        var forceSplit = Boolean(modalOptions && modalOptions.forceSplit);
+        var isPdfOnly = Boolean((modalOptions && modalOptions.pdfOnly) || role === "SALES" || (isAlreadySentOrSigned && !forceSplit));
+
+        var canonicalOrderId = String(o["Order_ID"] || orderId).trim();
+        var tpl = typeof window.detectContractTemplateForOrder === "function"
+          ? window.detectContractTemplateForOrder(canonicalOrderId, o["Template_ID"])
+          : null;
+        var selectedTplId = String(o["Template_ID"] || (tpl ? (tpl["Template ID"] || "") : "")).trim();
+        if (selectedTplId && !o["Template_ID"]) {
+          o["Template_ID"] = selectedTplId;
+        }
+        var initialDocId = (tpl && typeof window.extractGoogleDocId === "function")
+          ? window.extractGoogleDocId(tpl["Google_Doc_File_ID"])
+          : "";
+        var headerLabel = "Hợp đồng ngoại thương - " + (o["Contract_No."] || canonicalOrderId);
+        var contractOpts = {
+          format: "pdf",
+          templateId: selectedTplId,
+          googleDocFileId: initialDocId
+        };
+        var initialViewTab = isPdfOnly ? "PDF" : "SPLIT";
+
+        window.PREVIEW_MODAL_CTX = {
+          mode: "CONTRACT",
+          orderId: canonicalOrderId,
+          docType: "CONTRACT",
+          contractOpts: contractOpts,
+          viewTab: initialViewTab,
+          pdfOnly: isPdfOnly,
+          emailMeta: null
+        };
+
+        try {
+          var ctrTplSel = document.getElementById("doc-contract-tpl-select");
+          if (ctrTplSel) {
+            var pool = typeof window.getContractTemplatesPool === "function" ? window.getContractTemplatesPool() : [];
+            if (!pool || pool.length === 0) pool = (window.APP_DATA && window.APP_DATA.templates) || [];
+            ctrTplSel.innerHTML = pool.map(function (t) {
+              var tid = String(t["Template ID"] || "").trim();
+              var sel = tid === selectedTplId ? " selected" : "";
+              var docLabel = String(t["Document_Name"] || "Mẫu Hợp đồng").replace(/\s*\(TMP_[A-Z0-9_]+\)\s*/gi, "").trim();
+              return '<option value="' + window.escHtmlText(tid) + '"' + sel + '>' + window.escHtmlText(docLabel) + '</option>';
+            }).join("");
+            if (typeof window.syncSearchableCombo === "function") window.syncSearchableCombo(ctrTplSel);
+          }
+        } catch (tplSelErr) {}
+
+        try {
+          if (typeof window.buildClientFallbackEmailMeta === "function") {
+            var fallbackMeta = window.buildClientFallbackEmailMeta(canonicalOrderId, "CONTRACT", "Sales Contract");
+            var compTo = document.getElementById("doc-email-to-composer");
+            if (compTo && fallbackMeta) compTo.value = fallbackMeta.recipientEmail || "";
+            if (typeof window.populateEmailComposerFromMeta === "function" && fallbackMeta) {
+              window.populateEmailComposerFromMeta(fallbackMeta);
+            }
+          }
+        } catch (emailMetaErr) {}
+
+        try {
+          if (typeof window.preparePdfPreviewLoading === "function") {
+            window.preparePdfPreviewLoading(headerLabel, initialDocId, initialViewTab);
+          } else {
+            var modalEl = document.getElementById("modal-document-preview");
+            if (modalEl) modalEl.classList.remove("hidden");
+          }
+        } catch (prepErr) {
+          var fallbackModalEl = document.getElementById("modal-document-preview");
+          if (fallbackModalEl) fallbackModalEl.classList.remove("hidden");
+        }
+
+        applyContractPreviewLayout(isPdfOnly);
+
+        var sendLbl = document.getElementById("doc-composer-send-label");
+        if (sendLbl) sendLbl.textContent = "Gửi Email Hợp đồng cho Sales";
+        if (typeof window.syncContractSavedLinkUI === "function") window.syncContractSavedLinkUI(o);
+        syncSendContractToSalesBtn(o);
+
+        google.script.run
+          .withSuccessHandler(function (res) {
+            if (typeof window.renderPdfPreviewFromServerResponse === "function") {
+              window.renderPdfPreviewFromServerResponse(res, headerLabel);
+            }
+            if (window.PREVIEW_MODAL_CTX && window.PREVIEW_MODAL_CTX.mode === "CONTRACT") {
+              applyContractPreviewLayout(Boolean(window.PREVIEW_MODAL_CTX.pdfOnly));
+            }
+          })
+          .withFailureHandler(function (err) {
+            if (typeof window.renderPdfPreviewFromServerResponse === "function") {
+              window.renderPdfPreviewFromServerResponse({
+                success: false,
+                message: (err && err.message) || "Lỗi kết nối máy chủ Apps Script khi tạo bản xem trước Hợp đồng."
+              }, headerLabel);
+            }
+            if (window.PREVIEW_MODAL_CTX && window.PREVIEW_MODAL_CTX.mode === "CONTRACT") {
+              applyContractPreviewLayout(Boolean(window.PREVIEW_MODAL_CTX.pdfOnly));
+            }
+          })
+          .exportContractFromTemplate(canonicalOrderId, contractOpts);
+      };
+
+      // 3. Khi XNK gửi Email Hợp đồng từ Modal, đồng bộ Contract_Link và trạng thái "Chờ Sales đưa ký"
+      var origSendQuotationEmailFromPreview = window.sendQuotationEmailFromPreview;
+      if (typeof origSendQuotationEmailFromPreview === "function") {
+        window.sendQuotationEmailFromPreview = function (btnEl) {
+          var isContractMode = typeof window.PREVIEW_MODAL_CTX !== "undefined" && window.PREVIEW_MODAL_CTX && window.PREVIEW_MODAL_CTX.mode === "CONTRACT";
+          if (!isContractMode) {
+            return origSendQuotationEmailFromPreview.apply(this, arguments);
+          }
+          var orderId = window.PREVIEW_MODAL_CTX.orderId;
+          var compEmailEl = document.getElementById("doc-email-to-composer");
+          var emailVal = String((compEmailEl && compEmailEl.value) || "").trim();
+          var subjEl = document.getElementById("doc-email-subject-input");
+          var msgEl = document.getElementById("doc-email-message-input");
+          var customSubject = subjEl ? String(subjEl.value || "").trim() : "";
+          var customMessage = msgEl ? String(msgEl.value || "").trim() : "";
+          var senderName = (window.CURRENT_USER && window.CURRENT_USER.Full_Name) ? String(window.CURRENT_USER.Full_Name).trim() : "";
+          if (!orderId) return;
+          if (!emailVal || emailVal.indexOf("@") === -1) {
+            if (typeof Swal !== "undefined") {
+              Swal.fire("Thiếu email hợp lệ", "Vui lòng nhập địa chỉ email nhận Hợp đồng.", "warning");
+            }
+            return;
+          }
+          if (typeof window.setButtonLoading === "function") window.setButtonLoading(btnEl, true, "Đang gửi Email & lưu HĐ...");
+          if (typeof window.startTopProgress === "function") window.startTopProgress();
+          var ctrOpts = window.PREVIEW_MODAL_CTX.contractOpts || {};
+          google.script.run
+            .withSuccessHandler(function (res) {
+              if (typeof window.stopTopProgress === "function") window.stopTopProgress();
+              if (typeof window.setButtonLoading === "function") window.setButtonLoading(btnEl, false);
+              if (res && res.success) {
+                var sentCtrUrl = res.gmailSentUrl || res.fallbackGmailUrl || "";
+                var ordObj = (window.APP_DATA.orders || []).find(function (x) {
+                  return String(x["Order_ID"] || "").trim().toUpperCase() === String(orderId || "").trim().toUpperCase();
+                });
+                if (ordObj) {
+                  ordObj["Fulfillment_Status"] = res.fulfillmentStatus || "Chờ Sales đưa ký";
+                  if (res.contractLink) ordObj["Contract_Link"] = res.contractLink;
+                }
+                if (window.EDITED_CONTRACTS_RESEND_ENABLED) {
+                  delete window.EDITED_CONTRACTS_RESEND_ENABLED[String(orderId || "").trim().toUpperCase()];
+                }
+                if (typeof window.syncContractSavedLinkUI === "function" && ordObj) window.syncContractSavedLinkUI(ordObj);
+                syncSendContractToSalesBtn(ordObj);
+                if (sentCtrUrl && typeof window.updateModalSentMailLinkBar === "function") window.updateModalSentMailLinkBar(sentCtrUrl);
+                if (typeof window.renderContractsTable === "function") window.renderContractsTable();
+                if (typeof window.renderSalesContractsTable === "function") window.renderSalesContractsTable();
+                if (typeof window.updateSalesContractsNavBadge === "function") window.updateSalesContractsNavBadge();
+                if (typeof window.renderDashboard === "function") window.renderDashboard();
+                if (typeof window.showToast === "function") window.showToast("success", "Đã gửi Email Hợp đồng (" + (res.fileName || "") + ") tới " + res.emailSentTo);
+                if (sentCtrUrl && typeof Swal !== "undefined") {
+                  Swal.fire({
+                    icon: "success",
+                    title: "Đã gửi Email Hợp đồng cho Sales!",
+                    html: '<p class="text-sm text-[#0b2418] mb-3">Hợp đồng đính kèm <code>' + window.escHtmlText(res.fileName || "") + '</code> đã được gửi tới <strong>' + window.escHtmlText(res.emailSentTo || "") + '</strong> và chuyển sang trạng thái <strong>Chờ Sales đưa ký</strong>.</p>' +
+                          '<a href="' + window.escHtmlText(sentCtrUrl) + '" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-[#fff5d6] bg-[#16977f] hover:bg-[#0f4a33] border border-[#186635] rounded-lg">↗ Mở mail đã gửi (Gmail)</a>',
+                    confirmButtonColor: "#0f4a33",
+                    confirmButtonText: "Đóng"
+                  });
+                }
+                if (typeof window.refreshAllData === "function") window.refreshAllData({ silent: true });
+              } else if (typeof Swal !== "undefined") {
+                Swal.fire("Không thể gửi Email", (res && res.message) || "Vui lòng kiểm tra quyền GmailApp/MailApp trong Apps Script.", "warning");
+              }
+            })
+            .withFailureHandler(function (err) {
+              if (typeof window.stopTopProgress === "function") window.stopTopProgress();
+              if (typeof window.setButtonLoading === "function") window.setButtonLoading(btnEl, false);
+              if (typeof Swal !== "undefined") Swal.fire("Lỗi gửi Email", (err && err.message) || "Lỗi kết nối Google Apps Script.", "error");
+            })
+            .sendContractEmailToSalesWithPdf(orderId, emailVal, customSubject, customMessage, senderName, ctrOpts);
+        };
+      }
+
+      if (window.IS_APP_DATA_READY) {
+        try { window.renderContractsTable(); } catch (e) {}
+        try { window.renderDocumentsHub(); } catch (e2) {}
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", initXnkContractOverrides);
+    window.addEventListener("load", initXnkContractOverrides);
+  })();
+</script>
+

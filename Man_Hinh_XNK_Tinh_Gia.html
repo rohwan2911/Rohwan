@@ -1,0 +1,2213 @@
+<!-- 3.1. VIEW: XNK - BẢNG TÍNH GIÁ & TƯ VẤN AI INCOTERMS (4 KHUNG TUẦN TỰ) -->
+<section id="view-xnk-pricing" class="app-view hidden space-y-6">
+  <div>
+    <h2 class="text-2xl font-extrabold text-[#0b2418] font-display">Bảng tính giá &amp; Tư vấn Incoterms</h2>
+  </div>
+
+  <!-- KHUNG 1: THIẾT LẬP ĐƠN HÀNG & TUYẾN VẬN CHUYỂN -->
+  <div class="mint-card overflow-visible">
+    <div class="card-header-3d rounded-t-[17px] px-5 py-3 flex flex-wrap items-center justify-between gap-2">
+      <h3 class="text-sm font-bold text-[#fff5d6]">Khung 1 · Thiết lập Đơn hàng &amp; Tuyến Vận chuyển</h3>
+      <span id="calc-next-quotation-no" class="hidden px-2.5 py-0.5 rounded bg-[#07281c]/70 text-[#f4d98a] border border-[#f4d98a]/60 font-mono text-xs font-bold"></span>
+    </div>
+
+    <div class="p-5 sm:p-6 bg-[#547d59] rounded-b-[17px] space-y-5 overflow-visible">
+      <!-- Bộ lọc 3 cột ngang hàng: Đơn hàng | Quốc gia <-> Cảng đến -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1.5">1. Chọn đơn hàng chờ tính giá</label>
+          <select id="calc-order-id" onchange="onPricingOrderChange()"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+            <option value="">-- Chọn mã đơn --</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1.5">2. Quốc gia đích (Country)</label>
+          <select id="calc-country" onchange="onPricingCountryChange()"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+            <option value="">-- Tất cả quốc gia --</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1.5">3. Cảng đến (POD)</label>
+          <select id="calc-pod" onchange="onPricingPodChange()"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+            <option value="">-- Tất cả cảng đến --</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="calc-negotiation-banner" class="hidden px-4 py-3 rounded-xl bg-[#0f4a33] border-[1.5px] border-[#f4d98a] text-xs text-[#fff5d6] flex items-start gap-2.5"></div>
+
+      <!-- Tổ hợp nhiều loại container (6 chuẩn ISO + Hàng lẻ LCL < 55%) -->
+      <div class="p-4 bg-[#9bccb8] border-[1.5px] border-[#186635] rounded-2xl space-y-3 text-[#0b2418]">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-xs font-extrabold text-[#07281c]">Phân bổ Container (6 loại chuẩn ISO 20' / 40' / 40'HC · Khô &amp; Lạnh)</span>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" onclick="applyOptimalContainerMix(false)"
+              class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold bg-[#0f4a33] hover:bg-[#16977f] text-[#fff5d6] border border-[#186635] rounded-lg shadow-xs transition-colors cursor-pointer">
+              <i data-lucide="sparkles" class="w-3.5 h-3.5 text-[#f4d98a]"></i>
+              <span>Tự tính tổ hợp Cont tối ưu</span>
+            </button>
+            <span id="calc-cont-mix-summary" class="text-xs font-mono font-bold text-[#f4d98a] bg-[#07281c] border border-[#186635] px-2.5 py-1 rounded-lg">Tổng: 0 container</span>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+          <div class="bg-[#809c8f] border-[1.5px] border-[#186635] rounded-xl p-2.5">
+            <label class="block text-[11px] font-bold text-[#07281c] mb-1">20' Khô (20'DC)</label>
+            <input id="calc-qty-20dc" type="number" min="0" step="1" value="0" oninput="onContainerMixChange()"
+              class="w-full px-2.5 py-1.5 text-sm font-mono font-bold bg-[#aed6c6] text-[#0b2418] border-[1.5px] border-[#186635] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+          </div>
+          <div class="bg-[#809c8f] border-[1.5px] border-[#186635] rounded-xl p-2.5">
+            <label class="block text-[11px] font-bold text-[#07281c] mb-1">40' Khô (40'DC)</label>
+            <input id="calc-qty-40dc" type="number" min="0" step="1" value="0" oninput="onContainerMixChange()"
+              class="w-full px-2.5 py-1.5 text-sm font-mono font-bold bg-[#aed6c6] text-[#0b2418] border-[1.5px] border-[#186635] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+          </div>
+          <div class="bg-[#809c8f] border-[1.5px] border-[#186635] rounded-xl p-2.5">
+            <label class="block text-[11px] font-bold text-[#07281c] mb-1">40' Khô Cao (40'HC)</label>
+            <input id="calc-qty-40hc" type="number" min="0" step="1" value="0" oninput="onContainerMixChange()"
+              class="w-full px-2.5 py-1.5 text-sm font-mono font-bold bg-[#aed6c6] text-[#0b2418] border-[1.5px] border-[#186635] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+          </div>
+          <div class="bg-[#809c8f] border-[1.5px] border-[#186635] rounded-xl p-2.5">
+            <label class="block text-[11px] font-bold text-[#07281c] mb-1">20' Lạnh (20'RF)</label>
+            <input id="calc-qty-20rf" type="number" min="0" step="1" value="0" oninput="onContainerMixChange()"
+              class="w-full px-2.5 py-1.5 text-sm font-mono font-bold bg-[#aed6c6] text-[#0b2418] border-[1.5px] border-[#186635] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+          </div>
+          <div class="bg-[#809c8f] border-[1.5px] border-[#186635] rounded-xl p-2.5">
+            <label class="block text-[11px] font-bold text-[#07281c] mb-1">40' Lạnh (40'RF)</label>
+            <input id="calc-qty-40rf" type="number" min="0" step="1" value="1" oninput="onContainerMixChange()"
+              class="w-full px-2.5 py-1.5 text-sm font-mono font-bold bg-[#aed6c6] text-[#0b2418] border-[1.5px] border-[#186635] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+          </div>
+          <div class="bg-[#809c8f] border-[1.5px] border-[#186635] rounded-xl p-2.5">
+            <label class="block text-[11px] font-bold text-[#07281c] mb-1">40' Lạnh Cao (40'RH)</label>
+            <input id="calc-qty-40rh" type="number" min="0" step="1" value="0" oninput="onContainerMixChange()"
+              class="w-full px-2.5 py-1.5 text-sm font-mono font-bold bg-[#aed6c6] text-[#0b2418] border-[1.5px] border-[#186635] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Chi tiết đa sản phẩm của đơn hàng + Tier 1 / Tier 2 -->
+      <div id="calc-order-summary" class="hidden space-y-3 p-4 bg-[#9bccb8] border-[1.5px] border-[#186635] rounded-2xl text-sm text-[#0b2418]">
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4 items-start">
+          <div class="col-span-2 sm:col-span-2 lg:col-span-2 min-w-0">
+            <div class="text-xs font-semibold text-[#1e4231]">Khách hàng &amp; Quốc gia</div>
+            <div id="calc-cust-info" class="mt-1 space-y-1 min-w-0 font-bold text-[#0b2418]">-</div>
+          </div>
+          <div>
+            <div class="text-xs font-semibold text-[#1e4231]">Tổng khối lượng tịnh</div>
+            <div id="calc-net-weight" class="font-bold text-[#0b2418] mt-0.5 tabular-nums font-mono">0 KG</div>
+          </div>
+          <div>
+            <div class="text-xs font-semibold text-[#1e4231]">Hàng Khô (DC) tham chiếu</div>
+            <div id="calc-dry-weight" class="font-bold text-[#07281c] mt-0.5 tabular-nums font-mono">0 KG</div>
+          </div>
+          <div>
+            <div class="text-xs font-semibold text-[#1e4231]">Hàng Lạnh (RF) tham chiếu</div>
+            <div id="calc-reefer-weight" class="font-bold text-[#0f4a33] mt-0.5 tabular-nums font-mono">0 KG</div>
+          </div>
+          <div>
+            <div class="text-xs font-semibold text-[#1e4231]">Điều kiện khách mong muốn</div>
+            <div id="calc-req-incoterm" class="font-bold text-[#07281c] mt-0.5">-</div>
+          </div>
+          <div>
+            <div class="text-xs font-semibold text-[#1e4231]">Tổng giá vốn hàng hóa</div>
+            <div id="calc-goods-cost-preview" class="font-extrabold text-[#07281c] mt-0.5 tabular-nums font-mono">$0.00</div>
+          </div>
+        </div>
+        <div id="calc-items-breakdown" class="pt-3 border-t border-[#186635]/40 text-xs text-[#0b2418]"></div>
+        <div id="calc-pallet-pool-bar" class="pt-3 space-y-2 bg-[#0f4a33] px-3.5 py-2.5 rounded-xl border-[1.5px] border-[#186635] text-[#fff5d6]">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <label class="inline-flex items-center gap-2 text-xs font-bold text-[#fff5d6] cursor-pointer">
+              <input id="calc-use-pallet" type="checkbox" onchange="onCalcOrderPalletChange()" class="rounded text-[#2f7d3e]" />
+              <span>Đóng Pallet gỗ ISPM-15 (18 kg · 0.17 CBM/pallet · +5% hao hụt ghép đa quy cách)</span>
+            </label>
+            <div class="flex flex-wrap items-center gap-3 text-xs">
+              <span class="text-[#d2ebe0]">Tổng thùng: <strong id="calc-total-cartons" class="font-mono text-[#f4d98a]">0</strong></span>
+              <span class="text-[#d2ebe0]">Số pallet: <strong id="calc-total-pallets" class="font-mono text-[#f4d98a]">0</strong></span>
+              <span class="text-[#d2ebe0]">Gross Wt: <strong id="calc-total-gw" class="font-mono text-[#fff5d6]">0 KG</strong></span>
+              <span class="text-[#d2ebe0]">Thể tích: <strong id="calc-total-cbm" class="font-mono text-[#f4d98a]">0.000 CBM</strong></span>
+              <span class="text-[#d2ebe0]">Tính cước W/M: <strong id="calc-total-wm" class="font-mono text-[#f4d98a]">0.00 W/M</strong></span>
+              <label class="inline-flex items-center gap-1 text-[#fff5d6] font-semibold">
+                <span>Đơn giá/pallet ($):</span>
+                <input id="calc-pallet-rate" type="number" step="0.01" min="0" value="18.00" oninput="onCalcOrderPalletChange()"
+                  class="w-20 px-2 py-1 text-xs font-mono font-bold border border-[#186635] rounded-lg bg-[#aed6c6] text-[#0b2418] text-right" />
+              </label>
+              <span class="font-bold text-[#fff5d6]">Phí pallet: <strong id="calc-pallet-fee-display" class="font-mono text-[#f4d98a]">$0.00</strong></span>
+            </div>
+          </div>
+          <div id="calc-pallet-loss-note" class="text-[11px] text-[#f4d98a] font-medium"></div>
+        </div>
+      </div>
+
+      <!-- Bảng chọn tuyến tàu (Toggle bấm lần 1 chọn, lần 2 bỏ chọn) -->
+      <div class="bg-[#9bccb8] border-[1.5px] border-[#186635] rounded-2xl p-4 space-y-2.5 text-[#0b2418]">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h4 class="text-xs sm:text-sm font-extrabold text-[#07281c]">So sánh &amp; Chọn Tuyến tàu (Bấm lần 1 để chọn — Bấm lại lần 2 để bỏ chọn)</h4>
+          <span id="calc-selected-schedule-label" class="text-xs font-bold text-[#0f4a33]">Chưa chọn tuyến tàu</span>
+        </div>
+        <div class="agri-table-scroll-compact border-[1.5px] border-[#186635] rounded-xl overflow-hidden">
+          <table class="agri-table text-left text-xs">
+            <colgroup>
+              <col style="width: 6%;" />
+              <col style="width: 11%;" />
+              <col style="width: 14%;" />
+              <col style="width: 17%;" />
+              <col style="width: 16%;" />
+              <col style="width: 13%;" />
+              <col style="width: 12%;" />
+              <col style="width: 11%;" />
+            </colgroup>
+            <thead>
+              <tr class="font-bold">
+                <th>Chọn</th>
+                <th>Mã lịch</th>
+                <th>Hãng tàu</th>
+                <th>Tuyến cảng</th>
+                <th>ETD - ETA</th>
+                <th>Cước biển (USD)</th>
+                <th>Phụ phí tàu</th>
+                <th>Hiệu lực còn</th>
+              </tr>
+            </thead>
+            <tbody id="calc-schedule-compare-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- KHUNG 2: TƯ VẤN AI (GEMINI) & LỰA CHỌN NHÓM INCOTERMS ĐỀ XUẤT -->
+  <div class="mint-card overflow-visible">
+    <div class="card-header-3d px-5 py-3 flex flex-wrap items-center justify-between gap-2">
+      <h3 class="text-sm font-bold text-[#fff5d6]">Khung 2 · Tư vấn AI (Gemini) — Incoterms 2020 &amp; Bảo hiểm Hàng hóa</h3>
+      <span id="calc-proposed-mode-badge" class="inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-[#07281c]/70 text-[#f4d98a] border border-[#f4d98a]/60 whitespace-nowrap">Chế độ: Đơn lẻ (SINGLE · 1 ĐK)</span>
+    </div>
+
+    <div class="p-5 sm:p-6 bg-[#547d59] rounded-b-[14px] space-y-5 overflow-visible">
+      <!-- Trợ lý AI Gemini Tư vấn kép Incoterms 2020 & Bảo hiểm Hàng hóa -->
+      <div class="bg-[#9bccb8] border-[1.5px] border-[#186635] rounded-2xl p-4 space-y-3 text-[#0b2418]">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div class="text-xs font-extrabold text-[#07281c] flex items-center gap-1.5">
+              <i data-lucide="sparkles" class="w-4 h-4 text-[#0f4a33]"></i>
+              <span>Trợ lý AI Tư vấn kép: Incoterms 2020 &amp; Bảo hiểm Hàng hóa</span>
+            </div>
+            <div class="text-[11px] text-[#1e4231] font-medium mt-0.5">Phân tích mặt hàng (Khô DC / Lạnh RF), tuyến vận tải &amp; thanh toán để đề xuất đồng thời Incoterms tối ưu và gói Bảo hiểm + điều khoản mở rộng phù hợp.</div>
+          </div>
+          <button id="btn-ai-analyze-order" type="button" onclick="askGasAiIncoterms(true)"
+            class="px-3.5 py-2 bg-[#0f4a33] hover:bg-[#16977f] text-[#fff5d6] border border-[#186635] text-xs font-bold rounded-xl shadow-[0_3px_0_#07281c] transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer">
+            <i data-lucide="wand-2" class="w-3.5 h-3.5 text-[#f4d98a]"></i>
+            <span>Phân tích đơn hàng bằng AI</span>
+          </button>
+        </div>
+
+        <div id="ai-chat-error" class="hidden px-3.5 py-2.5 rounded-xl bg-[#8c3b3b] border border-[#6e2b2b] text-xs text-[#fdf2f2] font-semibold"></div>
+
+        <div id="ai-chat-messages" class="max-h-56 overflow-y-auto space-y-2.5 p-3 rounded-xl bg-[#809c8f] border-[1.5px] border-[#186635] text-xs text-[#0b2418]">
+          <div class="text-[#0b2418] italic text-center py-2 font-medium">Chọn đơn hàng ở Khung 1 rồi bấm "Phân tích đơn hàng bằng AI" hoặc đặt câu hỏi nghiệp vụ bên dưới.</div>
+        </div>
+
+        <div class="flex flex-wrap sm:flex-nowrap items-center gap-2">
+          <input id="ai-chat-input" type="text" onkeydown="if(event.key==='Enter'){event.preventDefault();askGasAiIncoterms(false);}"
+            placeholder="Hỏi AI (VD: Lô hàng lạnh đi Rotterdam thanh toán L/C nên chào FOB, CIF hay CIP?)..."
+            class="flex-1 px-3.5 py-2 text-xs border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/70 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+          <button id="btn-ai-send-chat" type="button" onclick="askGasAiIncoterms(false)"
+            class="px-4 py-2 bg-[#0f4a33] hover:bg-[#16977f] text-[#fff5d6] border border-[#186635] text-xs font-bold rounded-xl transition-colors whitespace-nowrap cursor-pointer">
+            Gửi
+          </button>
+        </div>
+      </div>
+
+      <!-- Bộ lọc 3 tiêu chí trách nhiệm Incoterms 2020 -->
+      <div class="bg-[#9bccb8] border-[1.5px] border-[#186635] rounded-2xl p-4 space-y-3 text-[#0b2418]">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-xs font-extrabold text-[#07281c]">Bộ lọc 3 Tiêu chí Trách nhiệm Incoterms 2020</span>
+          <button type="button" onclick="resetIncoterm3CriteriaFilter()" class="text-[11px] font-bold text-[#0f4a33] hover:text-[#16977f] hover:underline cursor-pointer">Xóa bộ lọc</button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-[#0b2418] mb-1">Bên chịu cước vận tải chính</label>
+            <select id="inc-filter-freight" onchange="renderIncoterm3CriteriaMatches()"
+              class="w-full px-3 py-2 text-xs border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+              <option value="">-- Tất cả --</option>
+              <option value="Buyer">Người mua trả cước (Nhóm E, F)</option>
+              <option value="Seller">Người bán trả cước (Nhóm C, D)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-[#0b2418] mb-1">Nghĩa vụ bảo hiểm quốc tế</label>
+            <select id="inc-filter-insurance" onchange="renderIncoterm3CriteriaMatches()"
+              class="w-full px-3 py-2 text-xs border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+              <option value="">-- Tất cả --</option>
+              <option value="Seller">Người bán bắt buộc mua (CIF, CIP)</option>
+              <option value="Buyer">Người mua tự mua / Không bắt buộc</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-[#0b2418] mb-1">Điểm chuyển giao rủi ro</label>
+            <select id="inc-filter-risk" onchange="renderIncoterm3CriteriaMatches()"
+              class="w-full px-3 py-2 text-xs border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+              <option value="">-- Tất cả --</option>
+              <option value="factory">Tại xưởng người bán (EXW)</option>
+              <option value="carrier">Giao người chuyên chở (FCA/CPT/CIP)</option>
+              <option value="port">Cảng đi (FAS/FOB/CFR/CIF)</option>
+              <option value="destination">Cảng / Kho đích (DAP/DPU/DDP)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tích chọn nhiều điều kiện Incoterms 2020 -->
+      <div class="bg-[#9bccb8] border-[1.5px] border-[#186635] rounded-2xl p-4 space-y-2.5 text-[#0b2418]">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <label class="block text-xs font-extrabold text-[#07281c]">Tích chọn các điều kiện Incoterms 2020 đề xuất báo giá (Chọn &ge; 2 để mở Bảng So sánh Khung 3)</label>
+          <span class="text-[11px] font-medium text-[#1e4231]">Khi chọn &lt; 2 điều kiện, Khung 3 tự động ẩn để giao diện gọn nhẹ</span>
+        </div>
+        <div id="calc-proposed-incoterms-grid" class="flex flex-wrap gap-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- KHUNG 3: BẢNG TÍNH TOÁN & SO SÁNH ĐA ĐIỀU KIỆN INCOTERMS 2020 (CHỈ HIỂN THỊ KHI CHỌN >= 2 ĐK) -->
+  <div id="pricing-khung-3" class="hidden mint-card overflow-hidden">
+    <div class="card-header-3d px-5 py-3 flex flex-wrap items-center justify-between gap-2">
+      <h3 class="text-sm font-bold text-[#fff5d6]">Khung 3 · Bảng Tính toán &amp; So sánh Đa Điều kiện Incoterms 2020</h3>
+      <span id="pricing-khung-3-count" class="text-xs font-mono font-bold text-[#f4d98a]">0 điều kiện</span>
+    </div>
+
+    <div class="p-5 sm:p-6 bg-[#547d59] space-y-4">
+      <div id="pricing-optimal-banner" class="hidden px-4 py-3 rounded-xl bg-[#0f4a33] border-2 border-[#f4d98a] flex flex-wrap items-center justify-between gap-3">
+        <div class="text-xs text-[#fff5d6]">
+          <span class="font-extrabold text-[#f4d98a]">★ Đề xuất tối ưu nhất: <span id="pricing-optimal-code" class="font-mono text-sm"></span></span>
+          <span id="pricing-optimal-reason" class="ml-2 text-[#d2ebe0] font-medium"></span>
+        </div>
+        <button type="button" onclick="applyOptimalIncotermToKhung4()"
+          class="px-3 py-1.5 bg-[#f4d98a] hover:bg-[#e8c668] text-[#07281c] border border-[#186635] text-xs font-bold rounded-lg whitespace-nowrap cursor-pointer">
+          Chốt áp dụng ở Khung 4
+        </button>
+      </div>
+
+      <div class="agri-table-scroll-compact border-[1.5px] border-[#186635] rounded-xl overflow-hidden">
+        <table class="agri-table incoterm-compare-table text-left text-xs">
+          <colgroup>
+            <col style="width: 6%;" />
+            <col style="width: 10%;" />
+            <col style="width: 10%;" />
+            <col style="width: 13%;" />
+            <col style="width: 9%;" />
+            <col style="width: 9%;" />
+            <col style="width: 9%;" />
+            <col style="width: 10%;" />
+            <col style="width: 14%;" />
+            <col style="width: 10%;" />
+          </colgroup>
+          <thead>
+            <tr class="font-bold">
+              <th>Incoterm</th>
+              <th>Cước chính</th>
+              <th>Bảo hiểm</th>
+              <th>Chuyển giao rủi ro</th>
+              <th>Hàng &amp; Bao bì</th>
+              <th>Cước &amp; Phí áp dụng</th>
+              <th>Phí BH</th>
+              <th>Giá chào dự kiến</th>
+              <th class="text-center">Đánh giá</th>
+              <th class="text-center">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody id="incoterm-compare-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- KHUNG 4: HOÀN THIỆN GIÁ BÁN & GỬI PHƯƠNG ÁN / XUẤT BÁO GIÁ -->
+  <div class="mint-card overflow-visible">
+    <div class="card-header-3d px-5 py-3 flex flex-wrap items-center justify-between gap-2">
+      <h3 class="text-sm font-bold text-[#fff5d6]">Khung 4 · Hoàn thiện Giá Bán &amp; Gửi Phương án / Xuất Báo giá</h3>
+      <div id="khung4-incoterm-pills" class="flex flex-wrap items-center gap-1.5"></div>
+    </div>
+
+    <div class="p-5 sm:p-6 bg-[#547d59] rounded-b-[14px] space-y-6 overflow-visible">
+      <div class="khung4-top-grid grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+        <!-- CỘT TRÁI: THÔNG SỐ CHÀO GIÁ -->
+        <div class="flex flex-col space-y-3 min-w-0">
+          <h4 class="text-sm font-extrabold text-[#fff5d6]">Thông số chào giá</h4>
+          <div class="flex-1 grid grid-cols-2 gap-3 bg-[#9bccb8] p-4 rounded-xl border-[1.5px] border-[#186635] content-start text-[#0b2418]">
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Bao bì &amp; Pallet (USD)</label>
+              <input id="calc-packing-cost" type="number" step="0.01" min="0" value="" placeholder="VD: 120" oninput="onManualPackingCostInput()"
+                class="w-full px-3 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Gói bảo hiểm chính</label>
+              <select id="calc-insurance-code" onchange="onInsurancePlanChange()"
+                class="w-full px-3 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+                <option value="INS-NONE" data-rate="0">Không mua (0%)</option>
+                <option value="INS-ICC-C" data-rate="0.12">INS-ICC-C · ICC C (0.12%)</option>
+                <option value="INS-ICC-B" data-rate="0.18">INS-ICC-B · ICC B (0.18%)</option>
+                <option value="INS-ICC-A" data-rate="0.25">INS-ICC-A · ICC A (0.25%)</option>
+                <option value="INS-FRZ-A" data-rate="0.35">INS-FRZ-A · Frozen Food A (0.35%)</option>
+              </select>
+            </div>
+            <div class="col-span-2 p-2.5 rounded-xl bg-[#809c8f] border-[1.5px] border-[#186635] space-y-2 text-[#0b2418]">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <span class="text-[11px] font-extrabold text-[#07281c]">Điều khoản mở rộng (Add-ons)</span>
+                  <span class="px-1.5 py-0.5 rounded bg-[#07281c] border border-[#186635] font-mono text-[10.5px] font-bold text-[#f4d98a]">Tổng R: <span id="calc-insurance-total-rate-tag">0.25%</span></span>
+                </div>
+                <button type="button" onclick="applyCargoRecommendedInsurance()"
+                  class="px-2 py-0.5 rounded-md bg-[#0f4a33] hover:bg-[#16977f] text-[#fff5d6] border border-[#186635] text-[10.5px] font-bold cursor-pointer whitespace-nowrap">
+                  Gợi ý theo loại hàng
+                </button>
+              </div>
+              <div id="calc-insurance-addons-wrap" class="flex flex-wrap gap-1.5"></div>
+              <div class="text-[11px] text-[#0b2418] leading-snug pt-1 border-t border-[#186635]/40">
+                <span class="font-extrabold text-[#07281c]">Điều khoản HĐ: </span>
+                <span id="calc-insurance-clause-preview" class="font-mono text-[10.5px] font-bold text-[#0b2418]">Institute Cargo Clauses (A) 110% CIF</span>
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Phí bảo hiểm (USD)</label>
+              <input id="calc-insurance" type="number" step="0.01" min="0" value="" placeholder="VD: 45" data-manual-ins="0" oninput="this.setAttribute('data-manual-ins','1');recalculatePricing()"
+                class="w-full px-3 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Biên lợi nhuận (%)</label>
+              <input id="calc-margin" type="number" step="0.5" min="0" value="12" oninput="recalculatePricing(true)"
+                class="w-full px-3 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Biên LN tối thiểu (% · Giá sàn)</label>
+              <input id="calc-min-margin" type="number" step="0.5" min="0" value="5" oninput="recalculatePricing(true)"
+                class="w-full px-3 py-2 text-sm border-[1.5px] border-[#186635] bg-[#f4d98a]/45 text-[#07281c] font-bold rounded-xl focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Giá Sàn tối thiểu (Floor USD)</label>
+              <input id="calc-floor-price" type="number" step="0.01" min="0" value="" placeholder="VD: 18500" data-manual-floor="0" oninput="this.setAttribute('data-manual-floor','1')"
+                class="w-full px-3 py-2 text-sm font-mono font-extrabold text-[#07281c] border-[1.5px] border-[#186635] bg-[#f4d98a]/65 placeholder:text-[#1e4231]/65 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Giá vốn hàng hóa (USD)</label>
+              <input id="calc-goods-cost" type="number" step="0.01" min="0" value="" placeholder="VD: 15000" oninput="recalculatePricing()"
+                class="w-full px-3 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Điều kiện đề xuất chính</label>
+              <select id="calc-rec-incoterm" onchange="onIncotermSelectionChange()"
+                class="w-full px-3 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+                <option value="EXW">EXW</option>
+                <option value="FCA">FCA</option>
+                <option value="FAS">FAS</option>
+                <option value="FOB">FOB</option>
+                <option value="CFR">CFR</option>
+                <option value="CIF">CIF</option>
+                <option value="CPT">CPT</option>
+                <option value="CIP">CIP</option>
+                <option value="DAP">DAP</option>
+                <option value="DPU">DPU</option>
+                <option value="DDP">DDP</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Phí giao tại đích (DAP/DPU/DDP)</label>
+              <input id="calc-dest-extra" type="number" step="0.01" min="0" value="" placeholder="VD: 800" oninput="recalculatePricing()"
+                class="w-full px-3 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Thuế NK dự kiến (USD · DDP)</label>
+              <input id="calc-import-duty" type="number" step="0.01" min="0" value="" placeholder="VD: 1200" oninput="recalculatePricing()"
+                class="w-full px-3 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div class="col-span-2">
+              <label class="block text-xs font-semibold text-[#0b2418] mb-1">Ghi chú phương án giá</label>
+              <input id="calc-note" type="text" placeholder="Ghi chú nội bộ / điều kiện áp dụng gửi cho Sales..."
+                class="w-full px-3 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            </div>
+            <div class="col-span-2 flex flex-wrap items-center gap-4 pt-1 text-xs font-semibold text-[#0b2418]">
+              <label class="inline-flex items-center gap-1.5 cursor-pointer">
+                <input id="chk-include-freight" type="checkbox" checked onchange="recalculatePricing()" class="rounded text-[#0f4a33]" />
+                <span>Cộng cước biển quốc tế</span>
+              </label>
+              <label class="inline-flex items-center gap-1.5 cursor-pointer">
+                <input id="chk-include-insurance" type="checkbox" checked onchange="recalculatePricing()" class="rounded text-[#0f4a33]" />
+                <span>Cộng bảo hiểm hàng hóa</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- CỘT GIỮA: CHI TIẾT CẤU THÀNH CƯỚC & PHÍ ĐỊA PHƯƠNG -->
+        <div class="flex flex-col space-y-3 min-w-0">
+          <h4 class="text-sm font-extrabold text-[#fff5d6]">Chi tiết cấu thành cước &amp; phí địa phương</h4>
+          <div class="flex-1 flex flex-col justify-between space-y-2.5 text-sm bg-[#9bccb8] p-4 rounded-xl border-[1.5px] border-[#186635] text-[#0b2418]">
+            <div class="space-y-2.5">
+              <div class="flex justify-between gap-2">
+                <span class="text-[#1e4231] font-semibold">Chi phí Bao bì &amp; Pallet:</span>
+                <span id="break-packing" class="font-mono font-bold text-[#0b2418]">$0.00</span>
+              </div>
+              <div class="flex justify-between gap-2">
+                <span class="text-[#1e4231] font-semibold">Cước biển chính:</span>
+                <span id="break-ocean" class="font-mono font-bold text-[#0b2418]">$0.00</span>
+              </div>
+              <div class="flex justify-between gap-2">
+                <span class="text-[#1e4231] font-semibold">Phụ phí hãng tàu:</span>
+                <span id="break-surcharge" class="font-mono font-bold text-[#0b2418]">$0.00</span>
+              </div>
+              <div class="flex justify-between gap-2">
+                <span class="text-[#1e4231] font-semibold">Phí cảng nội địa:</span>
+                <span id="break-local" class="font-mono font-bold text-[#0b2418]">$0.00</span>
+              </div>
+              <div class="flex justify-between gap-2">
+                <span class="text-[#1e4231] font-semibold">Phí kiểm dịch &amp; hải quan:</span>
+                <span id="break-customs" class="font-mono font-bold text-[#0b2418]">$0.00</span>
+              </div>
+              <div class="flex justify-between gap-2">
+                <span class="text-[#1e4231] font-semibold">Phí đích / Thuế NK (DAP/DDP):</span>
+                <span id="break-dest-extra" class="font-mono font-bold text-[#0b2418]">$0.00</span>
+              </div>
+            </div>
+            <div class="pt-3 mt-auto border-t border-[#186635]/50 flex justify-between gap-2 font-extrabold">
+              <span class="text-[#07281c]">Tổng cước &amp; phí tính vào giá:</span>
+              <span id="break-total-freight" class="font-mono text-[#07281c]">$0.00</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- CỘT PHẢI: GIÁ BÁN CUỐI CÙNG ĐỀ XUẤT (CĂN GIỮA HOÀN TOÀN) -->
+        <div class="flex flex-col space-y-3 min-w-0">
+          <h4 class="text-sm font-extrabold text-[#fff5d6]">Tổng hợp giá chào bán</h4>
+          <div class="khung4-price-hero flex-1 flex flex-col justify-between bg-gradient-to-br from-[#07281c] to-[#0f4a33] border-2 border-[#f4d98a] rounded-2xl p-5 shadow-[0_6px_0_#07281c,0_14px_28px_rgba(7,40,28,0.4)]">
+            <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;" class="flex-1 py-4 px-2">
+              <div class="text-xs font-extrabold uppercase tracking-wider text-[#d2ebe0]">GIÁ BÁN CUỐI CÙNG ĐỀ XUẤT</div>
+              <div id="calc-final-price" class="text-4xl font-extrabold text-[#f4d98a] mt-3 font-mono tabular-nums">$0.00</div>
+              <div id="calc-unit-selling" class="text-sm text-[#fff5d6] font-bold mt-2 font-mono tabular-nums">Đơn giá: $0.00 / KG</div>
+            </div>
+            <div class="mt-4 space-y-2.5">
+              <button id="btn-save-pricing" type="button" onclick="handleSavePricingProposal(this)"
+                class="w-full py-2.5 px-4 bg-[#f4d98a] hover:bg-[#e8c668] text-[#07281c] border border-[#186635] text-sm font-extrabold rounded-xl shadow-[0_3px_0_#124d28] transition-colors flex items-center justify-center gap-2 cursor-pointer">
+                <i data-lucide="send" class="w-4 h-4"></i>
+                <span>Gửi phương án giá cho Sales</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- HÀNG DƯỚI TOÀN KHUNG: KHỐI SO SÁNH NỘI BỘ: TỰ LÀM VS FORWARDER (CHỈ XNK & QUẢN LÝ) -->
+      <div id="calc-internal-cost-section" class="khung4-fwd-section w-full bg-[#9bccb8] p-4 sm:p-5 rounded-xl border-[1.5px] border-[#186635] space-y-3 text-xs text-[#0b2418]">
+        <div id="chk-show-fwd-compare-wrap" class="flex flex-wrap items-center justify-between gap-2">
+          <label class="inline-flex items-center gap-2 font-extrabold text-[#07281c] cursor-pointer">
+            <input id="chk-show-fwd-compare" type="checkbox" onchange="onToggleFwdCompare()" class="rounded text-[#0f4a33]" />
+            <span>Tham khảo thêm giá Forwarder (Nội bộ · Không hiện ra chứng từ)</span>
+          </label>
+        </div>
+        <div id="calc-fwd-compare-body" class="hidden space-y-3.5 pt-3 border-t border-[#186635]/40">
+          <input type="hidden" id="calc-freight-exec-option" value="SELF" />
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs font-extrabold uppercase tracking-wider text-[#07281c]">Bảng so sánh chi phí nội bộ (Công ty tự làm vs Thuê ngoài FWD)</span>
+            <span class="text-[11px] font-medium text-[#1e4231]">Tích chọn Công ty tự làm hoặc nhập giá Thuê ngoài FWD</span>
+          </div>
+          <div class="overflow-x-auto rounded-xl border-[1.5px] border-[#186635]">
+            <table class="khung4-fwd-compare-table w-full text-xs border-collapse">
+              <colgroup>
+                <col style="width: 40%;" />
+                <col style="width: 22%;" />
+                <col style="width: 20%;" />
+                <col style="width: 18%;" />
+              </colgroup>
+              <thead>
+                <tr class="bg-[#547d59] text-[#fff5d6] border-b border-[#186635]">
+                  <th class="text-left px-3 py-2.5 font-bold">Hạng mục chi phí</th>
+                  <th class="text-center px-3 py-2.5 font-bold">Công ty tự làm</th>
+                  <th class="text-center px-3 py-2.5 font-bold">Thuê ngoài FWD</th>
+                  <th class="text-center px-3 py-2.5 font-bold">Áp dụng nội bộ</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="bg-[#9bccb8] border-b border-[#186635]/35">
+                  <td class="px-3 py-2.5 align-top font-semibold text-[#0b2418] text-left">
+                    <div>1. Cước biển &amp; Local Charge / CFS</div>
+                    <div id="calc-lcl-inline-row" class="hidden mt-2 p-2.5 rounded-lg bg-[#0f4a33] border border-[#f4d98a] space-y-1.5 text-[#fff5d6]">
+                      <div class="flex flex-wrap items-center justify-between gap-1">
+                        <span id="calc-lcl-alert-text" class="text-[11px] font-bold text-[#f4d98a]">Hàng lẻ LCL qua FWD</span>
+                        <span id="calc-lcl-stream-badge" class="px-1.5 py-0.5 rounded bg-[#f4d98a] text-[#07281c] text-[10px] font-mono font-bold">LCL</span>
+                      </div>
+                      <div class="grid grid-cols-2 gap-2">
+                        <select id="calc-lcl-basis" onchange="recalculatePricing()"
+                          class="w-full px-2 py-1 text-[11px] border border-[#186635] rounded bg-[#aed6c6] text-[#0b2418] font-bold">
+                          <option value="CBM">USD / CBM</option>
+                          <option value="TON">USD / Tấn</option>
+                        </select>
+                        <input id="calc-lcl-rate" type="number" step="0.01" min="0" value="0" oninput="recalculatePricing()"
+                          placeholder="Đơn giá LCL" class="w-full px-2 py-1 text-[11px] font-mono font-bold border border-[#186635] rounded bg-[#aed6c6] text-[#0b2418] text-center" />
+                      </div>
+                      <div class="flex items-center justify-between text-[11px] text-[#d2ebe0]">
+                        <span>Tạm tính LCL:</span>
+                        <strong id="calc-lcl-freight-preview" class="font-mono text-[#f4d98a]">$0.00</strong>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-3 py-2 align-middle text-center">
+                    <label class="inline-flex items-center justify-center gap-2 cursor-pointer select-none">
+                      <input id="calc-self-chk-ocean" type="checkbox" onchange="onInternalSelfCheckChange('ocean')" class="w-4 h-4 rounded text-[#0f4a33] focus:ring-[#16977f]" />
+                      <span id="calc-self-rate-ocean" class="font-mono text-xs font-extrabold text-[#07281c]">$0.00</span>
+                    </label>
+                    <input type="hidden" id="calc-self-ocean" value="" />
+                  </td>
+                  <td class="px-3 py-2 align-middle text-center">
+                    <input id="calc-fwd-ocean" type="number" step="0.01" min="0" value="" placeholder="0.00" oninput="onInternalFwdValueInput('ocean')"
+                      class="w-28 sm:w-32 mx-auto px-2 py-1.5 text-xs font-mono font-bold border-[1.5px] border-[#186635] rounded bg-[#aed6c6] text-[#0b2418] text-center focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+                  </td>
+                  <td id="calc-comp-applied-ocean" class="px-3 py-2.5 align-middle text-center font-mono font-extrabold text-[#0f4a33] whitespace-nowrap">$0.00</td>
+                </tr>
+                <tr class="bg-[#809c8f] border-b border-[#186635]/35">
+                  <td class="px-3 py-2.5 font-semibold text-[#0b2418] text-left">2. Vận tải nội địa (Trucking)</td>
+                  <td class="px-3 py-2 text-center">
+                    <label class="inline-flex items-center justify-center gap-2 cursor-pointer select-none">
+                      <input id="calc-self-chk-trucking" type="checkbox" onchange="onInternalSelfCheckChange('trucking')" class="w-4 h-4 rounded text-[#0f4a33] focus:ring-[#16977f]" />
+                      <span id="calc-self-rate-trucking" class="font-mono text-xs font-extrabold text-[#07281c]">$0.00</span>
+                    </label>
+                    <input type="hidden" id="calc-self-trucking" value="" />
+                  </td>
+                  <td class="px-3 py-2 text-center">
+                    <input id="calc-fwd-trucking" type="number" step="0.01" min="0" value="" placeholder="0.00" oninput="onInternalFwdValueInput('trucking')"
+                      class="w-28 sm:w-32 mx-auto px-2 py-1.5 text-xs font-mono font-bold border-[1.5px] border-[#186635] rounded bg-[#aed6c6] text-[#0b2418] text-center focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+                  </td>
+                  <td id="calc-comp-applied-trucking" class="px-3 py-2.5 text-center font-mono font-extrabold text-[#07281c] whitespace-nowrap">$0.00</td>
+                </tr>
+                <tr class="bg-[#9bccb8] border-b border-[#186635]/35">
+                  <td class="px-3 py-2.5 font-semibold text-[#0b2418] text-left">3. Khai báo Hải quan xuất khẩu</td>
+                  <td class="px-3 py-2 text-center">
+                    <label class="inline-flex items-center justify-center gap-2 cursor-pointer select-none">
+                      <input id="calc-self-chk-customs" type="checkbox" onchange="onInternalSelfCheckChange('customs')" class="w-4 h-4 rounded text-[#0f4a33] focus:ring-[#16977f]" />
+                      <span id="calc-self-rate-customs" class="font-mono text-xs font-extrabold text-[#07281c]">$0.00</span>
+                    </label>
+                    <input type="hidden" id="calc-self-customs" value="" />
+                  </td>
+                  <td class="px-3 py-2 text-center">
+                    <input id="calc-fwd-customs" type="number" step="0.01" min="0" value="" placeholder="0.00" oninput="onInternalFwdValueInput('customs')"
+                      class="w-28 sm:w-32 mx-auto px-2 py-1.5 text-xs font-mono font-bold border-[1.5px] border-[#186635] rounded bg-[#aed6c6] text-[#0b2418] text-center focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+                  </td>
+                  <td id="calc-comp-applied-customs" class="px-3 py-2.5 text-center font-mono font-extrabold text-[#0f4a33] whitespace-nowrap">$0.00</td>
+                </tr>
+                <tr class="bg-[#809c8f]">
+                  <td class="px-3 py-2.5 font-semibold text-[#0b2418] text-left">4. Giấy phép chuyên ngành (Kiểm dịch, Hun trùng, C/O)</td>
+                  <td class="px-3 py-2 text-center">
+                    <label class="inline-flex items-center justify-center gap-2 cursor-pointer select-none">
+                      <input id="calc-self-chk-permits" type="checkbox" onchange="onInternalSelfCheckChange('permits')" class="w-4 h-4 rounded text-[#0f4a33] focus:ring-[#16977f]" />
+                      <span id="calc-self-rate-permits" class="font-mono text-xs font-extrabold text-[#07281c]">$0.00</span>
+                    </label>
+                    <input type="hidden" id="calc-self-permits" value="" />
+                  </td>
+                  <td class="px-3 py-2 text-center">
+                    <input id="calc-fwd-permits" type="number" step="0.01" min="0" value="" placeholder="0.00" oninput="onInternalFwdValueInput('permits')"
+                      class="w-28 sm:w-32 mx-auto px-2 py-1.5 text-xs font-mono font-bold border-[1.5px] border-[#186635] rounded bg-[#aed6c6] text-[#0b2418] text-center focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+                  </td>
+                  <td id="calc-comp-applied-permits" class="px-3 py-2.5 text-center font-mono font-extrabold text-[#07281c] whitespace-nowrap">$0.00</td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr class="bg-[#0f4a33] border-t border-[#186635] font-bold text-[#fff5d6]">
+                  <td class="px-3 py-2.5 text-left">Tổng chi phí theo cột (USD)</td>
+                  <td id="calc-total-self-cost" class="px-3 py-2.5 text-center font-mono whitespace-nowrap">$0.00</td>
+                  <td id="calc-total-fwd-cost" class="px-3 py-2.5 text-center font-mono whitespace-nowrap">$0.00</td>
+                  <td id="calc-total-combined-cost" class="px-3 py-2.5 text-center font-mono text-[#f4d98a] whitespace-nowrap">$0.00</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div class="space-y-2 pt-1">
+            <div class="text-xs font-extrabold uppercase tracking-wider text-[#07281c]">Tổng phụ phí so sánh</div>
+            <div id="calc-fwd-options-table" class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs text-center"></div>
+          </div>
+          <div class="p-3 rounded-xl bg-[#0f4a33] border-[1.5px] border-[#186635] grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-[#fff5d6]">
+            <div class="flex items-center justify-between sm:justify-center gap-2"><span class="text-[#d2ebe0]">Chi phí thực tế nội bộ:</span><strong id="calc-internal-cost-disp" class="font-mono text-[#fff5d6]">$0.00</strong></div>
+            <div class="flex items-center justify-between sm:justify-center gap-2"><span class="text-[#d2ebe0]">Phí thu khách (Buyer):</span><strong id="calc-buyer-charge-disp" class="font-mono text-[#f4d98a]">$0.00</strong></div>
+            <div class="flex items-center justify-between sm:justify-center gap-2"><span class="font-bold text-[#fff5d6]">Chênh lệch / Lãi cước:</span><strong id="calc-internal-profit-disp" class="font-mono text-[#f4d98a]">$0.00</strong></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mint-card overflow-hidden">
+    <div class="card-header-3d px-5 py-3 flex items-center justify-between gap-2">
+      <h3 class="text-sm font-bold text-[#fff5d6]">Danh sách phương án giá đã lập</h3>
+    </div>
+    <div class="agri-table-scroll">
+      <table class="agri-table text-left text-xs">
+        <colgroup>
+          <col style="width: 13%;" />
+          <col style="width: 11%;" />
+          <col style="width: 14%;" />
+          <col style="width: 10%;" />
+          <col style="width: 14%;" />
+          <col style="width: 8%;" />
+          <col style="width: 12%;" />
+          <col style="width: 18%;" />
+        </colgroup>
+        <thead>
+          <tr class="text-xs font-bold">
+            <th>Số báo giá / Mã đơn</th>
+            <th>NV XNK &amp; Ngày lập</th>
+            <th>Lịch tàu &amp; Container</th>
+            <th>Giá vốn (USD)</th>
+            <th>Bao bì / Cước / BH</th>
+            <th>Điều kiện</th>
+            <th>Giá bán cuối (USD)</th>
+            <th>Trạng thái</th>
+          </tr>
+        </thead>
+        <tbody id="pricing-list-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- 4.1. VIEW: NHẬP LIỆU & DANH MỤC - LỊCH TÀU & CƯỚC -->
+<section id="view-xnk-shipping" class="app-view hidden space-y-6">
+  <div class="flex flex-wrap items-center justify-between gap-4">
+    <div>
+      <h2 class="text-2xl font-extrabold text-[#0b2418] font-display">Quản lý lịch tàu &amp; cước vận tải biển</h2>
+    </div>
+    <div class="flex items-center gap-2.5">
+      <button type="button" onclick="handleDeleteExpiredSchedules()"
+        class="px-3.5 py-2.5 bg-[#8c3b3b] hover:bg-[#7a2e2e] text-[#fdf2f2] border border-[#6e2b2b] text-sm font-semibold rounded-xl transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer">
+        <i data-lucide="trash-2" class="w-4 h-4"></i>
+        <span>Xóa tuyến hết hạn</span>
+      </button>
+      <button type="button" onclick="openModal('modal-new-schedule')"
+        class="px-4 py-2.5 bg-[#0f4a33] hover:bg-[#16977f] text-[#fff5d6] border border-[#186635] text-sm font-bold rounded-xl shadow-[0_3px_0_#07281c] transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer">
+        <i data-lucide="plus" class="w-4 h-4"></i>
+        <span>Thêm tuyến cước tàu</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="mint-card overflow-visible">
+    <div class="card-header-3d px-5 py-3">
+      <h3 class="text-sm font-bold text-[#fff5d6]">Bộ lọc Lịch tàu &amp; Cảng đến</h3>
+    </div>
+    <div class="p-4 bg-[#547d59] rounded-b-[14px] flex flex-wrap items-center gap-3 overflow-visible">
+      <input id="filter-ship-search" type="text" oninput="renderShippingTable()"
+        placeholder="Tìm mã lịch, tên tàu, số chuyến..."
+        class="w-full sm:w-64 px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/70 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+      <select id="filter-ship-pod" onchange="renderShippingTable()"
+        class="px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+        <option value="">Tất cả cảng đến</option>
+      </select>
+      <select id="filter-ship-line" onchange="renderShippingTable()"
+        class="px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+        <option value="">Tất cả hãng tàu</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="mint-card overflow-hidden">
+    <div class="card-header-3d px-5 py-3">
+      <h3 class="text-sm font-bold text-[#fff5d6]">Bảng Lịch tàu &amp; Cước Biển Quốc tế</h3>
+    </div>
+    <div class="agri-table-scroll">
+      <table class="agri-table text-left text-xs">
+        <colgroup>
+          <col style="width: 11%;" />
+          <col style="width: 14%;" />
+          <col style="width: 14%;" />
+          <col style="width: 13%;" />
+          <col style="width: 13%;" />
+          <col style="width: 15%;" />
+          <col style="width: 11%;" />
+          <col style="width: 9%;" />
+        </colgroup>
+        <thead>
+          <tr class="font-bold">
+            <th>Mã lịch &amp; Hãng tàu</th>
+            <th>Tuyến cảng</th>
+            <th>Tàu / Chuyến &amp; Lịch</th>
+            <th>Cước Cont Khô (20'/40'/40HC)</th>
+            <th>Cước Cont Lạnh (20'/40'/40RH)</th>
+            <th>Phụ phí (BAF/LSS/PSS/BL/Seal)</th>
+            <th>Hiệu lực</th>
+            <th>Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="shipping-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- 4.2. VIEW: NHẬP LIỆU & DANH MỤC - BIỂU PHÍ CẢNG -->
+<section id="view-xnk-local" class="app-view hidden space-y-6">
+  <div>
+    <h2 class="text-2xl font-extrabold text-[#0b2418] font-display">Biểu phí cảng nội địa</h2>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="lg:col-span-2 mint-card overflow-hidden">
+      <div class="card-header-3d px-5 py-3">
+        <h3 class="text-sm font-bold text-[#fff5d6]">Danh sách Biểu phí Cảng Nội địa</h3>
+      </div>
+      <div class="agri-table-scroll">
+        <table class="agri-table text-left text-xs sm:text-sm">
+          <colgroup>
+            <col style="width: 13%;" />
+            <col style="width: 25%;" />
+            <col style="width: 13%;" />
+            <col style="width: 12%;" />
+            <col style="width: 14%;" />
+            <col style="width: 13%;" />
+            <col style="width: 10%;" />
+          </colgroup>
+          <thead>
+            <tr class="text-xs font-bold">
+              <th>Mã phí</th>
+              <th>Tên loại phí</th>
+              <th>Nhóm phí</th>
+              <th>Đơn vị</th>
+              <th>Đơn giá (USD)</th>
+              <th>Container</th>
+              <th>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody id="local-charges-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="mint-card overflow-visible h-fit">
+      <div class="card-header-3d px-5 py-3">
+        <h3 class="text-sm font-bold text-[#fff5d6]">Thêm hoặc cập nhật phí cảng</h3>
+      </div>
+      <form id="form-local-charge" class="p-5 bg-[#547d59] rounded-b-[14px] space-y-3.5 overflow-visible" onsubmit="handleSaveLocalCharge(event)">
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Mã phí</label>
+          <input id="lc-code" type="text" required placeholder="VD: THC-20"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Tên loại phí</label>
+          <input id="lc-name" type="text" required placeholder="VD: Phí xếp dỡ tại cảng 20ft"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Nhóm phí</label>
+            <input id="lc-category" type="text" list="dl-lc-category" required placeholder="VD: Cảng vụ"
+              class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            <datalist id="dl-lc-category"></datalist>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Đơn vị tính</label>
+            <input id="lc-unit" type="text" list="dl-lc-unit" required placeholder="VD: Container"
+              class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            <datalist id="dl-lc-unit"></datalist>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Đơn giá chuẩn (USD)</label>
+            <input id="lc-fee" type="number" step="0.01" min="0" required
+              class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Loại container áp dụng</label>
+            <select id="lc-cont" class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]">
+              <option value="ALL">Tất cả</option>
+              <option value="20DC">20DC</option>
+              <option value="40DC">40DC</option>
+              <option value="20'RF">20'RF</option>
+              <option value="40'RF">40'RF</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Ghi chú</label>
+          <input id="lc-note" type="text" placeholder="Ghi chú thêm nếu có"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <button type="submit"
+          class="w-full py-2.5 px-4 bg-[#0f4a33] hover:bg-[#16977f] text-[#fff5d6] border border-[#186635] text-sm font-bold rounded-xl shadow-[0_3px_0_#07281c] transition-colors cursor-pointer">
+          Lưu biểu phí cảng
+        </button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- 4.3. VIEW: NHẬP LIỆU & DANH MỤC - CHI PHÍ KIỂM DỊCH & THỦ TỤC -->
+<section id="view-xnk-customs" class="app-view hidden space-y-6">
+  <div>
+    <h2 class="text-2xl font-extrabold text-[#0b2418] font-display">Chi phí kiểm dịch &amp; thủ tục hải quan</h2>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="lg:col-span-2 mint-card overflow-hidden">
+      <div class="card-header-3d px-5 py-3">
+        <h3 class="text-sm font-bold text-[#fff5d6]">Danh sách Phí Kiểm dịch &amp; Thủ tục Hải quan</h3>
+      </div>
+      <div class="agri-table-scroll">
+        <table class="agri-table text-left text-xs sm:text-sm">
+          <colgroup>
+            <col style="width: 13%;" />
+            <col style="width: 27%;" />
+            <col style="width: 12%;" />
+            <col style="width: 15%;" />
+            <col style="width: 23%;" />
+            <col style="width: 10%;" />
+          </colgroup>
+          <thead>
+            <tr class="text-xs font-bold">
+              <th>Mã dịch vụ</th>
+              <th>Tên dịch vụ thủ tục</th>
+              <th>Đơn vị tính</th>
+              <th>Đơn giá chuẩn (USD)</th>
+              <th>Đơn vị cung cấp</th>
+              <th>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody id="customs-fees-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="mint-card overflow-hidden h-fit">
+      <div class="card-header-3d px-5 py-3">
+        <h3 class="text-sm font-bold text-[#fff5d6]">Thêm hoặc cập nhật phí dịch vụ</h3>
+      </div>
+      <form id="form-customs-fee" class="p-5 bg-[#547d59] space-y-3.5" onsubmit="handleSaveCustomsFee(event)">
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Mã dịch vụ</label>
+          <input id="cf-code" type="text" required placeholder="VD: PHYTO-01"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Tên dịch vụ thủ tục</label>
+          <input id="cf-name" type="text" required placeholder="VD: Kiểm dịch thực vật lô hàng"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Đơn vị tính</label>
+            <input id="cf-unit" type="text" list="dl-cf-unit" required placeholder="VD: Lô hàng"
+              class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+            <datalist id="dl-cf-unit"></datalist>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Đơn giá (USD)</label>
+            <input id="cf-fee" type="number" step="0.01" min="0" required
+              class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Đơn vị cung cấp</label>
+          <input id="cf-provider" type="text" required placeholder="VD: Chi cục Kiểm dịch Vùng II"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-[#fff5d6] mb-1">Ghi chú</label>
+          <input id="cf-note" type="text" placeholder="Ghi chú thêm nếu có"
+            class="w-full px-3.5 py-2 text-sm border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/65 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+        </div>
+        <button type="submit"
+          class="w-full py-2.5 px-4 bg-[#0f4a33] hover:bg-[#16977f] text-[#fff5d6] border border-[#186635] text-sm font-bold rounded-xl shadow-[0_3px_0_#07281c] transition-colors cursor-pointer">
+          Lưu phí dịch vụ
+        </button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- 4.3B. VIEW: XNK - BẢNG GIÁ PHỤ PHÍ (Pricing_Rates CRUD) -->
+<section id="view-xnk-rates" class="app-view hidden space-y-6">
+  <div class="flex flex-wrap items-center justify-between gap-4">
+    <div>
+      <h2 class="text-2xl font-extrabold text-[#0b2418] font-display">Bảng giá Phụ phí</h2>
+    </div>
+    <button type="button" onclick="openPricingRateModal(null)"
+      class="px-4 py-2.5 bg-[#0f4a33] hover:bg-[#16977f] text-[#fff5d6] border border-[#186635] text-sm font-bold rounded-xl shadow-[0_3px_0_#07281c] transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer">
+      <i data-lucide="plus" class="w-4 h-4"></i>
+      <span>Thêm đầu mục phí</span>
+    </button>
+  </div>
+
+  <div class="mint-card overflow-hidden">
+    <div class="card-header-3d px-5 py-3">
+      <h3 class="text-sm font-bold text-[#fff5d6]">Bộ lọc Nhóm Phụ phí</h3>
+    </div>
+    <div class="p-4 bg-[#547d59] flex flex-wrap items-center justify-between gap-3">
+      <div id="rates-category-tabs" class="flex flex-wrap items-center gap-1.5">
+        <button type="button" onclick="setRatesCategoryFilter('ALL')" data-rate-cat="ALL" class="rate-cat-btn px-3 py-1.5 text-xs font-bold rounded-lg bg-[#0f4a33] text-[#fff5d6] border border-[#186635] cursor-pointer">Tất cả</button>
+        <button type="button" onclick="setRatesCategoryFilter('PACKING')" data-rate-cat="PACKING" class="rate-cat-btn px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#9bccb8] border-[1.5px] border-[#186635] text-[#0b2418] hover:bg-[#aed6c6] cursor-pointer">Bao bì &amp; Pallet</button>
+        <button type="button" onclick="setRatesCategoryFilter('CONTAINER')" data-rate-cat="CONTAINER" class="rate-cat-btn px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#9bccb8] border-[1.5px] border-[#186635] text-[#0b2418] hover:bg-[#aed6c6] cursor-pointer">Container &amp; Sức chứa</button>
+        <button type="button" onclick="setRatesCategoryFilter('LOCAL_CHARGE')" data-rate-cat="LOCAL_CHARGE" class="rate-cat-btn px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#9bccb8] border-[1.5px] border-[#186635] text-[#0b2418] hover:bg-[#aed6c6] cursor-pointer">Biểu phí cảng</button>
+        <button type="button" onclick="setRatesCategoryFilter('CUSTOMS_FEE')" data-rate-cat="CUSTOMS_FEE" class="rate-cat-btn px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#9bccb8] border-[1.5px] border-[#186635] text-[#0b2418] hover:bg-[#aed6c6] cursor-pointer">Kiểm dịch &amp; HQ</button>
+        <button type="button" onclick="setRatesCategoryFilter('INSURANCE')" data-rate-cat="INSURANCE" class="rate-cat-btn px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#9bccb8] border-[1.5px] border-[#186635] text-[#0b2418] hover:bg-[#aed6c6] cursor-pointer">Bảo hiểm</button>
+      </div>
+      <input id="filter-rates-search" type="text" oninput="renderPricingRatesTable()"
+        placeholder="Tìm mã phí, tên phí, kích thước..."
+        class="w-full sm:w-64 px-3 py-1.5 text-xs border-[1.5px] border-[#186635] rounded-xl bg-[#aed6c6] text-[#0b2418] font-semibold placeholder:text-[#1e4231]/70 focus:outline-none focus:ring-2 focus:ring-[#16977f]/35 focus:border-[#07281c]" />
+    </div>
+  </div>
+
+  <div class="mint-card overflow-hidden">
+    <div class="card-header-3d px-5 py-3">
+      <h3 class="text-sm font-bold text-[#fff5d6]">Chi tiết Bảng giá Phụ phí, Bao bì, Container &amp; Bảo hiểm</h3>
+    </div>
+    <div class="agri-table-scroll">
+      <table class="agri-table pricing-rates-table text-left text-xs sm:text-sm">
+        <colgroup>
+          <col style="width: 11%;" />
+          <col style="width: 11%;" />
+          <col style="width: 9%;" />
+          <col style="width: 22%;" />
+          <col style="width: 10%;" />
+          <col style="width: 9%;" />
+          <col style="width: 15%;" />
+          <col style="width: 13%;" />
+        </colgroup>
+        <thead>
+          <tr class="text-xs font-bold">
+            <th>Nhóm phí</th>
+            <th>Mã phí</th>
+            <th>Phạm vi / Cont</th>
+            <th>Tên tiếng Việt / Tiếng Anh</th>
+            <th>Đơn vị</th>
+            <th>Đơn giá chuẩn</th>
+            <th>Thông số KT &amp; Ghi chú</th>
+            <th>Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="pricing-rates-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- MODAL: THÊM TUYẾN CƯỚC TÀU (NHẬP HÀNG LOẠT NHIỀU DÒNG) -->
+<div id="modal-new-schedule" class="hidden fixed inset-0 z-50 bg-[#07281c]/70 backdrop-blur-[2px] flex items-center justify-center p-2 sm:p-4">
+  <div class="bg-[#547d59] border-2 border-[#186635] rounded-2xl max-w-6xl w-full max-h-[92vh] overflow-y-auto p-5 sm:p-6 shadow-[0_6px_0_#124d28,0_16px_32px_rgba(7,40,28,0.45)] text-[#fff5d6]">
+    <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-[#186635]/70">
+      <div>
+        <h3 class="text-lg font-extrabold text-[#fff5d6] font-display">Thêm tuyến cước tàu mới (Nhập hàng loạt)</h3>
+        <p class="text-xs text-[#d2ebe0] mt-0.5">Nhập nhiều tuyến tàu cùng lúc hoặc bấm "Thêm dòng tuyến tàu" để thêm lịch trình mới.</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" onclick="closeModal('modal-new-schedule')" class="text-[#d2ebe0] hover:text-[#f4d98a] p-1 cursor-pointer">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+    </div>
+    <form id="form-new-schedule" class="mt-4 space-y-4" onsubmit="handleCreateSchedule(event)">
+      <div id="schedule-batch-rows" class="space-y-3"></div>
+      <div class="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-[#186635]/70">
+        <button type="button" onclick="addScheduleBatchRow()"
+          class="px-3.5 py-2 text-xs font-bold text-[#0b2418] bg-[#9bccb8] border-[1.5px] border-[#186635] rounded-xl hover:bg-[#aed6c6] inline-flex items-center gap-1.5 cursor-pointer"><i data-lucide="plus" class="w-3.5 h-3.5"></i><span>Thêm dòng tuyến tàu</span></button>
+        <div class="flex items-center gap-3">
+          <button type="button" onclick="closeModal('modal-new-schedule')"
+            class="px-4 py-2 text-sm font-semibold text-[#0b2418] bg-[#9bccb8] border-[1.5px] border-[#186635] rounded-xl hover:bg-[#aed6c6] cursor-pointer">Hủy</button>
+          <button type="submit"
+            class="px-5 py-2 text-sm font-bold text-[#fff5d6] bg-[#0f4a33] border border-[#186635] rounded-xl hover:bg-[#16977f] shadow-[0_3px_0_#07281c] cursor-pointer">Lưu tất cả lịch tàu &amp; cước</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL: THÊM / SỬA ĐẦU MỤC PHÍ (HỖ TRỢ NHẬP HÀNG LOẠT & ĐỘNG) -->
+<div id="modal-pricing-rate" class="hidden fixed inset-0 z-50 bg-[#07281c]/70 backdrop-blur-[2px] flex items-center justify-center p-2 sm:p-4">
+  <div class="bg-[#547d59] border-2 border-[#186635] rounded-2xl max-w-6xl w-full max-h-[92vh] overflow-y-auto p-5 sm:p-6 shadow-[0_6px_0_#124d28,0_16px_32px_rgba(7,40,28,0.45)] text-[#fff5d6]">
+    <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-[#186635]/70">
+      <div>
+        <h3 id="modal-pricing-rate-title" class="text-lg font-extrabold text-[#fff5d6] font-display">Cập nhật Bảng giá Phụ phí</h3>
+        <p id="modal-pricing-rate-subtitle" class="text-xs text-[#d2ebe0] mt-0.5">Chọn nhóm phí để tự gợi ý đơn vị tính &amp; quy tắc, kích thước thùng tự tính Tối đa/Pallet.</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" onclick="closeModal('modal-pricing-rate')" class="text-[#d2ebe0] hover:text-[#f4d98a] p-1 cursor-pointer">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+    </div>
+    <form id="form-pricing-rate" class="mt-4 space-y-4" onsubmit="handleSavePricingRateModal(event)">
+      <input id="pr-edit-mode" type="hidden" value="0" />
+      <div id="pricing-rate-batch-rows" class="space-y-3"></div>
+      <div class="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[#186635]/70">
+        <button id="pr-add-batch-row-footer-btn" type="button" onclick="addPricingRateBatchRow()"
+          class="px-3.5 py-2 text-xs font-bold text-[#0b2418] bg-[#9bccb8] border-[1.5px] border-[#186635] rounded-xl hover:bg-[#aed6c6] inline-flex items-center gap-1.5 cursor-pointer"><i data-lucide="plus" class="w-3.5 h-3.5"></i><span>Thêm dòng mục phí</span></button>
+        <div class="flex items-center gap-3 ml-auto">
+          <button type="button" onclick="closeModal('modal-pricing-rate')"
+            class="px-4 py-2 text-sm font-semibold text-[#0b2418] bg-[#9bccb8] border-[1.5px] border-[#186635] rounded-xl hover:bg-[#aed6c6] cursor-pointer">Hủy</button>
+          <button type="submit"
+            class="px-5 py-2 text-sm font-bold text-[#fff5d6] bg-[#0f4a33] border border-[#186635] rounded-xl hover:bg-[#16977f] shadow-[0_3px_0_#07281c] cursor-pointer">Lưu đầu mục phí</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var pricingOverridesReady = false;
+    var INTERNAL_COST_ROWS = [
+      { key: "ocean", chkId: "calc-self-chk-ocean", rateId: "calc-self-rate-ocean", selfId: "calc-self-ocean", fwdId: "calc-fwd-ocean", appliedId: "calc-comp-applied-ocean" },
+      { key: "trucking", chkId: "calc-self-chk-trucking", rateId: "calc-self-rate-trucking", selfId: "calc-self-trucking", fwdId: "calc-fwd-trucking", appliedId: "calc-comp-applied-trucking" },
+      { key: "customs", chkId: "calc-self-chk-customs", rateId: "calc-self-rate-customs", selfId: "calc-self-customs", fwdId: "calc-fwd-customs", appliedId: "calc-comp-applied-customs" },
+      { key: "permits", chkId: "calc-self-chk-permits", rateId: "calc-self-rate-permits", selfId: "calc-self-permits", fwdId: "calc-fwd-permits", appliedId: "calc-comp-applied-permits" }
+    ];
+    var touchedRows = { ocean: false, trucking: false, customs: false, permits: false };
+    var latestStdSelfRates = { ocean: 0, trucking: 0, customs: 0, permits: 0 };
+
+    function safeToNum(v) {
+      if (typeof window.toNum === "function") return window.toNum(v);
+      var n = parseFloat(String(v === null || v === undefined ? "" : v).replace(/,/g, ""));
+      return isNaN(n) || !isFinite(n) ? 0 : n;
+    }
+
+    function safeFmtUsd(v) {
+      if (typeof window.fmtUSD === "function") return window.fmtUSD(v);
+      var n = safeToNum(v);
+      return "$" + n.toFixed(2);
+    }
+
+    function resetInternalCostTouches() {
+      touchedRows = { ocean: false, trucking: false, customs: false, permits: false };
+    }
+
+    function lookupStandardTruckingRateUsd(mix) {
+      var contCount = Math.max(1, safeToNum(mix && mix.total) || 1);
+      var pool = []
+        .concat(Array.isArray(window.APP_DATA && window.APP_DATA.pricingRates) ? window.APP_DATA.pricingRates : [])
+        .concat(Array.isArray(window.APP_DATA && window.APP_DATA.localCharges) ? window.APP_DATA.localCharges : []);
+      var found = pool.find(function (r) {
+        var text = String((r["Category"] || "") + " " + (r["Fee_Code"] || r["Rate_Code"] || "") + " " + (r["Fee_Name"] || r["Rate_Name"] || r["Description"] || "")).toUpperCase();
+        return text.indexOf("TRUCK") !== -1 || text.indexOf("VẬN TẢI NỘI ĐỊA") !== -1 || text.indexOf("VAN TAI NOI DIA") !== -1 || text.indexOf("XE KÉO") !== -1 || text.indexOf("XE KEO") !== -1;
+      });
+      if (found) {
+        var unitRate = safeToNum(found["Unit_Price_USD"] || found["Rate_USD"] || found["Amount_USD"] || found["Price_USD"] || found["Cost_USD"]);
+        if (unitRate > 0) {
+          var unitTxt = String(found["Unit"] || found["Charge_Unit"] || "").toUpperCase();
+          var mult = (unitTxt.indexOf("CONT") !== -1 || unitTxt.indexOf("20") !== -1 || unitTxt.indexOf("40") !== -1) ? contCount : 1;
+          return Math.round(unitRate * mult * 100) / 100;
+        }
+      }
+      return Math.round(180 * contCount * 100) / 100;
+    }
+
+    function lookupDefaultLclRateUsd() {
+      var pool = Array.isArray(window.APP_DATA && window.APP_DATA.pricingRates) ? window.APP_DATA.pricingRates : [];
+      var found = pool.find(function (r) {
+        var text = String((r["Category"] || "") + " " + (r["Fee_Code"] || r["Rate_Code"] || "") + " " + (r["Fee_Name"] || r["Rate_Name"] || "")).toUpperCase();
+        return text.indexOf("LCL") !== -1 && (text.indexOf("FREIGHT") !== -1 || text.indexOf("CƯỚC") !== -1 || text.indexOf("CUOC") !== -1 || text.indexOf("CFS") !== -1);
+      });
+      var rate = found ? safeToNum(found["Unit_Price_USD"] || found["Rate_USD"] || found["Amount_USD"] || found["Price_USD"]) : 0;
+      return rate > 0 ? rate : 45;
+    }
+
+    function applyRowCrossLockVisual(cfg) {
+      var chkEl = document.getElementById(cfg.chkId);
+      var fwdEl = document.getElementById(cfg.fwdId);
+      var selfEl = document.getElementById(cfg.selfId);
+      if (!chkEl || !fwdEl) return;
+      var fwdVal = Math.max(0, safeToNum(fwdEl.value));
+      if (chkEl.checked) {
+        fwdEl.value = "";
+        fwdEl.disabled = true;
+        fwdEl.classList.add("bg-[#809c8f]", "text-[#1e4231]/60", "cursor-not-allowed");
+        chkEl.disabled = false;
+        if (selfEl) selfEl.value = (latestStdSelfRates[cfg.key] || 0).toFixed(2);
+      } else if (fwdVal > 0) {
+        chkEl.checked = false;
+        chkEl.disabled = true;
+        fwdEl.disabled = false;
+        fwdEl.classList.remove("bg-[#809c8f]", "text-[#1e4231]/60", "cursor-not-allowed");
+        if (selfEl) selfEl.value = "";
+      } else {
+        chkEl.disabled = false;
+        fwdEl.disabled = false;
+        fwdEl.classList.remove("bg-[#809c8f]", "text-[#1e4231]/60", "cursor-not-allowed");
+        if (selfEl) selfEl.value = "";
+      }
+    }
+
+    window.onInternalSelfCheckChange = function (rowKey) {
+      var cfg = INTERNAL_COST_ROWS.find(function (r) { return r.key === rowKey; });
+      if (!cfg) return;
+      touchedRows[rowKey] = true;
+      var chkEl = document.getElementById(cfg.chkId);
+      var fwdEl = document.getElementById(cfg.fwdId);
+      var selfEl = document.getElementById(cfg.selfId);
+      if (chkEl && chkEl.checked) {
+        if (fwdEl) fwdEl.value = "";
+        if (selfEl) selfEl.value = (latestStdSelfRates[rowKey] || 0).toFixed(2);
+      } else {
+        if (selfEl) selfEl.value = "";
+      }
+      applyRowCrossLockVisual(cfg);
+      if (typeof window.recalculatePricing === "function") {
+        window.recalculatePricing();
+      }
+    };
+
+    window.onInternalFwdValueInput = function (rowKey) {
+      var cfg = INTERNAL_COST_ROWS.find(function (r) { return r.key === rowKey; });
+      if (!cfg) return;
+      touchedRows[rowKey] = true;
+      var chkEl = document.getElementById(cfg.chkId);
+      var fwdEl = document.getElementById(cfg.fwdId);
+      var selfEl = document.getElementById(cfg.selfId);
+      var fwdVal = fwdEl ? Math.max(0, safeToNum(fwdEl.value)) : 0;
+      if (fwdVal > 0) {
+        if (chkEl) chkEl.checked = false;
+        if (selfEl) selfEl.value = "";
+      }
+      applyRowCrossLockVisual(cfg);
+      if (typeof window.recalculatePricing === "function") {
+        window.recalculatePricing();
+      }
+    };
+
+    // Giữ alias tương thích ngược
+    window.onInternalCostMutualInput = function (rowKey, activeSide) {
+      if (activeSide === "self") window.onInternalSelfCheckChange(rowKey);
+      else window.onInternalFwdValueInput(rowKey);
+    };
+
+    window.autoCalculateWeightCbmAndFreightBasis = function (triggerOptimalMix) {
+      var gwEl = document.getElementById("calc-total-gw");
+      var cbmEl = document.getElementById("calc-total-cbm");
+      var wmEl = document.getElementById("calc-total-wm");
+      var totalGwKg = gwEl ? safeToNum(String(gwEl.textContent || "").replace(/[^0-9.,]/g, "")) : 0;
+      var totalCbm = cbmEl ? safeToNum(String(cbmEl.textContent || "").replace(/[^0-9.,]/g, "")) : 0;
+
+      // Fallback nếu core chưa kịp tính Gross Weight / CBM từ danh sách sản phẩm
+      if ((totalGwKg <= 0 || totalCbm <= 0) && Array.isArray(window.PRICING_ITEMS_STATE) && window.PRICING_ITEMS_STATE.length > 0) {
+        var netSum = 0;
+        var calcGw = 0;
+        var calcCbm = 0;
+        var cartonsTotal = 0;
+        var usePallet = Boolean((document.getElementById("calc-use-pallet") || {}).checked);
+        window.PRICING_ITEMS_STATE.forEach(function (it) {
+          var w = Math.max(0, safeToNum(it.weight));
+          netSum += w;
+          var tareRatio = safeToNum(it.tareRatio) > 0 ? safeToNum(it.tareRatio) : 0.08;
+          calcGw += w * (1 + tareRatio);
+          var cbmPerKg = safeToNum(it.cbmPerKg) > 0 ? safeToNum(it.cbmPerKg) : 0.0018;
+          calcCbm += w * cbmPerKg;
+          cartonsTotal += Math.ceil(w / 10);
+        });
+        if (usePallet && netSum > 0) {
+          var estPallets = Math.max(1, Math.ceil(cartonsTotal / 40));
+          calcGw += estPallets * 18;
+          calcCbm += estPallets * 0.17;
+          if (window.PRICING_ITEMS_STATE.length > 1) calcCbm = calcCbm * 1.05;
+        }
+        if (totalGwKg <= 0 && calcGw > 0) {
+          totalGwKg = Math.round(calcGw * 100) / 100;
+          if (gwEl) gwEl.textContent = (typeof window.fmtNumber === "function" ? window.fmtNumber(Math.round(totalGwKg)) : Math.round(totalGwKg)) + " KG";
+        }
+        if (totalCbm <= 0 && calcCbm > 0) {
+          totalCbm = Math.round(calcCbm * 1000) / 1000;
+          if (cbmEl) cbmEl.textContent = totalCbm.toFixed(3) + " CBM";
+        }
+      }
+
+      var tons = Math.round((totalGwKg / 1000) * 1000) / 1000;
+      var wm = Math.round(Math.max(tons, totalCbm) * 1000) / 1000;
+      var wmBasis = tons >= totalCbm ? "TON" : "CBM";
+      if (wmEl) {
+        wmEl.textContent = wm.toFixed(2) + " W/M (" + (wmBasis === "TON" ? "Tấn" : "CBM") + ")";
+      }
+
+      if (triggerOptimalMix && typeof window.applyOptimalContainerMix === "function" && totalGwKg > 0) {
+        try { window.applyOptimalContainerMix(true); } catch (optErr) {}
+      }
+
+      var mix = typeof window.getContainerMixState === "function" ? window.getContainerMixState() : { total: 0, hasLcl: false };
+      if (mix && (mix.hasLcl || (totalGwKg > 0 && mix.total === 0))) {
+        var basisSel = document.getElementById("calc-lcl-basis");
+        if (basisSel && basisSel.value !== wmBasis) {
+          basisSel.value = wmBasis;
+          if (typeof window.syncSearchableCombo === "function") window.syncSearchableCombo(basisSel);
+        }
+        var rateEl = document.getElementById("calc-lcl-rate");
+        if (rateEl && safeToNum(rateEl.value) <= 0) {
+          rateEl.value = lookupDefaultLclRateUsd().toFixed(2);
+        }
+        var lclRate = rateEl ? safeToNum(rateEl.value) : 0;
+        var alertEl = document.getElementById("calc-lcl-alert-text");
+        if (alertEl) {
+          alertEl.textContent = "Hàng lẻ LCL · W/M = max(" + tons.toFixed(2) + " T, " + totalCbm.toFixed(3) + " CBM) = " + wm.toFixed(2) + " W/M";
+        }
+        var prevEl = document.getElementById("calc-lcl-freight-preview");
+        if (prevEl && lclRate > 0) {
+          prevEl.textContent = safeFmtUsd(wm * lclRate);
+        }
+      }
+
+      return { totalGwKg: totalGwKg, tons: tons, totalCbm: totalCbm, wm: wm, wmBasis: wmBasis };
+    };
+
+    function initPricingOverrides() {
+      if (pricingOverridesReady) return;
+      pricingOverridesReady = true;
+
+      // 1. Khung 2: Bộ lọc 3 Tiêu chí tự động tích chọn thẳng vào các checkbox "Tích chọn các điều kiện Incoterms 2020 để xuất báo giá"
+      window.renderIncoterm3CriteriaMatches = function () {
+        var elFr = document.getElementById("inc-filter-freight");
+        var elIns = document.getElementById("inc-filter-insurance");
+        var elRisk = document.getElementById("inc-filter-risk");
+        var fFr = elFr ? String(elFr.value || "").trim() : "";
+        var fIns = elIns ? String(elIns.value || "").trim() : "";
+        var fRisk = elRisk ? String(elRisk.value || "").trim() : "";
+
+        if (!fFr && !fIns && !fRisk) {
+          return;
+        }
+        if (typeof INCOTERMS_2020_MATRIX === "undefined") return;
+
+        var matchedCodes = INCOTERMS_2020_MATRIX.filter(function (row) {
+          if (fFr && row.freightOwner !== fFr) return false;
+          if (fIns && row.insOwner !== fIns) return false;
+          if (fRisk && row.riskGroup !== fRisk) return false;
+          return true;
+        }).map(function (row) {
+          return String(row.code || "").trim().toUpperCase();
+        });
+
+        var chks = document.querySelectorAll(".calc-proposed-inc-chk");
+        for (var i = 0; i < chks.length; i++) {
+          var code = String(chks[i].value || "").trim().toUpperCase();
+          chks[i].checked = matchedCodes.indexOf(code) !== -1;
+        }
+
+        if (typeof onProposedIncotermsChange === "function") {
+          onProposedIncotermsChange();
+        }
+        var activeEl = document.activeElement;
+        if (matchedCodes.length === 0 && activeEl && (activeEl === elFr || activeEl === elIns || activeEl === elRisk) && typeof showToast === "function") {
+          showToast("info", "Không có điều kiện Incoterms 2020 nào khớp đồng thời các tiêu chí đã chọn.");
+        }
+      };
+
+      window.resetIncoterm3CriteriaFilter = function () {
+        var elFr = document.getElementById("inc-filter-freight");
+        var elIns = document.getElementById("inc-filter-insurance");
+        var elRisk = document.getElementById("inc-filter-risk");
+        if (elFr) elFr.value = "";
+        if (elIns) elIns.value = "";
+        if (elRisk) elRisk.value = "";
+
+        var recSel = document.getElementById("calc-rec-incoterm");
+        var recCode = recSel ? String(recSel.value || "CIF").trim().toUpperCase() : "CIF";
+        var chks = document.querySelectorAll(".calc-proposed-inc-chk");
+        for (var i = 0; i < chks.length; i++) {
+          chks[i].checked = String(chks[i].value || "").trim().toUpperCase() === recCode;
+        }
+        if (typeof onProposedIncotermsChange === "function") {
+          onProposedIncotermsChange();
+        }
+      };
+
+      // 2. Giữ nguyên 1 mã Quote_ID duy nhất cho mỗi đơn hàng (không gắn hậu tố -V1, -R2...)
+      window.generateNextQuotationNoJS = function (orderId, explicitRound) {
+        var cleanOid = String(orderId || "").trim().replace(/-(?:V|R)\d+$/i, "");
+        var roundNum = Math.max(parseInt(explicitRound || 1, 10) || 1, 1);
+        return {
+          versionLabel: "",
+          quotationNo: cleanOid ? ("QT-" + cleanOid) : "",
+          quoteRound: roundNum
+        };
+      };
+
+      // 3. Bảng so sánh Công ty tự làm (Checkbox tự kéo bảng giá chuẩn) vs Thuê ngoài FWD (khóa chéo 2 chiều)
+      window.computeFwdInternalSummary = function (mix, effOcean, effSurcharge, localTotal, customsExportUsd, permitsUsd, buyerCharge) {
+        var isLclOrder = Boolean(mix && mix.hasLcl);
+        var stdOcean = Math.round(Math.max(0, effOcean + effSurcharge + localTotal) * 100) / 100;
+        var stdTrucking = lookupStandardTruckingRateUsd(mix);
+        var stdCustoms = Math.round(Math.max(0, customsExportUsd) * 100) / 100;
+        var stdPermits = Math.round(Math.max(0, permitsUsd) * 100) / 100;
+
+        latestStdSelfRates = {
+          ocean: stdOcean,
+          trucking: stdTrucking,
+          customs: stdCustoms,
+          permits: stdPermits
+        };
+
+        INTERNAL_COST_ROWS.forEach(function (cfg) {
+          var rateEl = document.getElementById(cfg.rateId);
+          if (rateEl) rateEl.textContent = safeFmtUsd(latestStdSelfRates[cfg.key]);
+        });
+
+        // Auto-seed mặc định ban đầu khi người dùng chưa thao tác dòng đó
+        INTERNAL_COST_ROWS.forEach(function (cfg) {
+          var chkEl = document.getElementById(cfg.chkId);
+          var fwdEl = document.getElementById(cfg.fwdId);
+          if (!chkEl || !fwdEl) return;
+          var fwdVal = safeToNum(fwdEl.value);
+          if (!touchedRows[cfg.key] && !chkEl.checked && fwdVal <= 0) {
+            if (cfg.key === "ocean" && isLclOrder && effOcean > 0) {
+              fwdEl.value = (Math.round(effOcean * 100) / 100).toFixed(2);
+            } else if (latestStdSelfRates[cfg.key] > 0) {
+              chkEl.checked = true;
+            }
+          }
+          applyRowCrossLockVisual(cfg);
+        });
+
+        function readCrossLockedRow(cfg) {
+          var chkEl = document.getElementById(cfg.chkId);
+          var fwdEl = document.getElementById(cfg.fwdId);
+          var selfEl = document.getElementById(cfg.selfId);
+          var isSelf = Boolean(chkEl && chkEl.checked);
+          var sVal = isSelf ? Math.max(0, latestStdSelfRates[cfg.key] || 0) : 0;
+          var fVal = isSelf ? 0 : Math.max(0, safeToNum(fwdEl ? fwdEl.value : 0));
+          if (selfEl) selfEl.value = isSelf ? sVal.toFixed(2) : "";
+          return {
+            isSelf: isSelf,
+            isFwd: !isSelf && fVal > 0,
+            self: Math.round(sVal * 100) / 100,
+            fwd: Math.round(fVal * 100) / 100,
+            applied: Math.round((sVal + fVal) * 100) / 100
+          };
+        }
+
+        var rowOcean = readCrossLockedRow(INTERNAL_COST_ROWS[0]);
+        var rowTruck = readCrossLockedRow(INTERNAL_COST_ROWS[1]);
+        var rowCust = readCrossLockedRow(INTERNAL_COST_ROWS[2]);
+        var rowPerm = readCrossLockedRow(INTERNAL_COST_ROWS[3]);
+
+        var totalSelf = Math.round((rowOcean.self + rowTruck.self + rowCust.self + rowPerm.self) * 100) / 100;
+        var totalFwd = Math.round((rowOcean.fwd + rowTruck.fwd + rowCust.fwd + rowPerm.fwd) * 100) / 100;
+        var internalCost = Math.round((totalSelf + totalFwd) * 100) / 100;
+        var allSelf100 = Math.round((stdOcean + stdTrucking + stdCustoms + stdPermits) * 100) / 100;
+        var buyerChargeRounded = Math.round(safeToNum(buyerCharge) * 100) / 100;
+        var internalProfit = Math.round((buyerChargeRounded - internalCost) * 100) / 100;
+
+        var selfCount = [rowOcean, rowTruck, rowCust, rowPerm].filter(function (r) { return r.isSelf; }).length;
+        var fwdCount = [rowOcean, rowTruck, rowCust, rowPerm].filter(function (r) { return r.isFwd; }).length;
+        var execOpt = (fwdCount > 0 && selfCount === 0)
+          ? "FWD_ALL"
+          : ((selfCount > 0 && fwdCount > 0) ? "HYBRID" : "SELF");
+        var execHidden = document.getElementById("calc-freight-exec-option");
+        if (execHidden) execHidden.value = execOpt;
+
+        var appliedMap = [
+          ["calc-comp-applied-ocean", rowOcean.applied],
+          ["calc-comp-applied-trucking", rowTruck.applied],
+          ["calc-comp-applied-customs", rowCust.applied],
+          ["calc-comp-applied-permits", rowPerm.applied]
+        ];
+        appliedMap.forEach(function (pair) {
+          var el = document.getElementById(pair[0]);
+          if (el) el.textContent = safeFmtUsd(pair[1]);
+        });
+
+        var elTotSelf = document.getElementById("calc-total-self-cost");
+        var elTotFwd = document.getElementById("calc-total-fwd-cost");
+        var elTotComb = document.getElementById("calc-total-combined-cost");
+        if (elTotSelf) elTotSelf.textContent = safeFmtUsd(totalSelf);
+        if (elTotFwd) elTotFwd.textContent = safeFmtUsd(totalFwd);
+        if (elTotComb) elTotComb.textContent = safeFmtUsd(internalCost);
+
+        var tableEl = document.getElementById("calc-fwd-options-table");
+        if (tableEl) {
+          var clsSelf100 = execOpt === "SELF"
+            ? "bg-[#0f4a33] border-[#f4d98a] text-[#fff5d6] ring-1 ring-[#f4d98a]/40 shadow-[0_3px_0_#07281c]"
+            : "bg-[#9bccb8] border-[#186635] text-[#0b2418]";
+          var clsHybrid = execOpt === "HYBRID"
+            ? "bg-[#0f4a33] border-[#f4d98a] text-[#fff5d6] ring-1 ring-[#f4d98a]/40 shadow-[0_3px_0_#07281c]"
+            : "bg-[#9bccb8] border-[#186635] text-[#0b2418]";
+          var clsFwd100 = execOpt === "FWD_ALL"
+            ? "bg-[#0f4a33] border-[#f4d98a] text-[#fff5d6] ring-1 ring-[#f4d98a]/40 shadow-[0_3px_0_#07281c]"
+            : "bg-[#9bccb8] border-[#186635] text-[#0b2418]";
+
+          tableEl.innerHTML =
+            '<div class="p-2.5 rounded-xl border-[1.5px] ' + clsSelf100 + '">' +
+              '<div class="font-semibold">Công ty tự làm 100%</div>' +
+              '<div class="font-mono font-bold text-sm mt-1">' + safeFmtUsd(allSelf100) + '</div>' +
+            '</div>' +
+            '<div class="p-2.5 rounded-xl border-[1.5px] ' + clsHybrid + '">' +
+              '<div class="font-semibold">Thuê FWD vài hạng mục</div>' +
+              '<div class="font-mono font-bold text-sm mt-1">' + safeFmtUsd(execOpt === "HYBRID" ? internalCost : 0) + '</div>' +
+            '</div>' +
+            '<div class="p-2.5 rounded-xl border-[1.5px] ' + clsFwd100 + '">' +
+              '<div class="font-semibold">Thuê FWD tự làm 100%</div>' +
+              '<div class="font-mono font-bold text-sm mt-1">' + safeFmtUsd(totalFwd) + '</div>' +
+            '</div>';
+        }
+
+        var elInt = document.getElementById("calc-internal-cost-disp");
+        var elBuy = document.getElementById("calc-buyer-charge-disp");
+        var elProf = document.getElementById("calc-internal-profit-disp");
+        if (elInt) elInt.textContent = safeFmtUsd(internalCost);
+        if (elBuy) elBuy.textContent = safeFmtUsd(buyerChargeRounded);
+        if (elProf) {
+          elProf.textContent = (internalProfit >= 0 ? "+" : "-") + safeFmtUsd(Math.abs(internalProfit));
+          elProf.className = "font-mono " + (internalProfit >= 0 ? "text-[#f4d98a]" : "text-[#fca5a5]");
+        }
+
+        return {
+          execOption: execOpt,
+          selfOcean: rowOcean.self,
+          selfTrucking: rowTruck.self,
+          selfCustoms: rowCust.self,
+          selfPermits: rowPerm.self,
+          fwdOcean: rowOcean.fwd,
+          fwdTrucking: rowTruck.fwd,
+          fwdCustoms: rowCust.fwd,
+          fwdPermits: rowPerm.fwd,
+          internalCost: internalCost,
+          buyerCharge: buyerChargeRounded,
+          internalProfit: internalProfit
+        };
+      };
+
+      // 4. Chuẩn hóa mô tả Incoterms 2020 (đặc biệt CFR, CIF, CPT, CIP, Nhóm D) theo giáo trình
+      if (Array.isArray(window.INCOTERMS_2020_MATRIX)) {
+        window.INCOTERMS_2020_MATRIX.forEach(function (row) {
+          if (row.code === "CFR") {
+            row.freightLabel = "Người bán trả cước tới POD";
+            row.insLabel = "Người mua tự mua";
+            row.riskLabel = "Chuyển giao khi hàng lên tàu tại POL";
+            row.includeIns = false;
+          } else if (row.code === "CIF") {
+            row.freightLabel = "Người bán trả cước tới POD";
+            row.insLabel = "Người bán (tối thiểu ICC C · 110%)";
+            row.riskLabel = "Chuyển giao khi hàng lên tàu tại POL";
+            row.includeIns = true;
+          } else if (row.code === "CPT") {
+            row.freightLabel = "Người bán trả cước tới nơi đến";
+            row.insLabel = "Người mua tự mua";
+            row.riskLabel = "Giao cho người chuyên chở đầu tiên";
+            row.includeIns = false;
+          } else if (row.code === "CIP") {
+            row.freightLabel = "Người bán trả cước tới nơi đến";
+            row.insLabel = "Người bán (tối đa ICC A · 110%)";
+            row.riskLabel = "Giao cho người chuyên chở đầu tiên";
+            row.includeIns = true;
+          } else if (row.code === "DAP" || row.code === "DPU" || row.code === "DDP") {
+            row.includeIns = false;
+          }
+        });
+      }
+
+      // 5. Công thức chuẩn Incoterms 2020 & Bảo hiểm Hàng hải ICC 2009:
+      //    R_total = R_base + sum(R_addons) đọc động từ Pricing_Rates (Fee_Category = INSURANCE)
+      //    V = (C + F) * 1.1 / (1 - R_total), I = R_total * V
+      window.getSelectedInsuranceRatePct = function () {
+        if (typeof window.getSelectedInsuranceSelection === "function") {
+          return window.getSelectedInsuranceSelection().totalRatePct;
+        }
+        var sel = document.getElementById("calc-insurance-code");
+        if (!sel) return 0.12;
+        var opt = sel.options[sel.selectedIndex];
+        var dataRate = opt ? opt.getAttribute("data-rate") : "";
+        return dataRate !== null && dataRate !== "" ? safeToNum(dataRate) : 0.12;
+      };
+
+      function getActivePolicyRatePct(targetCode, fallbackPct) {
+        var normTarget = String(targetCode || "").trim().toUpperCase();
+        var rates = (window.APP_DATA && window.APP_DATA.pricingRates) || [];
+        for (var i = 0; i < rates.length; i++) {
+          var r = rates[i] || {};
+          var fc = String(r["Fee_Code"] || "").trim().toUpperCase();
+          if (fc === normTarget) {
+            var rawR = (r["Standard_Rate"] !== undefined && r["Standard_Rate"] !== "") ? r["Standard_Rate"] : r["Standard_Fee"];
+            var rv = safeToNum(rawR);
+            if (rv > 0 && rv < 10) return rv;
+          }
+        }
+        return fallbackPct;
+      }
+
+      function resolveRowInsuranceRateInfo(incCode, selPlanCode, selRatePct, isolateStandardInsurance) {
+        var code = String(incCode || "").trim().toUpperCase();
+        var plan = String(selPlanCode || "").trim().toUpperCase();
+        var rPct = Math.max(0, safeToNum(selRatePct));
+
+        // Bảng So sánh Khung 3: tách biệt hoàn toàn với gói bảo hiểm đang chọn ở Khung 4
+        // CIF dùng chuẩn tối thiểu ICC (C) từ Pricing_Rates (mặc định 0.08%); CIP dùng chuẩn bắt buộc ICC (A) (0.25%)
+        if (isolateStandardInsurance) {
+          if (code === "CIF") {
+            var iccCPct = getActivePolicyRatePct("INS-ICC-C", 0.08);
+            return { rateDec: iccCPct / 100, ratePct: iccCPct, clauseLabel: "ICC C (" + iccCPct.toFixed(2) + "%)" };
+          }
+          if (code === "CIP") {
+            var iccAPct = getActivePolicyRatePct("INS-ICC-A", 0.25);
+            return { rateDec: iccAPct / 100, ratePct: iccAPct, clauseLabel: "ICC A (" + iccAPct.toFixed(2) + "%)" };
+          }
+          return { rateDec: 0, ratePct: 0, clauseLabel: "" };
+        }
+
+        if (code === "CIF" || code === "CIP") {
+          if (typeof window.getSelectedInsuranceSelection === "function") {
+            var selInfo = window.getSelectedInsuranceSelection();
+            if (selInfo.baseCode === "INS-NONE" || selInfo.totalRatePct <= 0) {
+              var defPct = code === "CIP" ? getActivePolicyRatePct("INS-ICC-A", 0.25) : getActivePolicyRatePct("INS-ICC-C", 0.12);
+              return { rateDec: defPct / 100, ratePct: defPct, clauseLabel: (code === "CIP" ? "ICC A" : "ICC C") + " (" + defPct.toFixed(2) + "%)" };
+            }
+            return {
+              rateDec: selInfo.totalRatePct / 100,
+              ratePct: selInfo.totalRatePct,
+              clauseLabel: selInfo.combinedCode + " (" + selInfo.totalRatePct.toFixed(2) + "%)"
+            };
+          }
+          var fbPct = rPct > 0 ? rPct : (code === "CIP" ? 0.25 : 0.12);
+          return { rateDec: fbPct / 100, ratePct: fbPct, clauseLabel: (plan || "INS") + " (" + fbPct.toFixed(2) + "%)" };
+        }
+        return { rateDec: 0, ratePct: 0, clauseLabel: "" };
+      }
+
+      function calcTextbookInsurancePremiumClient(cPlusF, rateDec) {
+        var base = Math.max(0, safeToNum(cPlusF));
+        var r = Math.max(0, Math.min(0.25, safeToNum(rateDec)));
+        if (base <= 0 || r <= 0) return { V: 0, I: 0 };
+        var V = (base * 1.1) / (1 - r);
+        var I = r * V;
+        return {
+          V: Math.round(V * 100) / 100,
+          I: Math.round(I * 100) / 100
+        };
+      }
+
+      function readDomesticTruckingUsd() {
+        var sT = Math.max(0, safeToNum((document.getElementById("calc-self-trucking") || {}).value));
+        var fT = Math.max(0, safeToNum((document.getElementById("calc-fwd-trucking") || {}).value));
+        return Math.round((sT > 0 ? sT : fT) * 100) / 100;
+      }
+
+      window.computeCostComponentsForPricing = function () {
+        var mix = typeof window.getContainerMixState === "function" ? window.getContainerMixState() : { total: 0, hasLcl: false, lclFreight: 0 };
+        var sch = (window.APP_DATA && window.APP_DATA.schedules || []).find(function (s) {
+          return s["Schedule_ID"] === window.SELECTED_SCHEDULE_ID;
+        });
+        var schRes = typeof window.computeScheduleOceanAndMissing === "function"
+          ? window.computeScheduleOceanAndMissing(sch, mix)
+          : { ocean: mix.lclFreight || 0, surcharge: 0, missing: [] };
+        var localTotal = typeof window.computeLocalChargesForMix === "function"
+          ? window.computeLocalChargesForMix(mix, sch)
+          : 0;
+        var customsSplit = typeof window.computeCustomsSplitForPricing === "function"
+          ? window.computeCustomsSplitForPricing()
+          : { customsExportUsd: 0, permitsUsd: 0, customsTotal: 0 };
+        var domesticTrucking = readDomesticTruckingUsd();
+        var goodsCost = Math.max(0, safeToNum((document.getElementById("calc-goods-cost") || {}).value));
+        var packingPalletCost = Math.max(0, safeToNum((document.getElementById("calc-packing-cost") || {}).value));
+        var marginPct = Math.max(0, safeToNum((document.getElementById("calc-margin") || {}).value));
+        var minMarginEl = document.getElementById("calc-min-margin");
+        var minMarginPct = minMarginEl ? Math.max(0, safeToNum(minMarginEl.value)) : 5;
+        var destExtra = Math.max(0, safeToNum((document.getElementById("calc-dest-extra") || {}).value));
+        var importDuty = Math.max(0, safeToNum((document.getElementById("calc-import-duty") || {}).value));
+        var insSel = document.getElementById("calc-insurance-code");
+        var insPlanCode = insSel ? String(insSel.value || "").trim().toUpperCase() : "INS-ICC-C";
+        var selInsRatePct = window.getSelectedInsuranceRatePct();
+
+        return {
+          mix: mix,
+          sch: sch,
+          ocean: Math.round(safeToNum(schRes.ocean) * 100) / 100,
+          surcharge: Math.round(safeToNum(schRes.surcharge) * 100) / 100,
+          localTotal: Math.round(safeToNum(localTotal) * 100) / 100,
+          domesticTrucking: domesticTrucking,
+          customsTotal: Math.round(safeToNum(customsSplit.customsTotal) * 100) / 100,
+          customsExportUsd: Math.round(safeToNum(customsSplit.customsExportUsd) * 100) / 100,
+          permitsUsd: Math.round(safeToNum(customsSplit.permitsUsd) * 100) / 100,
+          goodsCost: Math.round(goodsCost * 100) / 100,
+          packingPalletCost: Math.round(packingPalletCost * 100) / 100,
+          marginPct: marginPct,
+          minMarginPct: minMarginPct,
+          destExtra: Math.round(destExtra * 100) / 100,
+          importDuty: Math.round(importDuty * 100) / 100,
+          insPlanCode: insPlanCode,
+          selInsRatePct: selInsRatePct
+        };
+      };
+
+      window.computeIncotermPriceBreakdown = function (incCode, comp, overrideMarginPct, manualInsOverride, isolateStandardInsurance) {
+        var code = String(incCode || "CIF").trim().toUpperCase();
+        var mPct = (overrideMarginPct !== undefined && overrideMarginPct !== null) ? Math.max(0, safeToNum(overrideMarginPct)) : comp.marginPct;
+        var goodsAndPack = Math.round((comp.goodsCost + comp.packingPalletCost) * 100) / 100;
+        var exwVal = Math.round((goodsAndPack * (1 + mPct / 100)) * 100) / 100;
+        var fobAddOns = Math.round((comp.domesticTrucking + comp.localTotal + comp.customsTotal) * 100) / 100;
+        var mainFreight = Math.round((comp.ocean + comp.surcharge) * 100) / 100;
+
+        if (code === "EXW") {
+          return {
+            code: code, exwVal: exwVal, fobAddOns: 0, mainFreight: 0, destCharges: 0,
+            appliedFees: 0, insurance: 0, insuredValue: 0, insClauseLabel: "", total: exwVal
+          };
+        }
+        if (code === "FCA" || code === "FAS" || code === "FOB") {
+          var fobTot = Math.round((exwVal + fobAddOns) * 100) / 100;
+          return {
+            code: code, exwVal: exwVal, fobAddOns: fobAddOns, mainFreight: 0, destCharges: 0,
+            appliedFees: fobAddOns, insurance: 0, insuredValue: 0, insClauseLabel: "", total: fobTot
+          };
+        }
+        if (code === "CFR" || code === "CPT") {
+          var cfrTot = Math.round((exwVal + fobAddOns + mainFreight) * 100) / 100;
+          return {
+            code: code, exwVal: exwVal, fobAddOns: fobAddOns, mainFreight: mainFreight, destCharges: 0,
+            appliedFees: Math.round((fobAddOns + mainFreight) * 100) / 100,
+            insurance: 0, insuredValue: 0, insClauseLabel: "", total: cfrTot
+          };
+        }
+        if (code === "CIF" || code === "CIP") {
+          var cPlusF = Math.round((exwVal + fobAddOns + mainFreight) * 100) / 100;
+          var rateInfo = resolveRowInsuranceRateInfo(code, comp.insPlanCode, comp.selInsRatePct, Boolean(isolateStandardInsurance));
+          var insCalc = calcTextbookInsurancePremiumClient(cPlusF, rateInfo.rateDec);
+          var insAmt = (manualInsOverride !== undefined && manualInsOverride !== null && manualInsOverride >= 0)
+            ? Math.round(manualInsOverride * 100) / 100
+            : insCalc.I;
+          var cifTot = Math.round((cPlusF + insAmt) * 100) / 100;
+          return {
+            code: code, exwVal: exwVal, fobAddOns: fobAddOns, mainFreight: mainFreight, destCharges: 0,
+            appliedFees: Math.round((fobAddOns + mainFreight) * 100) / 100,
+            insurance: insAmt, insuredValue: insCalc.V, insClauseLabel: rateInfo.clauseLabel, total: cifTot
+          };
+        }
+        // DAP, DPU, DDP: CFR/CPT + Destination Delivery Charges (+ Import Duty for DDP)
+        var destAmt = Math.round((comp.destExtra + (code === "DDP" ? comp.importDuty : 0)) * 100) / 100;
+        var grpDApplied = Math.round((fobAddOns + mainFreight + destAmt) * 100) / 100;
+        var grpDTot = Math.round((exwVal + grpDApplied) * 100) / 100;
+        return {
+          code: code, exwVal: exwVal, fobAddOns: fobAddOns, mainFreight: mainFreight, destCharges: destAmt,
+          appliedFees: grpDApplied, insurance: 0, insuredValue: 0, insClauseLabel: "", total: grpDTot
+        };
+      };
+
+      window.renderIncotermComparisonTable = function () {
+        var khung3 = document.getElementById("pricing-khung-3");
+        var tbody = document.getElementById("incoterm-compare-tbody");
+        var countEl = document.getElementById("pricing-khung-3-count");
+        var optBanner = document.getElementById("pricing-optimal-banner");
+        var optCodeEl = document.getElementById("pricing-optimal-code");
+        var optReasonEl = document.getElementById("pricing-optimal-reason");
+
+        var selectedCodes = typeof window.getSelectedProposedIncoterms === "function" ? window.getSelectedProposedIncoterms() : [];
+        if (typeof window.renderKhung4IncotermPills === "function") window.renderKhung4IncotermPills(selectedCodes);
+
+        if (selectedCodes.length < 2) {
+          if (khung3) khung3.classList.add("hidden");
+          window.CURRENT_OPTIMAL_INCOTERM = "";
+          if (optBanner) optBanner.classList.add("hidden");
+          return;
+        }
+
+        if (khung3) khung3.classList.remove("hidden");
+        if (countEl) countEl.textContent = selectedCodes.length + " điều kiện";
+        if (!tbody || !Array.isArray(window.INCOTERMS_2020_MATRIX)) return;
+
+        var currentRec = String((document.getElementById("calc-rec-incoterm") || {}).value || "").toUpperCase();
+        var comp = window.computeCostComponentsForPricing();
+
+        var rows = window.INCOTERMS_2020_MATRIX.filter(function (row) {
+          return selectedCodes.indexOf(row.code) !== -1;
+        });
+
+        var optimal = typeof window.resolveOptimalIncotermPick === "function"
+          ? window.resolveOptimalIncotermPick(rows.map(function (r) { return r.code; }))
+          : null;
+        window.CURRENT_OPTIMAL_INCOTERM = optimal ? optimal.code : "";
+        if (optBanner && optCodeEl && optReasonEl) {
+          if (optimal) {
+            optCodeEl.textContent = optimal.code;
+            optReasonEl.textContent = "— " + optimal.reason;
+            optBanner.classList.remove("hidden");
+          } else {
+            optBanner.classList.add("hidden");
+          }
+        }
+
+        tbody.innerHTML = rows.map(function (row) {
+          var bd = window.computeIncotermPriceBreakdown(row.code, comp, null, null, true);
+          var isActive = currentRec === row.code;
+          var isBest = optimal && optimal.code === row.code;
+
+          var evalBadge = isBest
+            ? '<span class="incoterm-eval-badge bg-[#f4d98a] text-[#07281c] border border-[#186635]">★ Đề xuất tối ưu</span>'
+            : (isActive
+              ? (typeof window.renderStatusBadge === "function" ? window.renderStatusBadge("Đang chốt K4", "success") : "Đang chốt K4")
+              : (typeof window.renderStatusBadge === "function" ? window.renderStatusBadge("So sánh", "neutral") : "So sánh"));
+
+          var rowCls = isBest
+            ? "bg-[#f4d98a]/35 font-semibold"
+            : (isActive ? "bg-[#aed6c6] font-semibold" : "");
+
+          var insSubTag = bd.insClauseLabel
+            ? '<div class="text-[10px] text-[#0f4a33] font-sans font-bold">' + bd.insClauseLabel + '</div>'
+            : '';
+
+          return '<tr class="' + rowCls + '">' +
+            '<td class="py-2.5 px-2.5 font-mono font-bold text-[#0b2418] whitespace-nowrap">' + row.code + '</td>' +
+            '<td class="py-2.5 px-2.5 text-[#0b2418]">' + row.freightLabel + '</td>' +
+            '<td class="py-2.5 px-2.5 text-[#0b2418]">' + row.insLabel + '</td>' +
+            '<td class="py-2.5 px-2.5 text-[#1e4231]">' + row.riskLabel + '</td>' +
+            '<td class="py-2.5 px-2.5 text-right font-mono tabular-nums whitespace-nowrap text-[#0b2418]">' + safeFmtUsd(bd.exwVal) + '</td>' +
+            '<td class="py-2.5 px-2.5 text-right font-mono tabular-nums whitespace-nowrap text-[#0b2418]">' + safeFmtUsd(bd.appliedFees) + '</td>' +
+            '<td class="py-2.5 px-2.5 text-right font-mono tabular-nums whitespace-nowrap text-[#0b2418]">' +
+              '<div>' + safeFmtUsd(bd.insurance) + '</div>' + insSubTag +
+            '</td>' +
+            '<td class="py-2.5 px-2.5 text-right font-mono font-bold text-[#07281c] tabular-nums whitespace-nowrap">' + safeFmtUsd(bd.total) + '</td>' +
+            '<td class="py-2.5 px-1.5 text-center">' + evalBadge + '</td>' +
+            '<td class="py-2.5 px-2 text-center whitespace-nowrap">' +
+              '<button type="button" onclick="selectIncotermFromMatrix(\'' + row.code + '\')" class="incoterm-action-btn transition-colors ' +
+                (isActive ? 'bg-[#0f4a33] text-[#fff5d6] border border-[#186635]' : 'bg-[#aed6c6] border-[1.5px] border-[#186635] text-[#0b2418] hover:bg-[#f4d98a]') + '">' +
+                (isActive ? 'Đang chọn' : 'Áp dụng') +
+              '</button>' +
+            '</td>' +
+          '</tr>';
+        }).join("");
+      };
+
+      window.onInsurancePlanChange = function () {
+        var chkIns = document.getElementById("chk-include-insurance");
+        var sel = document.getElementById("calc-insurance-code");
+        var insEl = document.getElementById("calc-insurance");
+        if (insEl) insEl.setAttribute("data-manual-ins", "0");
+        if (sel && sel.value === "INS-NONE") {
+          if (chkIns) chkIns.checked = false;
+          if (insEl) insEl.value = "0.00";
+        } else {
+          if (chkIns) chkIns.checked = true;
+        }
+        if (typeof window.updateInsuranceClausePreviewUi === "function") {
+          window.updateInsuranceClausePreviewUi();
+        }
+        if (sel && sel.value !== "INS-NONE") {
+          var comp = window.computeCostComponentsForPricing();
+          var inc = String((document.getElementById("calc-rec-incoterm") || {}).value || "CIF").trim().toUpperCase();
+          var bd = window.computeIncotermPriceBreakdown((inc === "CIF" || inc === "CIP") ? inc : "CIF", comp);
+          if (insEl) insEl.value = bd.insurance.toFixed(2);
+        }
+        window.recalculatePricing();
+      };
+
+      window.onInsuranceAddonChange = function () {
+        var insEl = document.getElementById("calc-insurance");
+        if (insEl) insEl.setAttribute("data-manual-ins", "0");
+        if (typeof window.updateInsuranceClausePreviewUi === "function") {
+          window.updateInsuranceClausePreviewUi();
+        }
+        var comp = window.computeCostComponentsForPricing();
+        var inc = String((document.getElementById("calc-rec-incoterm") || {}).value || "CIF").trim().toUpperCase();
+        var bd = window.computeIncotermPriceBreakdown((inc === "CIF" || inc === "CIP") ? inc : "CIF", comp);
+        if (insEl) insEl.value = bd.insurance.toFixed(2);
+        window.recalculatePricing();
+      };
+
+      window.onIncotermSelectionChange = function () {
+        var inc = String((document.getElementById("calc-rec-incoterm") || {}).value || "CIF").trim().toUpperCase();
+        var chkFreight = document.getElementById("chk-include-freight");
+        var chkIns = document.getElementById("chk-include-insurance");
+        var insSel = document.getElementById("calc-insurance-code");
+        var insEl = document.getElementById("calc-insurance");
+        if (insEl) insEl.setAttribute("data-manual-ins", "0");
+
+        var isFreightInc = (inc === "CFR" || inc === "CPT" || inc === "CIF" || inc === "CIP" || inc === "DAP" || inc === "DPU" || inc === "DDP");
+        var isInsInc = (inc === "CIF" || inc === "CIP");
+        if (chkFreight) chkFreight.checked = isFreightInc;
+        if (chkIns) chkIns.checked = isInsInc;
+
+        if (!isInsInc) {
+          if (typeof window.applyInsuranceSelectionToForm === "function") {
+            window.applyInsuranceSelectionToForm("INS-NONE", [], false);
+          } else if (insSel) {
+            insSel.value = "INS-NONE";
+          }
+          if (insEl) insEl.value = "0.00";
+        } else {
+          var curVal = insSel ? String(insSel.value || "").trim().toUpperCase() : "";
+          var needAutoPick = (!curVal || curVal === "INS-NONE" || (inc === "CIP" && curVal !== "INS-ICC-A" && curVal !== "INS-FRZ-A"));
+          if (needAutoPick && typeof window.resolveCargoInsuranceRecommendation === "function" && typeof window.applyInsuranceSelectionToForm === "function") {
+            var recIns = window.resolveCargoInsuranceRecommendation(inc);
+            window.applyInsuranceSelectionToForm(recIns.baseCode, recIns.addonCodes, false);
+          } else if (typeof window.updateInsuranceClausePreviewUi === "function") {
+            window.updateInsuranceClausePreviewUi();
+          }
+          var comp = window.computeCostComponentsForPricing();
+          var bd = window.computeIncotermPriceBreakdown(inc, comp);
+          if (insEl) insEl.value = bd.insurance.toFixed(2);
+        }
+        if (insSel && typeof window.syncSearchableCombo === "function") {
+          window.syncSearchableCombo(insSel, true);
+        }
+        if (typeof window.renderKhung4IncotermPills === "function") {
+          window.renderKhung4IncotermPills(typeof window.getSelectedProposedIncoterms === "function" ? window.getSelectedProposedIncoterms() : []);
+        }
+        window.recalculatePricing(true);
+      };
+
+      window.recalculatePricing = function (syncFloorAuto) {
+        if (typeof window.autoCalculateWeightCbmAndFreightBasis === "function") {
+          window.autoCalculateWeightCbmAndFreightBasis(false);
+        }
+        if (typeof window.updateContainerMixBadge === "function") window.updateContainerMixBadge();
+        var comp = window.computeCostComponentsForPricing();
+        var incoterm = String((document.getElementById("calc-rec-incoterm") || {}).value || "CIF").trim().toUpperCase();
+        var includeFreightEl = document.getElementById("chk-include-freight");
+        var includeInsEl = document.getElementById("chk-include-insurance");
+        var includeFreight = includeFreightEl ? includeFreightEl.checked : false;
+        var includeInsurance = includeInsEl ? includeInsEl.checked : false;
+
+        var effOcean = includeFreight ? comp.ocean : 0;
+        var effSurcharge = includeFreight ? comp.surcharge : 0;
+        var localTotal = incoterm !== "EXW" ? comp.localTotal : 0;
+        var domesticTruck = incoterm !== "EXW" ? comp.domesticTrucking : 0;
+        var customsExportUsd = incoterm !== "EXW" ? comp.customsExportUsd : 0;
+        var permitsUsd = incoterm !== "EXW" ? comp.permitsUsd : 0;
+        var customsTotal = customsExportUsd + permitsUsd;
+        var isDestTerm = (incoterm === "DAP" || incoterm === "DPU" || incoterm === "DDP");
+        var destExtra = isDestTerm ? (comp.destExtra + (incoterm === "DDP" ? comp.importDuty : 0)) : 0;
+
+        var effComp = Object.assign({}, comp, {
+          ocean: effOcean,
+          surcharge: effSurcharge
+        });
+
+        var insEl = document.getElementById("calc-insurance");
+        var isManualIns = insEl && insEl.getAttribute("data-manual-ins") === "1";
+        var manualInsVal = isManualIns ? Math.max(0, safeToNum(insEl.value)) : null;
+
+        var activeBd = window.computeIncotermPriceBreakdown(incoterm, effComp, comp.marginPct, includeInsurance ? manualInsVal : 0);
+        var insurance = includeInsurance ? activeBd.insurance : 0;
+        if (insEl && !isManualIns) {
+          insEl.value = includeInsurance ? insurance.toFixed(2) : "0.00";
+        }
+        var totalFreightLocal = Math.round((effOcean + effSurcharge + localTotal + domesticTruck + customsTotal + destExtra) * 100) / 100;
+        var finalSelling = Math.round((activeBd.exwVal + totalFreightLocal + insurance) * 100) / 100;
+
+        var floorBd = window.computeIncotermPriceBreakdown(incoterm, effComp, comp.minMarginPct, includeInsurance ? null : 0);
+        var computedFloor = Math.round((floorBd.exwVal + totalFreightLocal + (includeInsurance ? floorBd.insurance : 0)) * 100) / 100;
+
+        var floorEl = document.getElementById("calc-floor-price");
+        if (floorEl && (syncFloorAuto || floorEl.getAttribute("data-manual-floor") !== "1" || safeToNum(floorEl.value) <= 0)) {
+          floorEl.value = (comp.goodsCost + comp.packingPalletCost) > 0 ? computedFloor.toFixed(2) : "";
+        }
+        var activeFloorPrice = floorEl ? safeToNum(floorEl.value) : computedFloor;
+
+        // 4 mức giá Incoterms chuẩn theo công thức giáo trình (EXW, FOB, CFR, CIF)
+        var exwRef = window.computeIncotermPriceBreakdown("EXW", comp).total;
+        var fobRef = window.computeIncotermPriceBreakdown("FOB", comp).total;
+        var cfrRef = window.computeIncotermPriceBreakdown("CFR", comp).total;
+        var cifRef = window.computeIncotermPriceBreakdown("CIF", comp).total;
+
+        var rExwEl = document.getElementById("ref-price-exw");
+        var rFobEl = document.getElementById("ref-price-fob");
+        var rCfrEl = document.getElementById("ref-price-cfr");
+        var rCifEl = document.getElementById("ref-price-cif");
+        if (rExwEl) rExwEl.textContent = "$" + (typeof window.fmtNumber === "function" ? window.fmtNumber(Math.round(exwRef)) : Math.round(exwRef));
+        if (rFobEl) rFobEl.textContent = "$" + (typeof window.fmtNumber === "function" ? window.fmtNumber(Math.round(fobRef)) : Math.round(fobRef));
+        if (rCfrEl) rCfrEl.textContent = "$" + (typeof window.fmtNumber === "function" ? window.fmtNumber(Math.round(cfrRef)) : Math.round(cfrRef));
+        if (rCifEl) rCifEl.textContent = "$" + (typeof window.fmtNumber === "function" ? window.fmtNumber(Math.round(cifRef)) : Math.round(cifRef));
+
+        var elBo = document.getElementById("break-ocean");
+        var elBs = document.getElementById("break-surcharge");
+        var elBl = document.getElementById("break-local");
+        var elBc = document.getElementById("break-customs");
+        var elBp = document.getElementById("break-packing");
+        var elBd = document.getElementById("break-dest-extra");
+        var elBt = document.getElementById("break-total-freight");
+        var elFp = document.getElementById("calc-final-price");
+        if (elBo) elBo.textContent = safeFmtUsd(effOcean);
+        if (elBs) elBs.textContent = safeFmtUsd(effSurcharge);
+        if (elBl) elBl.textContent = safeFmtUsd(localTotal + domesticTruck);
+        if (elBc) elBc.textContent = safeFmtUsd(customsTotal);
+        if (elBp) elBp.textContent = safeFmtUsd(comp.packingPalletCost);
+        if (elBd) elBd.textContent = safeFmtUsd(destExtra);
+        if (elBt) elBt.textContent = safeFmtUsd(totalFreightLocal);
+        if (elFp) elFp.textContent = safeFmtUsd(finalSelling);
+
+        var fwdSummary = window.computeFwdInternalSummary(comp.mix, effOcean, effSurcharge, localTotal, customsExportUsd, permitsUsd, totalFreightLocal);
+
+        var orderId = String((document.getElementById("calc-order-id") || {}).value || "").trim();
+        var inq = (window.APP_DATA && window.APP_DATA.inquiries || []).find(function (i) {
+          return String(i["Order_ID"] || "").trim() === orderId;
+        });
+        var itemsWeightSum = (window.PRICING_ITEMS_STATE || []).reduce(function (sum, it) {
+          return sum + safeToNum(it.weight);
+        }, 0);
+        var nw = itemsWeightSum > 0
+          ? itemsWeightSum
+          : (inq ? (safeToNum(inq["Total_Weight_KG"]) || safeToNum(inq["Net_Weight_KGs"])) : 0);
+        var unitEl = document.getElementById("calc-unit-selling");
+        if (unitEl) {
+          unitEl.textContent = nw > 0 ? "Đơn giá: " + safeFmtUsd(finalSelling / nw) + " / KG" : ("Đơn giá: " + safeFmtUsd(0) + " / KG");
+        }
+
+        window.renderIncotermComparisonTable();
+
+        return {
+          totalFreightLocal: totalFreightLocal,
+          packingPalletCost: comp.packingPalletCost,
+          insurance: insurance,
+          goodsCost: comp.goodsCost,
+          finalSelling: finalSelling,
+          floorPrice: activeFloorPrice,
+          minMarginPct: comp.minMarginPct,
+          exwPrice: Number(exwRef.toFixed(2)),
+          fobPrice: Number(fobRef.toFixed(2)),
+          cfrPrice: Number(cfrRef.toFixed(2)),
+          cifPrice: Number(cifRef.toFixed(2)),
+          fwdSummary: fwdSummary,
+          mix: comp.mix
+        };
+      };
+
+      // 6. Tối ưu tốc độ Chatbot AI (<2s): Truyền toàn bộ ngữ cảnh đơn hàng & bảng giá so sánh trực tiếp từ RAM
+      window.askGasAiIncoterms = function (autoApplySelection) {
+        if (window.AI_IS_LOADING) return;
+        var orderId = String((document.getElementById("calc-order-id") || {}).value || "").trim();
+        var errEl = document.getElementById("ai-chat-error");
+        var inputEl = document.getElementById("ai-chat-input");
+        var analyzeBtn = document.getElementById("btn-ai-analyze-order");
+        var sendBtn = document.getElementById("btn-ai-send-chat");
+        var question = (!autoApplySelection && inputEl) ? String(inputEl.value || "").trim() : "";
+
+        if (!orderId) {
+          if (errEl) {
+            errEl.textContent = "Vui lòng chọn đơn hàng ở Khung 1 trước khi nhờ Trợ lý AI phân tích.";
+            errEl.classList.remove("hidden");
+          }
+          return;
+        }
+        if (!autoApplySelection && !question) return;
+
+        var inq = (window.APP_DATA && window.APP_DATA.inquiries || []).find(function (i) { return i["Order_ID"] === orderId; });
+        var cus = inq ? (window.APP_DATA && window.APP_DATA.consignees || []).find(function (c) { return c["Consignee_ID"] === inq["Consignee_ID"]; }) : null;
+        var sch = (window.APP_DATA && window.APP_DATA.schedules || []).find(function (s) { return s["Schedule_ID"] === window.SELECTED_SCHEDULE_ID; });
+        var comp = window.computeCostComponentsForPricing();
+        var mix = comp.mix || {};
+        var countryVal = (document.getElementById("calc-country") || {}).value || (cus ? cus["Country"] : "") || "";
+        var podVal = (document.getElementById("calc-pod") || {}).value || (sch ? sch["POD"] : "") || "";
+        var selInc = String((document.getElementById("calc-rec-incoterm") || {}).value || "").trim().toUpperCase();
+        var proposedInc = typeof window.getSelectedProposedIncoterms === "function" ? window.getSelectedProposedIncoterms() : [];
+
+        var dryKg = 0;
+        var reeferKg = 0;
+        (window.PRICING_ITEMS_STATE || []).forEach(function (it) {
+          var isRf = typeof window.isReeferProduct === "function" && typeof window.getProductBySku === "function"
+            ? window.isReeferProduct(window.getProductBySku(it.sku), it.name)
+            : false;
+          if (isRf) reeferKg += safeToNum(it.weight);
+          else dryKg += safeToNum(it.weight);
+        });
+
+        var priceSnapshot = {
+          EXW: window.computeIncotermPriceBreakdown("EXW", comp).total,
+          FOB: window.computeIncotermPriceBreakdown("FOB", comp).total,
+          CFR: window.computeIncotermPriceBreakdown("CFR", comp).total,
+          CIF: window.computeIncotermPriceBreakdown("CIF", comp).total,
+          CPT: window.computeIncotermPriceBreakdown("CPT", comp).total,
+          CIP: window.computeIncotermPriceBreakdown("CIP", comp).total,
+          DAP: window.computeIncotermPriceBreakdown("DAP", comp).total,
+          DDP: window.computeIncotermPriceBreakdown("DDP", comp).total
+        };
+
+        var userText = question || ("Phân tích đơn " + orderId + " (" + (cus ? cus["Consignee_Name"] : "") + " · " + (countryVal || "-") + ") và so sánh các Incoterms cùng nhóm tối ưu nhất.");
+        var priorHistory = (window.AI_CHAT_MESSAGES || []).slice(-6).map(function (m) { return { role: m.role, text: m.text }; });
+        if (!Array.isArray(window.AI_CHAT_MESSAGES)) window.AI_CHAT_MESSAGES = [];
+        window.AI_CHAT_MESSAGES.push({ role: "user", text: userText });
+        if (inputEl && !autoApplySelection) inputEl.value = "";
+        if (errEl) { errEl.textContent = ""; errEl.classList.add("hidden"); }
+        if (typeof window.renderAiChatFeed === "function") window.renderAiChatFeed();
+
+        window.AI_IS_LOADING = true;
+        if (typeof window.setButtonLoading === "function") {
+          window.setButtonLoading(analyzeBtn, true, "AI đang phân tích...");
+          window.setButtonLoading(sendBtn, true, "Đang hỏi...");
+        }
+        if (typeof window.startTopProgress === "function") window.startTopProgress();
+
+        var podLow = String(podVal || "").trim().toLowerCase();
+        var ramSchedules = (window.APP_DATA && window.APP_DATA.schedules || []).filter(function (s) {
+          return !podLow || String(s["POD"] || "").toLowerCase().indexOf(podLow) !== -1;
+        }).slice(0, 4);
+
+        var insCatalog = typeof window.getInsuranceCatalogFromRates === "function"
+          ? window.getInsuranceCatalogFromRates().all
+          : [];
+        var insSelInfo = typeof window.getSelectedInsuranceSelection === "function"
+          ? window.getSelectedInsuranceSelection()
+          : { combinedCode: comp.insPlanCode };
+
+        var payload = {
+          orderId: orderId,
+          skipSheetRead: true,
+          question: question,
+          chatHistory: priorHistory,
+          handbookRows: (window.APP_DATA && window.APP_DATA.incoterms || []).slice(0, 11),
+          matchingSchedules: ramSchedules,
+          insuranceRates: insCatalog,
+          orderContext: {
+            Order_ID: orderId,
+            Customer: cus ? cus["Consignee_Name"] : (inq ? inq["Consignee_ID"] : ""),
+            Country: countryVal,
+            POL: sch ? (sch["POL"] || "Cat Lai Port, Vietnam") : "Cat Lai Port, Vietnam",
+            POD: podVal,
+            Shipping_Schedule: sch ? (sch["Schedule_ID"] + " (" + sch["Shipping_Line"] + " · " + sch["POL"] + " -> " + sch["POD"] + ", ETD " + (sch["ETD"] || "") + ", ETA " + (sch["ETA"] || "") + ")") : "Chưa chốt tuyến tàu",
+            Items: (window.PRICING_ITEMS_STATE || []).map(function (it) {
+              return (it.name || it.sku) + " (" + it.weight + " KG" + (it.packingName ? (" · " + it.packingName) : "") + ")";
+            }),
+            Dry_Weight_KG: dryKg,
+            Reefer_Weight_KG: reeferKg,
+            Total_Gross_Weight_KG: (document.getElementById("calc-total-gw") || {}).textContent || "",
+            Total_CBM: (document.getElementById("calc-total-cbm") || {}).textContent || "",
+            Container_Mix: mix.summaryStr || "Chưa phân bổ",
+            Payment_Terms: inq ? (inq["Phương thức thanh toán đề xuất"] || "") : "",
+            Requested_Incoterm: inq ? (inq["Incoterm mong muốn"] || "") : "",
+            Selected_Incoterm: selInc,
+            Proposed_Incoterms: proposedInc.join(", "),
+            Insurance_Code: insSelInfo.combinedCode,
+            Goods_And_Packing_USD: Number((comp.goodsCost + comp.packingPalletCost).toFixed(2)),
+            Domestic_Trucking_USD: comp.domesticTrucking,
+            Export_Local_And_Customs_USD: Number((comp.localTotal + comp.customsTotal).toFixed(2)),
+            Ocean_Freight_And_Surcharges_USD: Number((comp.ocean + comp.surcharge).toFixed(2)),
+            Incoterm_Price_Snapshot_USD: priceSnapshot,
+            Note: inq ? String(inq["Note"] || "").slice(0, 200) : ""
+          }
+        };
+
+        google.script.run
+          .withSuccessHandler(function (res) {
+            if (typeof window.stopTopProgress === "function") window.stopTopProgress();
+            window.AI_IS_LOADING = false;
+            if (typeof window.setButtonLoading === "function") {
+              window.setButtonLoading(analyzeBtn, false);
+              window.setButtonLoading(sendBtn, false);
+            }
+            if (!res || res.success === false) {
+              if (errEl) {
+                errEl.textContent = (res && res.message) ? res.message : "Không thể kết nối Gemini AI Advisor.";
+                errEl.classList.remove("hidden");
+              }
+              return;
+            }
+            var recList = Array.isArray(res.recommendedIncoterms) ? res.recommendedIncoterms : [];
+            var best = String(res.bestIncoterm || recList[0] || "").toUpperCase();
+            var recInsCode = String(res.recommendedInsuranceCode || "").trim().toUpperCase();
+            var recInsAddons = Array.isArray(res.recommendedInsuranceAddons) ? res.recommendedInsuranceAddons : [];
+            if (best) window.AI_BEST_TERM = best;
+            if (res.reason) window.AI_BEST_REASON = res.reason;
+            window.AI_CHAT_MESSAGES.push({
+              role: "assistant",
+              text: res.replyText || "Đã hoàn tất phân tích đơn hàng.",
+              recommendedIncoterms: recList,
+              bestIncoterm: best,
+              reason: res.reason || "",
+              recommendedInsuranceCode: recInsCode,
+              recommendedInsuranceAddons: recInsAddons,
+              insuranceReason: res.insuranceReason || ""
+            });
+            if (typeof window.renderAiChatFeed === "function") window.renderAiChatFeed();
+            if (autoApplySelection && recList.length > 0 && typeof window.applyGasAiRecommendations === "function") {
+              window.applyGasAiRecommendations(recList.join(","), best, recInsCode, recInsAddons.join(","));
+            } else {
+              window.renderIncotermComparisonTable();
+            }
+          })
+          .withFailureHandler(function (err) {
+            if (typeof window.stopTopProgress === "function") window.stopTopProgress();
+            window.AI_IS_LOADING = false;
+            if (typeof window.setButtonLoading === "function") {
+              window.setButtonLoading(analyzeBtn, false);
+              window.setButtonLoading(sendBtn, false);
+            }
+            if (errEl) {
+              errEl.textContent = (err && err.message) ? err.message : "Lỗi gọi Gemini AI từ Google Apps Script.";
+              errEl.classList.remove("hidden");
+            }
+          })
+          .adviseIncotermsWithAI(payload);
+      };
+
+      // 7. Tự động tính Gross Weight / CBM / W/M khi đổi đơn hàng hoặc tùy chọn Pallet & khôi phục trạng thái khóa chéo Self/FWD
+      var origOnCalcOrderPalletChange = window.onCalcOrderPalletChange;
+      if (typeof origOnCalcOrderPalletChange === "function") {
+        window.onCalcOrderPalletChange = function () {
+          origOnCalcOrderPalletChange.apply(this, arguments);
+          window.autoCalculateWeightCbmAndFreightBasis(true);
+          window.recalculatePricing();
+        };
+      }
+
+      var origOnPricingOrderChange = window.onPricingOrderChange;
+      if (typeof origOnPricingOrderChange === "function") {
+        window.onPricingOrderChange = function () {
+          resetInternalCostTouches();
+          INTERNAL_COST_ROWS.forEach(function (cfg) {
+            var chkEl = document.getElementById(cfg.chkId);
+            var sEl = document.getElementById(cfg.selfId);
+            var fEl = document.getElementById(cfg.fwdId);
+            if (chkEl) { chkEl.checked = false; chkEl.disabled = false; }
+            if (sEl) sEl.value = "";
+            if (fEl) {
+              fEl.value = "";
+              fEl.disabled = false;
+              fEl.classList.remove("bg-[#809c8f]", "text-[#1e4231]/60", "cursor-not-allowed");
+            }
+          });
+          var dutyEl = document.getElementById("calc-import-duty");
+          if (dutyEl) dutyEl.value = "";
+          var insEl = document.getElementById("calc-insurance");
+          if (insEl) insEl.setAttribute("data-manual-ins", "0");
+
+          if (typeof window.renderInsuranceControlsFromRates === "function") {
+            window.renderInsuranceControlsFromRates();
+          }
+
+          origOnPricingOrderChange.apply(this, arguments);
+          window.autoCalculateWeightCbmAndFreightBasis(true);
+
+          var oid = String((document.getElementById("calc-order-id") || {}).value || "").trim().toUpperCase();
+          var prop = (window.APP_DATA && window.APP_DATA.proposals || []).slice().reverse().find(function (p) {
+            return String(p["Order ID"] || p["Order_ID"] || "").trim().toUpperCase() === oid;
+          });
+          if (prop) {
+            if (prop["Insurance_Code"] && typeof window.parseInsuranceCodeString === "function" && typeof window.applyInsuranceSelectionToForm === "function") {
+              var parsedIns = window.parseInsuranceCodeString(prop["Insurance_Code"]);
+              window.applyInsuranceSelectionToForm(parsedIns.baseCode, parsedIns.addonCodes, false);
+            }
+            var pairs = [
+              { cfg: INTERNAL_COST_ROWS[0], sVal: safeToNum(prop["Self_Ocean_CFS_USD"]), fVal: safeToNum(prop["FWD_Ocean_CFS_USD"]) },
+              { cfg: INTERNAL_COST_ROWS[1], sVal: safeToNum(prop["Self_Trucking_USD"]), fVal: safeToNum(prop["FWD_Trucking_USD"]) },
+              { cfg: INTERNAL_COST_ROWS[2], sVal: safeToNum(prop["Self_Customs_USD"]), fVal: safeToNum(prop["FWD_Customs_USD"]) },
+              { cfg: INTERNAL_COST_ROWS[3], sVal: safeToNum(prop["Self_Permits_USD"]), fVal: safeToNum(prop["FWD_Permits_USD"]) }
+            ];
+            pairs.forEach(function (item) {
+              var chkEl = document.getElementById(item.cfg.chkId);
+              var sDom = document.getElementById(item.cfg.selfId);
+              var fDom = document.getElementById(item.cfg.fwdId);
+              if (item.fVal > 0) {
+                if (fDom) fDom.value = item.fVal.toFixed(2);
+                if (chkEl) chkEl.checked = false;
+                if (sDom) sDom.value = "";
+                touchedRows[item.cfg.key] = true;
+              } else if (item.sVal > 0) {
+                if (chkEl) chkEl.checked = true;
+                if (sDom) sDom.value = item.sVal.toFixed(2);
+                if (fDom) fDom.value = "";
+                touchedRows[item.cfg.key] = true;
+              }
+              applyRowCrossLockVisual(item.cfg);
+            });
+          } else if (typeof window.resolveCargoInsuranceRecommendation === "function" && typeof window.applyInsuranceSelectionToForm === "function") {
+            var curInc = String((document.getElementById("calc-rec-incoterm") || {}).value || "").trim().toUpperCase();
+            var cargoRec = window.resolveCargoInsuranceRecommendation(curInc);
+            window.applyInsuranceSelectionToForm(cargoRec.baseCode, cargoRec.addonCodes, false);
+          }
+          window.recalculatePricing();
+        };
+      }
+      if (typeof window.renderInsuranceControlsFromRates === "function") {
+        window.renderInsuranceControlsFromRates();
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", initPricingOverrides);
+    window.addEventListener("load", initPricingOverrides);
+  })();
+</script>
+
