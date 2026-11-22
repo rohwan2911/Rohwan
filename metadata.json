@@ -1,0 +1,8 @@
+{
+  "name": "GREEN AGRI-EXPORTS — Nông Sản Xanh",
+  "description": "Hệ thống Quản lý Xuất khẩu Nông sản: Sales CRM, Bảng tính giá XNK (FCL/LCL & Incoterms 2020), Hợp đồng Ngoại thương & Bộ chứng từ Xuất khẩu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
