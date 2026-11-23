@@ -1,5 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { X, Printer, Mail, SlidersHorizontal, AlertTriangle, CheckCircle2, Clock, Copy, Send } from 'lucide-react';
+import {
+  X,
+  Printer,
+  Mail,
+  SlidersHorizontal,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Copy,
+  Send,
+  Loader2,
+  FileDown,
+  Save,
+  PenLine,
+  ListChecks,
+} from 'lucide-react';
 import type {
   AppDataState,
   OrderLogisticsMeta,
@@ -10,11 +25,11 @@ import {
   computeFloorPriceScaled,
   fmtNumber,
   fmtUSD,
-  getOrderStage6Number,
   INCOTERMS_2020_MATRIX,
   parseOrderItems,
   toNum,
   WORKFLOW_6_STAGES,
+  getOrderStage6Number,
 } from '../utils/calculations';
 import {
   buildExportEmailHtml,
@@ -24,6 +39,19 @@ import {
   generateExportDocumentHtml,
   generateQuotationDocHtml,
 } from '../utils/documentHtml';
+import {
+  buildTemplateFieldContext,
+  extractPlaceholdersFromDocx,
+  renderDocxAndPreviewHtml,
+  selectMatchingTemplates,
+  TemplateFieldDescriptor,
+  wrapMammothPreviewHtml,
+} from '../utils/docxEngine';
+import {
+  downloadTemplateDocx,
+  saveGeneratedDocumentRecord,
+  uploadGeneratedOrderDocx,
+} from '../services/supabaseService';
 
 export interface PreviewModalTarget {
   kind: 'QUOTATION' | 'CONTRACT' | 'INVOICE' | 'PACKING_LIST' | 'CO' | 'BL';
@@ -38,8 +66,9 @@ interface DocumentPreviewModalProps {
   allowQuickAdjust: boolean;
   onClose: () => void;
   onConfirmQuickAdjust?: (orderId: string, newIncoterm: string, newPrice: number, templateMode: 'STANDARD' | 'COMPARISON') => Promise<void>;
-  onMarkQuotationSent?: (orderId: string, emailSubject: string) => Promise<void>;
+  onMarkQuotationSent?: (orderId: string, linkOrSubject: string) => Promise<void>;
   onRequestRepriceFromModal?: (orderId: string, reason: string) => Promise<void>;
+  onDocumentSaved?: () => Promise<void>;
   onToast: (type: 'success' | 'error' | 'info' | 'warning', title: string) => void;
 }
 
@@ -53,9 +82,12 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   onConfirmQuickAdjust,
   onMarkQuotationSent,
   onRequestRepriceFromModal,
+  onDocumentSaved,
   onToast,
 }) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const editableRef = useRef<HTMLDivElement>(null);
+
   const [templateMode, setTemplateMode] = useState<'STANDARD' | 'COMPARISON'>('STANDARD');
   const [adjIncoterm, setAdjIncoterm] = useState('CIF');
   const [adjPrice, setAdjPrice] = useState('');
@@ -63,7 +95,21 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBodyHtml, setEmailBodyHtml] = useState('');
   const [showEmailPane, setShowEmailPane] = useState(false);
-  const [docLoading, setDocLoading] = useState(true);
+
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+  const [templateBuffer, setTemplateBuffer] = useState<ArrayBuffer | null>(null);
+  const [detectedKeys, setDetectedKeys] = useState<string[]>([]);
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
+  const [descriptors, setDescriptors] = useState<TemplateFieldDescriptor[]>([]);
+  const [itemsRows, setItemsRows] = useState<Array<Record<string, string>>>([]);
+  const [renderedDocxBytes, setRenderedDocxBytes] = useState<Uint8Array | null>(null);
+  const [docxPreviewHtml, setDocxPreviewHtml] = useState<string>('');
+
+  const [showFieldEditor, setShowFieldEditor] = useState(false);
+  const [directEditMode, setDirectEditMode] = useState(false);
+  const [customBodyHtml, setCustomBodyHtml] = useState<string>('');
+
+  const [docLoading, setDocLoading] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const ctx = useMemo(() => {
@@ -76,15 +122,32 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     const cusId = order?.consignee_id || inq?.consignee_id || '';
     const cus = data.consignees.find((c) => c.consignee_id === cusId);
     const sch = prop ? data.schedules.find((s) => s.schedule_id === prop.schedule_id) : undefined;
-    return { inq, prop, extraMeta, order, meta, cus, sch };
+    const items = inq
+      ? parseOrderItems(inq, data.products, data.pricingRates)
+      : order
+      ? parseOrderItems(
+          { sku_code: order.sku_code, net_weight_kgs: order.nw_confirmed_kgs, product_name_vie: order.sku_code },
+          data.products,
+          data.pricingRates
+        )
+      : [];
+    return { inq, prop, extraMeta, order, meta, cus, sch, items };
   }, [target, data, orderMetaMap, proposalMetaMap]);
 
+  const matchingTemplates = useMemo(() => {
+    if (!target || !ctx) return [];
+    return selectMatchingTemplates(data.templates, target.kind, ctx.items, data.products);
+  }, [target, ctx, data.templates, data.products]);
+
+  // Initialize metadata & pick default .docx template whenever target changes
   useEffect(() => {
     if (!target || !ctx) return;
     if (target.kind === 'QUOTATION' && ctx.inq) {
-      const mode = String(ctx.inq.quotation_mode || '').toUpperCase().includes('COMP') || (ctx.prop?.proposed_incoterms || '').split(',').filter(Boolean).length >= 2
-        ? 'COMPARISON'
-        : 'STANDARD';
+      const mode =
+        String(ctx.inq.quotation_mode || '').toUpperCase().includes('COMP') ||
+        (ctx.prop?.proposed_incoterms || '').split(',').filter(Boolean).length >= 2
+          ? 'COMPARISON'
+          : 'STANDARD';
       setTemplateMode(mode);
       const inc = ctx.prop?.recommended_incoterm || ctx.inq.desired_incoterm || 'CIF';
       const price = toNum(ctx.prop?.final_selling_price);
@@ -99,9 +162,112 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       setEmailSubject(`[GREEN AGRI-EXPORTS] ${label}`);
       setEmailBodyHtml(buildExportEmailHtml(label, ctx.order, ctx.cus));
     }
+
     setShowEmailPane(false);
+    setShowFieldEditor(false);
+    setDirectEditMode(false);
+    setCustomBodyHtml('');
+    setDocxPreviewHtml('');
+    setRenderedDocxBytes(null);
+    setTemplateBuffer(null);
+
+    const bestTpl =
+      ctx.meta?.template_id && matchingTemplates.some((t) => t.template_id === ctx.meta?.template_id)
+        ? ctx.meta.template_id
+        : matchingTemplates[0]?.template_id || '';
+    setSelectedTemplateId(bestTpl);
+  }, [target?.orderId, target?.kind]);
+
+  // Download & render selected .docx template from Supabase Storage "documents" bucket
+  useEffect(() => {
+    if (!target || !ctx) return;
+    const tpl = matchingTemplates.find((t) => t.template_id === selectedTemplateId);
+    if (!tpl || !tpl.google_doc_file_id) {
+      setTemplateBuffer(null);
+      setRenderedDocxBytes(null);
+      setDocxPreviewHtml('');
+      const built = buildTemplateFieldContext(
+        {
+          kind: target.kind,
+          order: ctx.order,
+          meta: ctx.meta,
+          inq: ctx.inq,
+          prop: ctx.prop,
+          extraMeta: ctx.extraMeta,
+          cus: ctx.cus,
+          sch: ctx.sch,
+          products: data.products,
+          pricingRates: data.pricingRates,
+          lookups: data.lookups,
+          templatePlaceholders: data.templatePlaceholders,
+          overrideIncoterm: target.kind === 'QUOTATION' ? adjIncoterm : undefined,
+          overrideSellingPrice: target.kind === 'QUOTATION' && toNum(adjPrice) > 0 ? toNum(adjPrice) : undefined,
+        },
+        []
+      );
+      setDetectedKeys([]);
+      setFieldValues(built.fields);
+      setDescriptors(built.descriptors);
+      setItemsRows(built.itemsTableRows);
+      setDocLoading(false);
+      return;
+    }
+
+    let cancelled = false;
     setDocLoading(true);
-  }, [target, ctx, data.products]);
+
+    (async () => {
+      try {
+        const buf = await downloadTemplateDocx(tpl.google_doc_file_id);
+        if (cancelled) return;
+        const keys = await extractPlaceholdersFromDocx(buf);
+        if (cancelled) return;
+
+        const built = buildTemplateFieldContext(
+          {
+            kind: target.kind,
+            order: ctx.order,
+            meta: ctx.meta,
+            inq: ctx.inq,
+            prop: ctx.prop,
+            extraMeta: ctx.extraMeta,
+            cus: ctx.cus,
+            sch: ctx.sch,
+            products: data.products,
+            pricingRates: data.pricingRates,
+            lookups: data.lookups,
+            templatePlaceholders: data.templatePlaceholders,
+            overrideIncoterm: target.kind === 'QUOTATION' ? adjIncoterm : undefined,
+            overrideSellingPrice: target.kind === 'QUOTATION' && toNum(adjPrice) > 0 ? toNum(adjPrice) : undefined,
+          },
+          keys
+        );
+
+        const rendered = await renderDocxAndPreviewHtml(buf, built.fields, built.itemsTableRows);
+        if (cancelled) return;
+
+        setTemplateBuffer(buf);
+        setDetectedKeys(keys);
+        setFieldValues(built.fields);
+        setDescriptors(built.descriptors);
+        setItemsRows(built.itemsTableRows);
+        setRenderedDocxBytes(rendered.docxBytes);
+        setDocxPreviewHtml(rendered.previewHtml);
+        setCustomBodyHtml('');
+      } catch {
+        if (cancelled) return;
+        setTemplateBuffer(null);
+        setRenderedDocxBytes(null);
+        setDocxPreviewHtml('');
+      } finally {
+        if (!cancelled) setDocLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [target?.orderId, target?.kind, selectedTemplateId]);
 
   const floorForSelectedInc = useMemo(() => {
     if (!ctx?.prop) return 0;
@@ -111,7 +277,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const numericAdjPrice = toNum(adjPrice);
   const isBelowFloor = floorForSelectedInc > 0 && numericAdjPrice > 0 && numericAdjPrice < floorForSelectedInc;
 
-  const docHtml = useMemo(() => {
+  const fallbackHtml = useMemo(() => {
     if (!target || !ctx) return '';
     if (target.kind === 'QUOTATION' && ctx.inq) {
       return generateQuotationDocHtml({
@@ -151,25 +317,89 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     return '';
   }, [target, ctx, data.products, data.pricingRates, templateMode, adjIncoterm, numericAdjPrice]);
 
+  const activeDocHtml = useMemo(() => {
+    if (customBodyHtml) {
+      return wrapMammothPreviewHtml(customBodyHtml);
+    }
+    return docxPreviewHtml || fallbackHtml;
+  }, [customBodyHtml, docxPreviewHtml, fallbackHtml]);
+
+  const editableInnerHtml = useMemo(() => {
+    if (customBodyHtml) return customBodyHtml;
+    const m = (docxPreviewHtml || fallbackHtml).match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    return m ? m[1] : (docxPreviewHtml || fallbackHtml);
+  }, [customBodyHtml, docxPreviewHtml, fallbackHtml]);
+
+  // Re-render .docx live when user edits fieldValues
+  const handleFieldValueChange = async (key: string, nextVal: string) => {
+    const updated = { ...fieldValues, [key]: nextVal };
+    setFieldValues(updated);
+    setDescriptors((prev) => prev.map((d) => (d.key === key ? { ...d, value: nextVal } : d)));
+    if (templateBuffer) {
+      try {
+        const rendered = await renderDocxAndPreviewHtml(templateBuffer, updated, itemsRows);
+        setRenderedDocxBytes(rendered.docxBytes);
+        setDocxPreviewHtml(rendered.previewHtml);
+        setCustomBodyHtml('');
+      } catch {
+        // Ignore transient render error while typing
+      }
+    }
+  };
+
   if (!target || !ctx) return null;
 
-  const cleanQuoteTitle = target.kind === 'QUOTATION'
-    ? `Báo giá ${cleanQuoteNoForCustomer(ctx.extraMeta?.quotation_no || '', target.orderId)}`
-    : `${target.kind} · ${ctx.order?.contract_no || target.orderId}`;
+  const cleanQuoteTitle =
+    target.kind === 'QUOTATION'
+      ? `Báo giá ${cleanQuoteNoForCustomer(ctx.extraMeta?.quotation_no || '', target.orderId)}`
+      : `${target.kind} · ${ctx.order?.contract_no || target.orderId}`;
+
+  const safeDocFileName = `${cleanQuoteTitle.replace(/[^a-zA-Z0-9_-]+/g, '_')}.docx`;
 
   const handlePrint = () => {
+    if (directEditMode && editableRef.current) {
+      const edited = editableRef.current.innerHTML;
+      setCustomBodyHtml(edited);
+      setDirectEditMode(false);
+      window.setTimeout(() => iframeRef.current?.contentWindow?.print(), 120);
+      return;
+    }
     iframeRef.current?.contentWindow?.print();
   };
 
-  const handleDownloadHtml = () => {
-    const blob = new Blob([docHtml], { type: 'text/html;charset=utf-8' });
+  const handleDownloadDocxOrHtml = () => {
+    if (renderedDocxBytes) {
+      const blob = new Blob([renderedDocxBytes.slice().buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = safeDocFileName;
+      a.click();
+      URL.revokeObjectURL(url);
+      onToast('success', `Đã tải xuống file Word (${safeDocFileName}).`);
+      return;
+    }
+    const blob = new Blob([activeDocHtml], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${cleanQuoteTitle.replace(/[^a-zA-Z0-9_-]+/g, '_')}.html`;
+    a.download = safeDocFileName.replace(/\.docx$/i, '.html');
     a.click();
     URL.revokeObjectURL(url);
-    onToast('success', 'Đã tải xuống file chứng từ HTML (mở in PDF trực tiếp).');
+    onToast('success', 'Đã tải xuống file chứng từ.');
+  };
+
+  const handleSaveGeneratedToStorage = async (markSent = false): Promise<string | null> => {
+    if (!renderedDocxBytes) {
+      onToast('info', 'Chưa có phôi .docx được gắn cho loại chứng từ này. Bạn có thể thêm phôi .docx tại mục Quản lý Phôi mẫu.');
+      return null;
+    }
+    const storagePath = await uploadGeneratedOrderDocx(target.orderId, target.kind, safeDocFileName, renderedDocxBytes);
+    await saveGeneratedDocumentRecord(target.orderId, target.kind, storagePath, markSent);
+    if (onDocumentSaved) await onDocumentSaved();
+    return storagePath;
   };
 
   return (
@@ -182,8 +412,24 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               Khách hàng: {ctx.cus?.consignee_name || ctx.inq?.consignee_id || ctx.order?.consignee_id}
             </p>
           </div>
+
           <div className="flex flex-wrap items-center gap-2">
-            {target.kind === 'QUOTATION' && (
+            {matchingTemplates.length > 0 && (
+              <select
+                value={selectedTemplateId}
+                onChange={(e) => setSelectedTemplateId(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg bg-[#07281c] border border-[#f4d98a]/60 text-[#fff5d6] text-xs font-bold max-w-[220px]"
+              >
+                {matchingTemplates.map((t) => (
+                  <option key={t.template_id} value={t.template_id}>
+                    Phôi .docx: {t.document_name}
+                  </option>
+                ))}
+                <option value="">Mẫu HTML Chuẩn hệ thống</option>
+              </select>
+            )}
+
+            {target.kind === 'QUOTATION' && !selectedTemplateId && (
               <div className="flex items-center bg-[#07281c] rounded-lg p-0.5 border border-[#186635]">
                 <button
                   type="button"
@@ -201,29 +447,83 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                 </button>
               </div>
             )}
+
+            <button
+              type="button"
+              onClick={() => setShowFieldEditor((s) => !s)}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer border ${
+                showFieldEditor ? 'bg-[#f4d98a] text-[#07281c] border-[#f4d98a]' : 'bg-[#07281c] text-[#fff5d6] border-[#186635]'
+              }`}
+            >
+              <ListChecks className="w-3.5 h-3.5" />
+              <span>Chỉnh trường ({descriptors.length})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (directEditMode && editableRef.current) {
+                  setCustomBodyHtml(editableRef.current.innerHTML);
+                }
+                setDirectEditMode((s) => !s);
+              }}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer border ${
+                directEditMode ? 'bg-[#f4d98a] text-[#07281c] border-[#f4d98a]' : 'bg-[#07281c] text-[#fff5d6] border-[#186635]'
+              }`}
+            >
+              <PenLine className="w-3.5 h-3.5" />
+              <span>{directEditMode ? 'Xong sửa văn bản' : 'Sửa nội dung'}</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={busy || !renderedDocxBytes}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  const savedPath = await handleSaveGeneratedToStorage(false);
+                  if (savedPath) {
+                    onToast('success', 'Đã lưu chứng từ (.docx) vào hồ sơ đơn hàng.');
+                  }
+                } catch (err: any) {
+                  onToast('error', err?.message || 'Lỗi lưu chứng từ.');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg bg-[#16977f] hover:bg-[#117865] disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>Lưu chứng từ</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setShowEmailPane((s) => !s)}
-              className="px-3 py-1.5 rounded-lg bg-[#16977f] hover:bg-[#117865] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              className="px-3 py-1.5 rounded-lg bg-[#0f4a33] border border-[#f4d98a]/60 hover:bg-[#07281c] text-[#fff5d6] text-xs font-bold flex items-center gap-1.5 cursor-pointer"
             >
               <Mail className="w-3.5 h-3.5" />
-              <span>{showEmailPane ? 'Ẩn Soạn Email' : 'Soạn Email Gửi Khách'}</span>
+              <span>{showEmailPane ? 'Ẩn Email' : 'Soạn Email'}</span>
             </button>
+
             <button
               type="button"
               onClick={handlePrint}
               className="px-3 py-1.5 rounded-lg bg-[#f4d98a] text-[#07281c] text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
             >
               <Printer className="w-3.5 h-3.5" />
-              <span>In / Lưu PDF</span>
+              <span>In / PDF</span>
             </button>
+
             <button
               type="button"
-              onClick={handleDownloadHtml}
-              className="px-2.5 py-1.5 rounded-lg bg-[#07281c] text-[#fff5d6] border border-[#186635] text-xs font-semibold cursor-pointer"
+              onClick={handleDownloadDocxOrHtml}
+              className="px-2.5 py-1.5 rounded-lg bg-[#07281c] text-[#fff5d6] border border-[#186635] text-xs font-semibold flex items-center gap-1 cursor-pointer"
             >
-              Tải File
+              <FileDown className="w-3.5 h-3.5" />
+              <span>{renderedDocxBytes ? 'Tải .docx' : 'Tải File'}</span>
             </button>
+
             <button
               type="button"
               onClick={onClose}
@@ -248,6 +548,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                   if (ctx.inq && ctx.prop) {
                     setEmailBodyHtml(buildQuotationEmailHtml(ctx.inq, ctx.cus, ctx.prop, ctx.extraMeta, ctx.sch, data.products, nextInc, numericAdjPrice));
                   }
+                  void handleFieldValueChange('INCOTERM', nextInc);
                 }}
                 className="px-2 py-1 rounded-lg bg-[#0f4a33] border border-[#f4d98a]/60 text-[#fff5d6] font-mono font-bold text-xs"
               >
@@ -261,7 +562,13 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                   type="number"
                   step="0.01"
                   value={adjPrice}
-                  onChange={(e) => setAdjPrice(e.target.value)}
+                  onChange={(e) => {
+                    setAdjPrice(e.target.value);
+                    const val = toNum(e.target.value);
+                    if (val > 0) {
+                      void handleFieldValueChange('CTR_VAL', val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+                    }
+                  }}
                   className="w-28 px-2 py-1 rounded-lg bg-[#d7eee4] text-[#07281c] font-mono font-bold text-xs"
                 />
               </div>
@@ -313,23 +620,57 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
         )}
 
         <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12">
-          <div className={`${showEmailPane ? 'lg:col-span-7' : 'lg:col-span-12'} relative bg-white min-h-[460px]`}>
-            {docLoading && (
-              <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#d7eee4]/90 text-[#07281c] text-xs font-bold">
-                Đang tải chứng từ...
+          {showFieldEditor && (
+            <div className="lg:col-span-4 bg-[#0b3a27] border-r-2 border-[#186635] p-3.5 overflow-y-auto space-y-2.5 max-h-[600px]">
+              <div className="text-xs font-extrabold text-[#f4d98a] uppercase tracking-wider">
+                Chỉnh sửa Trường dữ liệu ({detectedKeys.length > 0 ? `${detectedKeys.length} biến trong phôi` : 'Chuẩn'})
               </div>
+              {descriptors.map((d) => (
+                <div key={d.key} className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-mono font-bold text-[#fff5d6]">{`{{${d.key}}}`}</span>
+                    <span className="text-[#9bccb8] truncate max-w-[140px]" title={d.description}>{d.description}</span>
+                  </div>
+                  <input
+                    type="text"
+                    value={fieldValues[d.key] ?? d.value ?? ''}
+                    onChange={(e) => void handleFieldValueChange(d.key, e.target.value)}
+                    className="agri-input text-xs py-1"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div
+            className={`${
+              showFieldEditor && showEmailPane
+                ? 'lg:col-span-4'
+                : showFieldEditor || showEmailPane
+                ? 'lg:col-span-8'
+                : 'lg:col-span-12'
+            } relative bg-white min-h-[460px] overflow-hidden`}
+          >
+            {docLoading ? (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2.5 bg-[#d7eee4] text-[#07281c]">
+                <Loader2 className="w-6 h-6 animate-spin text-[#0f4a33]" />
+                <span className="text-xs font-bold">Đang tải chứng từ...</span>
+              </div>
+            ) : directEditMode ? (
+              <div
+                ref={editableRef}
+                contentEditable
+                suppressContentEditableWarning
+                dangerouslySetInnerHTML={{ __html: editableInnerHtml }}
+                className="w-full h-full min-h-[520px] max-h-[600px] overflow-y-auto p-8 text-slate-900 bg-white outline-none text-[13px] leading-relaxed"
+              />
+            ) : (
+              <iframe ref={iframeRef} title={cleanQuoteTitle} srcDoc={activeDocHtml} className="w-full h-full min-h-[520px] border-0" />
             )}
-            <iframe
-              ref={iframeRef}
-              title={cleanQuoteTitle}
-              srcDoc={docHtml}
-              onLoad={() => setDocLoading(false)}
-              className="w-full h-full min-h-[520px] border-0"
-            />
           </div>
 
           {showEmailPane && (
-            <div className="lg:col-span-5 bg-[#0b3a27] border-l-2 border-[#186635] p-4 flex flex-col gap-3 overflow-y-auto">
+            <div className="lg:col-span-4 bg-[#0b3a27] border-l-2 border-[#186635] p-4 flex flex-col gap-3 overflow-y-auto max-h-[600px]">
               <div className="text-xs font-extrabold text-[#f4d98a] uppercase tracking-wider">
                 Email Gửi Khách Hàng (Chuẩn Quốc Tế)
               </div>
@@ -377,8 +718,14 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                     onClick={async () => {
                       setBusy(true);
                       try {
-                        await onMarkQuotationSent(target.orderId, emailSubject);
+                        let storedPath = '';
+                        if (renderedDocxBytes) {
+                          storedPath = (await handleSaveGeneratedToStorage(true)) || '';
+                        }
+                        await onMarkQuotationSent(target.orderId, storedPath || emailSubject);
                         onClose();
+                      } catch (err: any) {
+                        onToast('error', err?.message || 'Lỗi gửi báo giá.');
                       } finally {
                         setBusy(false);
                       }

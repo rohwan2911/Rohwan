@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { FileCheck2, Send, ArrowRightCircle, Ship, FolderOpen, Edit3, Eye } from 'lucide-react';
+import { FileCheck2, Send, ArrowRightCircle, Ship, FolderOpen, Edit3, Eye, FileDown } from 'lucide-react';
 import type { AppDataState, OrderLogisticsMeta, OrderMaster, SysUser, ViewId } from '../types';
 import {
   COMPLETED_ORDER_STATUS,
@@ -13,6 +13,7 @@ import {
   toNum,
 } from '../utils/calculations';
 import type { PreviewModalTarget } from './Modals';
+import { isStoredDocumentPath, openDocumentWithSignedUrl } from '../services/supabaseService';
 
 interface XnkContractsViewProps {
   activeView: Extract<ViewId, 'xnk-contract' | 'xnk-documents'>;
@@ -127,12 +128,41 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                         {cutoffs.length > 0 ? cutoffs.join(' · ') : <span className="opacity-65 italic">Chưa nhập Cut-off</span>}
                       </td>
                       <td className="font-mono font-bold">{ord.co_form || suggestCoFormCode(ord.pod, cus?.country)}</td>
-                      <td className="text-right whitespace-nowrap space-x-1">
-                        <button type="button" onClick={() => onOpenPreview({ kind: 'INVOICE', orderId: ord.order_id })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer">Invoice</button>
-                        <button type="button" onClick={() => onOpenPreview({ kind: 'PACKING_LIST', orderId: ord.order_id })} className="keep-btn-style px-2 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold cursor-pointer">Packing List</button>
-                        <button type="button" onClick={() => onOpenPreview({ kind: 'CO', orderId: ord.order_id })} className="keep-btn-style px-2 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold cursor-pointer">C/O</button>
-                        <button type="button" onClick={() => onOpenPreview({ kind: 'BL', orderId: ord.order_id })} className="keep-btn-style px-2 py-1 rounded bg-[#07281c] text-[#fff5d6] text-[11px] font-bold cursor-pointer">Draft B/L</button>
-                        <button type="button" onClick={() => openEditContractModal(ord)} className="keep-btn-style px-2 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold cursor-pointer">Sửa Cut-off</button>
+                      <td className="text-right whitespace-nowrap space-y-1">
+                        <div className="space-x-1">
+                          <button type="button" onClick={() => onOpenPreview({ kind: 'INVOICE', orderId: ord.order_id })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer">Invoice</button>
+                          <button type="button" onClick={() => onOpenPreview({ kind: 'PACKING_LIST', orderId: ord.order_id })} className="keep-btn-style px-2 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold cursor-pointer">Packing List</button>
+                          <button type="button" onClick={() => onOpenPreview({ kind: 'CO', orderId: ord.order_id })} className="keep-btn-style px-2 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold cursor-pointer">C/O</button>
+                          <button type="button" onClick={() => onOpenPreview({ kind: 'BL', orderId: ord.order_id })} className="keep-btn-style px-2 py-1 rounded bg-[#07281c] text-[#fff5d6] text-[11px] font-bold cursor-pointer">Draft B/L</button>
+                          <button type="button" onClick={() => openEditContractModal(ord)} className="keep-btn-style px-2 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold cursor-pointer">Sửa Cut-off</button>
+                        </div>
+                        {(isStoredDocumentPath(meta?.invoice_link) ||
+                          isStoredDocumentPath(meta?.packing_list_link) ||
+                          isStoredDocumentPath(meta?.co_link) ||
+                          isStoredDocumentPath(meta?.bl_link)) && (
+                          <div className="flex justify-end flex-wrap gap-1">
+                            {meta?.invoice_link && (
+                              <button type="button" onClick={() => openDocumentWithSignedUrl(meta.invoice_link!).catch((e: any) => onToast('error', e?.message || 'Lỗi tải file'))} className="keep-btn-style px-1.5 py-0.5 rounded bg-[#d7eee4] text-[#07281c] text-[10px] font-bold inline-flex items-center gap-0.5 cursor-pointer">
+                                <FileDown className="w-2.5 h-2.5" /> CI.docx
+                              </button>
+                            )}
+                            {meta?.packing_list_link && (
+                              <button type="button" onClick={() => openDocumentWithSignedUrl(meta.packing_list_link!).catch((e: any) => onToast('error', e?.message || 'Lỗi tải file'))} className="keep-btn-style px-1.5 py-0.5 rounded bg-[#d7eee4] text-[#07281c] text-[10px] font-bold inline-flex items-center gap-0.5 cursor-pointer">
+                                <FileDown className="w-2.5 h-2.5" /> PL.docx
+                              </button>
+                            )}
+                            {meta?.co_link && (
+                              <button type="button" onClick={() => openDocumentWithSignedUrl(meta.co_link!).catch((e: any) => onToast('error', e?.message || 'Lỗi tải file'))} className="keep-btn-style px-1.5 py-0.5 rounded bg-[#d7eee4] text-[#07281c] text-[10px] font-bold inline-flex items-center gap-0.5 cursor-pointer">
+                                <FileDown className="w-2.5 h-2.5" /> CO.docx
+                              </button>
+                            )}
+                            {meta?.bl_link && (
+                              <button type="button" onClick={() => openDocumentWithSignedUrl(meta.bl_link!).catch((e: any) => onToast('error', e?.message || 'Lỗi tải file'))} className="keep-btn-style px-1.5 py-0.5 rounded bg-[#d7eee4] text-[#07281c] text-[10px] font-bold inline-flex items-center gap-0.5 cursor-pointer">
+                                <FileDown className="w-2.5 h-2.5" /> BL.docx
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -264,10 +294,23 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                       </span>
                     </td>
                     <td className="text-right space-y-1">
-                      <div className="flex justify-end gap-1">
+                      <div className="flex justify-end gap-1 flex-wrap">
                         <button type="button" onClick={() => onOpenPreview({ kind: 'CONTRACT', orderId: ord.order_id })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold flex items-center gap-1 cursor-pointer">
                           <Eye className="w-3 h-3" /> Xem HĐ
                         </button>
+                        {ord.contract_link && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openDocumentWithSignedUrl(ord.contract_link).catch((err: any) =>
+                                onToast('error', err?.message || 'Không thể tải file Hợp đồng.')
+                              )
+                            }
+                            className="keep-btn-style px-2 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold flex items-center gap-1 cursor-pointer"
+                          >
+                            <FileDown className="w-3 h-3" /> Tải HĐ
+                          </button>
+                        )}
                         <button type="button" onClick={() => openEditContractModal(ord)} className="keep-btn-style px-2 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold flex items-center gap-1 cursor-pointer">
                           <Edit3 className="w-3 h-3" /> Sửa / Booking
                         </button>

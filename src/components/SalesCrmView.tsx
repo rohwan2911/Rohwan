@@ -43,6 +43,7 @@ import {
 } from '../utils/calculations';
 import { SearchableCombo } from './SearchableCombo';
 import type { PreviewModalTarget } from './Modals';
+import { isStoredDocumentPath, openDocumentWithSignedUrl } from '../services/supabaseService';
 
 interface SalesCrmViewProps {
   activeView: Extract<ViewId, 'sales-inquiry' | 'sales-quotation' | 'sales-contracts' | 'sales-customers'>;
@@ -853,6 +854,19 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                             Xem &amp; Gửi Báo giá
                           </button>
                         )}
+                        {isStoredDocumentPath(inq.sent_mail_link) && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openDocumentWithSignedUrl(inq.sent_mail_link).catch((err: any) =>
+                                onToast('error', err?.message || 'Không thể tải báo giá.')
+                              )
+                            }
+                            className="keep-btn-style px-2 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <ExternalLink className="w-3 h-3" /> Tải .docx
+                          </button>
+                        )}
                         {canConfirm && (
                           <>
                             <button
@@ -1002,14 +1016,17 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                             <Eye className="w-3.5 h-3.5" /> Xem hợp đồng
                           </button>
                           {ord.contract_link ? (
-                            <a
-                              href={ord.contract_link}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="px-2.5 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold inline-flex items-center gap-1"
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openDocumentWithSignedUrl(ord.contract_link).catch((err: any) =>
+                                  onToast('error', err?.message || 'Không thể mở file hợp đồng.')
+                                )
+                              }
+                              className="keep-btn-style px-2.5 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
                             >
                               <ExternalLink className="w-3 h-3" /> Mở / Tải File HĐ
-                            </a>
+                            </button>
                           ) : (
                             <button
                               type="button"

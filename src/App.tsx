@@ -58,6 +58,7 @@ const EMPTY_DATA: AppDataState = {
   incoterms: [],
   lookups: [],
   templates: [],
+  templatePlaceholders: [],
   inquiries: [],
   proposals: [],
   orders: [],
@@ -383,6 +384,9 @@ export const App: React.FC = () => {
                 pushToast('success', 'Đã lưu phôi mẫu.');
                 await syncData({ silent: true });
               }}
+              onRefreshData={async () => {
+                await syncData({ silent: true });
+              }}
               onUpsertUser={async (row, isEdit) => {
                 await upsertSysUserDirect(row, isEdit);
                 pushToast('success', 'Đã lưu thông tin nhân sự.');
@@ -414,12 +418,15 @@ export const App: React.FC = () => {
           pushToast('success', `Đã lưu điều chỉnh ${newInc} · $${newPrice.toFixed(2)}.`);
           await syncData({ silent: true });
         }}
-        onMarkQuotationSent={async (orderId, subject) => {
+        onMarkQuotationSent={async (orderId, linkOrSubject) => {
           await updateQuotationWorkflow(orderId, {
             inquiry_status: WORKFLOW_STATUS.SENT_WAITING_CUST,
-            sent_mail_link: subject,
+            sent_mail_link: linkOrSubject,
           });
           pushToast('success', 'Đã đánh dấu Đã gửi Báo giá cho Khách.');
+          await syncData({ silent: true });
+        }}
+        onDocumentSaved={async () => {
           await syncData({ silent: true });
         }}
         onRequestRepriceFromModal={async (orderId, reason) => {

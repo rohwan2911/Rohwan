@@ -96,6 +96,9 @@ interface SidebarProps {
   onNavigate: (view: ViewId) => void;
 }
 
+export const COMPANY_LOGO_URL =
+  'https://cqxchzwksyfwguzavqbz.supabase.co/storage/v1/object/public/images/logo-icon.png';
+
 export const Sidebar: React.FC<SidebarProps> = ({
   role,
   activeView,
@@ -104,12 +107,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
   onNavigate,
 }) => {
+  const [logoError, setLogoError] = React.useState(false);
+
   return (
     <aside className={`app-sidebar flex flex-col shrink-0 select-none ${collapsed ? 'is-collapsed' : ''}`}>
       <div className="p-3.5 border-b border-[#186635] flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-10 h-10 rounded-full bg-white border-2 border-[#f4d98a] flex items-center justify-center shrink-0 shadow">
-            <Sprout className="w-5 h-5 text-[#0f4a33]" />
+          <div className="w-11 h-11 rounded-full bg-[#f6f3e3] border-2 border-[#f4d98a] p-0.5 flex items-center justify-center shrink-0 shadow overflow-hidden">
+            {!logoError ? (
+              <img
+                src={COMPANY_LOGO_URL}
+                alt="GREEN AGRI-EXPORTS"
+                onError={() => setLogoError(true)}
+                className="w-full h-full rounded-full object-contain"
+              />
+            ) : (
+              <Sprout className="w-5 h-5 text-[#0f4a33]" />
+            )}
           </div>
           <div className="sidebar-hide-collapsed min-w-0">
             <div className="text-xs font-extrabold text-[#fff5d6] tracking-wide whitespace-nowrap">GREEN AGRI-EXPORTS</div>

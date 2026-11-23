@@ -12,6 +12,7 @@ import type {
   ShippingSchedule,
   SysUser,
   TemplateManager,
+  TemplatePlaceholder,
 } from '../types';
 import {
   classifyCustomerByCount,
@@ -23,9 +24,11 @@ import {
   WORKFLOW_6_STAGES,
   WORKFLOW_STATUS,
 } from '../utils/calculations';
+import type { DocumentKind } from '../utils/docxEngine';
 
 const ORDER_META_STORAGE_KEY = 'NSX_ORDER_LOGISTICS_META_V1';
 const PROPOSAL_META_STORAGE_KEY = 'NSX_PROPOSAL_EXTRA_META_V1';
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 export function readOrderLogisticsMetaMap(): Record<string, OrderLogisticsMeta> {
   try {
@@ -70,6 +73,27 @@ function assertConfigured() {
   }
 }
 
+async function fetchTemplatePlaceholdersSafe(): Promise<TemplatePlaceholder[]> {
+  const withAuto = await supabase
+    .from('template_placeholders')
+    .select('placeholder_key, scope, source_table, source_column, description_vie, is_auto_created')
+    .order('placeholder_key', { ascending: true });
+
+  if (!withAuto.error) {
+    return (withAuto.data || []) as TemplatePlaceholder[];
+  }
+
+  const fallback = await supabase
+    .from('template_placeholders')
+    .select('placeholder_key, scope, source_table, source_column, description_vie')
+    .order('placeholder_key', { ascending: true });
+
+  if (fallback.error) {
+    return [];
+  }
+  return (fallback.data || []) as TemplatePlaceholder[];
+}
+
 export async function fetchAllAppData(): Promise<AppDataState> {
   assertConfigured();
   const [
@@ -81,6 +105,7 @@ export async function fetchAllAppData(): Promise<AppDataState> {
     incotermsRes,
     lookupsRes,
     templatesRes,
+    templatePlaceholdersList,
     inquiriesRes,
     proposalsRes,
     ordersRes,
@@ -93,6 +118,7 @@ export async function fetchAllAppData(): Promise<AppDataState> {
     supabase.from('incoterms_handbook').select('stt, incoterms_code, incoterm_group, full_name, transport_mode, contract_text_eng, freight_term, freight_payer, insurance_payer, export_customs, import_customs, risk_transfer_point, activation_condition, risk_benefit_seller, note, practical_notes_vie, seller_cost_scope').order('stt', { ascending: true }),
     supabase.from('system_lookups').select('category, code, scope, display_name_vie, contract_text_eng, extra_value'),
     supabase.from('template_manager').select('template_id, document_name, google_doc_file_id, target_department, status, supported_placeholders'),
+    fetchTemplatePlaceholdersSafe(),
     supabase.from('inquiry_quotation').select('order_id, timestamp, sale_rep, consignee_id, address, contact, email, phone, sku_code, product_name_vie, net_weight_kgs, desired_delivery_date, desired_incoterm, proposed_payment_term, inquiry_status, note, order_items, quotation_mode, customer_confirm_note, sent_mail_link'),
     supabase.from('pricing_proposal').select('order_id, xnk_rep, schedule_id, container_type, container_qty, total_freight_local, insurance_cost, goods_cost, recommended_incoterm, final_selling_price, booking_date, booking_status, packing_pallet_cost, insurance_code, total_cartons, total_pallets, pallet_fee, total_gross_weight, total_cbm, proposed_incoterms'),
     supabase.from('order_master').select('order_id, contract_no, contract_date, in_charge_staff, consignee_id, sku_code, nw_confirmed_kgs, applied_incoterm, contract_value, payment_terms, pol, pod, fulfillment_status, co_form, contract_link'),
@@ -125,10 +151,182 @@ export async function fetchAllAppData(): Promise<AppDataState> {
     incoterms: (incotermsRes.data || []) as AppDataState['incoterms'],
     lookups: (lookupsRes.data || []) as AppDataState['lookups'],
     templates: (templatesRes.data || []) as TemplateManager[],
+    templatePlaceholders: templatePlaceholdersList,
     inquiries: (inquiriesRes.data || []) as InquiryQuotation[],
     proposals: (proposalsRes.data || []) as PricingProposal[],
     orders: (ordersRes.data || []) as OrderMaster[],
   };
+}
+
+// ==========================================
+// SUPABASE STORAGE: PRIVATE "documents" BUCKET
+// ==========================================
+export async function downloadTemplateDocx(storagePath: string): Promise<ArrayBuffer> {
+  assertConfigured();
+  const clean = String(storagePath || '').replace(/^\/+/, '').trim();
+  if (!clean) throw new Error('Đường dẫn phôi mẫu trống.');
+
+  const primary = await supabase.storage.from('documents').download(clean);
+  if (!primary.error && primary.data) {
+    return primary.data.arrayBuffer();
+  }
+
+  if (!clean.startsWith('templates/')) {
+    const fallback = await supabase.storage.from('documents').download(`templates/${clean}`);
+    if (!fallback.error && fallback.data) {
+      return fallback.data.arrayBuffer();
+    }
+  }
+
+  throw new Error(primary.error?.message || `Không thể tải phôi mẫu ${clean} từ Storage.`);
+}
+
+export async function uploadTemplateDocx(fileName: string, data: Uint8Array | Blob | ArrayBuffer): Promise<string> {
+  assertConfigured();
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const finalName = safeName.toLowerCase().endsWith('.docx') ? safeName : `${safeName}.docx`;
+  const path = `templates/${finalName}`;
+  const part: ArrayBuffer =
+    data instanceof Uint8Array
+      ? (data.slice().buffer as ArrayBuffer)
+      : (data as ArrayBuffer);
+  const blob = data instanceof Blob ? data : new Blob([part], { type: DOCX_MIME });
+
+  const { error } = await supabase.storage.from('documents').upload(path, blob, {
+    upsert: true,
+    contentType: DOCX_MIME,
+  });
+  if (error) throw new Error(`Lỗi tải phôi lên Storage: ${error.message}`);
+  return path;
+}
+
+export async function uploadGeneratedOrderDocx(
+  orderId: string,
+  kind: DocumentKind,
+  fileName: string,
+  data: Uint8Array | Blob | ArrayBuffer
+): Promise<string> {
+  assertConfigured();
+  const cleanOrderId = String(orderId || 'MISC').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const safeFile = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const finalFile = safeFile.toLowerCase().endsWith('.docx') ? safeFile : `${safeFile}.docx`;
+  const folder = kind === 'QUOTATION' ? `quotations/${cleanOrderId}` : `orders/${cleanOrderId}`;
+  const path = `${folder}/${finalFile}`;
+
+  if (path.startsWith('templates/')) {
+    throw new Error('Không được phép ghi đè thư mục phôi gốc templates/.');
+  }
+
+  const part: ArrayBuffer =
+    data instanceof Uint8Array
+      ? (data.slice().buffer as ArrayBuffer)
+      : (data as ArrayBuffer);
+  const blob = data instanceof Blob ? data : new Blob([part], { type: DOCX_MIME });
+  const { error } = await supabase.storage.from('documents').upload(path, blob, {
+    upsert: true,
+    contentType: DOCX_MIME,
+  });
+  if (error) throw new Error(`Lỗi lưu chứng từ lên Storage: ${error.message}`);
+  return path;
+}
+
+export async function getSignedDocumentUrl(storagePathOrUrl: string, expiresInSeconds = 3600): Promise<string> {
+  assertConfigured();
+  const raw = String(storagePathOrUrl || '').trim();
+  if (!raw) throw new Error('Không có đường dẫn chứng từ.');
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const clean = raw.replace(/^\/+/, '');
+  const { data, error } = await supabase.storage.from('documents').createSignedUrl(clean, expiresInSeconds);
+  if (error || !data?.signedUrl) {
+    throw new Error(error?.message || 'Không thể tạo liên kết tải chứng từ.');
+  }
+  return data.signedUrl;
+}
+
+export async function openDocumentWithSignedUrl(storagePathOrUrl: string, downloadFileName?: string): Promise<void> {
+  const url = await getSignedDocumentUrl(storagePathOrUrl, 3600);
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  if (downloadFileName) a.download = downloadFileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+export function isStoredDocumentPath(val?: string): boolean {
+  const s = String(val || '').trim();
+  if (!s) return false;
+  return /^https?:\/\//i.test(s) || /^(orders|quotations|templates)\//i.test(s) || /\.docx$/i.test(s);
+}
+
+export async function saveGeneratedDocumentRecord(
+  orderId: string,
+  kind: DocumentKind,
+  storagePath: string,
+  markQuotationSent = false
+): Promise<void> {
+  assertConfigured();
+  if (kind === 'CONTRACT') {
+    const { error } = await supabase
+      .from('order_master')
+      .update({ contract_link: storagePath })
+      .eq('order_id', orderId);
+    if (error) throw new Error(`Lỗi lưu đường dẫn Hợp đồng: ${error.message}`);
+    return;
+  }
+
+  if (kind === 'QUOTATION') {
+    const patch: Partial<InquiryQuotation> = { sent_mail_link: storagePath };
+    if (markQuotationSent) {
+      patch.inquiry_status = WORKFLOW_STATUS.SENT_WAITING_CUST;
+    }
+    const { error } = await supabase
+      .from('inquiry_quotation')
+      .update(patch)
+      .eq('order_id', orderId);
+    if (error) throw new Error(`Lỗi lưu đường dẫn Báo giá: ${error.message}`);
+    return;
+  }
+
+  const metaPatch: Partial<OrderLogisticsMeta> = {};
+  if (kind === 'INVOICE') metaPatch.invoice_link = storagePath;
+  if (kind === 'PACKING_LIST') metaPatch.packing_list_link = storagePath;
+  if (kind === 'CO') metaPatch.co_link = storagePath;
+  if (kind === 'BL') metaPatch.bl_link = storagePath;
+  saveOrderLogisticsMeta(orderId, metaPatch);
+}
+
+export async function upsertTemplatePlaceholders(rows: TemplatePlaceholder[]): Promise<void> {
+  assertConfigured();
+  if (!rows || rows.length === 0) return;
+
+  const cleanRows = rows.map((r) => ({
+    placeholder_key: String(r.placeholder_key || '').trim().replace(/^\{\{|\}\}$/g, '').toUpperCase(),
+    scope: String(r.scope || 'ALL').trim(),
+    source_table: String(r.source_table || 'computed').trim(),
+    source_column: String(r.source_column || 'TBA').trim(),
+    description_vie: String(r.description_vie || '').trim(),
+    is_auto_created: r.is_auto_created ?? true,
+  })).filter((r) => r.placeholder_key);
+
+  if (cleanRows.length === 0) return;
+
+  const res = await supabase
+    .from('template_placeholders')
+    .upsert(cleanRows, { onConflict: 'placeholder_key' });
+
+  if (res.error) {
+    // Fallback without is_auto_created if the column isn't defined
+    const stripped = cleanRows.map(({ is_auto_created: _ignored, ...rest }) => rest);
+    const fb = await supabase
+      .from('template_placeholders')
+      .upsert(stripped, { onConflict: 'placeholder_key' });
+    if (fb.error) {
+      throw new Error(`Lỗi lưu template_placeholders: ${fb.error.message}`);
+    }
+  }
 }
 
 export async function resolveOrUpsertConsigneeForInquiry(
@@ -639,7 +837,7 @@ export async function upsertTemplateDirect(row: TemplateManager, isEdit: boolean
   };
   const { error } = isEdit
     ? await supabase.from('template_manager').update(clean).eq('template_id', clean.template_id)
-    : await supabase.from('template_manager').insert(clean);
+    : await supabase.from('template_manager').upsert(clean, { onConflict: 'template_id' });
   if (error) throw new Error(`Lỗi lưu biểu mẫu: ${error.message}`);
 }
 

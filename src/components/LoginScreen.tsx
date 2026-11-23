@@ -3,6 +3,9 @@ import { Lock, Mail, Sprout, AlertTriangle, LogIn } from 'lucide-react';
 import { isSupabaseConfigured, signInWithSupabaseEmail } from '../lib/supabase';
 import type { SysUser } from '../types';
 
+export const COMPANY_LOGO_URL =
+  'https://cqxchzwksyfwguzavqbz.supabase.co/storage/v1/object/public/images/logo-icon.png';
+
 interface LoginScreenProps {
   onLoginSuccess: (user: SysUser) => void;
 }
@@ -12,6 +15,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [logoError, setLogoError] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,8 +39,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     <div className="login-emerald-bg flex items-center justify-center p-4">
       <div className="login-glass-card w-full max-w-md rounded-2xl p-7 text-[#f4f8f5]">
         <div className="flex flex-col items-center text-center mb-6">
-          <div className="w-16 h-16 rounded-full bg-white border-2 border-[#f4d98a] flex items-center justify-center shadow-lg mb-3">
-            <Sprout className="w-8 h-8 text-[#0f4a33]" />
+          <div className="w-24 h-24 rounded-full bg-[#f6f3e3] border-2 border-[#fde68a] p-1 flex items-center justify-center shadow-lg mb-3 overflow-hidden">
+            {!logoError ? (
+              <img
+                src={COMPANY_LOGO_URL}
+                alt="GREEN AGRI-EXPORTS"
+                onError={() => setLogoError(true)}
+                className="w-full h-full rounded-full object-contain"
+              />
+            ) : (
+              <Sprout className="w-10 h-10 text-[#0f4a33]" />
+            )}
           </div>
           <h1 className="text-xl font-extrabold tracking-wide text-[#fff5d6]">
             GREEN AGRI-EXPORTS

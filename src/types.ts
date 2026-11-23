@@ -129,6 +129,16 @@ export interface TemplateManager {
   supported_placeholders: string;
 }
 
+export interface TemplatePlaceholder {
+  id?: string | number;
+  placeholder_key: string;
+  scope: string;
+  source_table: string;
+  source_column: string;
+  description_vie: string;
+  is_auto_created?: boolean;
+}
+
 export interface InquiryQuotation {
   id?: string | number;
   order_id: string;
@@ -237,6 +247,10 @@ export interface OrderLogisticsMeta {
   signed_date?: string;
   is_locked?: boolean;
   sent_to_sales?: boolean;
+  invoice_link?: string;
+  packing_list_link?: string;
+  co_link?: string;
+  bl_link?: string;
 }
 
 export interface ProposalExtraMeta {
@@ -274,6 +288,7 @@ export interface AppDataState {
   incoterms: IncotermsHandbook[];
   lookups: SystemLookup[];
   templates: TemplateManager[];
+  templatePlaceholders: TemplatePlaceholder[];
   inquiries: InquiryQuotation[];
   proposals: PricingProposal[];
   orders: OrderMaster[];
