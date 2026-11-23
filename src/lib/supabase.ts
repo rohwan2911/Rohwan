@@ -28,23 +28,75 @@ function assertActiveUserStatus(userProfile: SysUser): void {
   }
 }
 
-export async function signInWithSupabaseEmail(email: string, password: string): Promise<SysUser> {
+export async function resolveLoginEmail(identifier: string): Promise<string> {
   if (!isSupabaseConfigured) {
     throw new Error('Chưa cấu hình VITE_SUPABASE_URL hoặc VITE_SUPABASE_ANON_KEY trong biến môi trường.');
   }
-  const cleanEmail = email.trim().toLowerCase();
+  const clean = identifier.trim();
+  if (!clean) {
+    throw new Error('Vui lòng nhập Email, Họ tên hoặc Mã nhân viên.');
+  }
+  if (clean.includes('@')) {
+    return clean.toLowerCase();
+  }
+
+  try {
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('resolve_login_email', {
+      p_identifier: clean,
+    });
+    if (!rpcErr && rpcData) {
+      if (typeof rpcData === 'string' && rpcData.trim()) {
+        return rpcData.trim().toLowerCase();
+      }
+      if (Array.isArray(rpcData) && rpcData[0]?.email) {
+        return String(rpcData[0].email).trim().toLowerCase();
+      }
+      if (typeof rpcData === 'object' && (rpcData as any).email) {
+        return String((rpcData as any).email).trim().toLowerCase();
+      }
+    }
+  } catch {
+    // Fallback to direct case-insensitive lookup on public.sys_users
+  }
+
+  const byEmp = await supabase
+    .from('sys_users')
+    .select('email')
+    .ilike('employee_id', clean)
+    .limit(1);
+  if (!byEmp.error && byEmp.data && byEmp.data.length > 0 && byEmp.data[0]?.email) {
+    return String(byEmp.data[0].email).trim().toLowerCase();
+  }
+
+  const byName = await supabase
+    .from('sys_users')
+    .select('email')
+    .ilike('full_name', clean)
+    .limit(1);
+  if (!byName.error && byName.data && byName.data.length > 0 && byName.data[0]?.email) {
+    return String(byName.data[0].email).trim().toLowerCase();
+  }
+
+  throw new Error('Tên đăng nhập hoặc Mã nhân viên không tồn tại.');
+}
+
+export async function signInWithSupabaseEmail(identifier: string, password: string): Promise<SysUser> {
+  if (!isSupabaseConfigured) {
+    throw new Error('Chưa cấu hình VITE_SUPABASE_URL hoặc VITE_SUPABASE_ANON_KEY trong biến môi trường.');
+  }
+  const resolvedEmail = await resolveLoginEmail(identifier);
   const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
-    email: cleanEmail,
+    email: resolvedEmail,
     password,
   });
   if (authErr || !authData.user) {
-    throw new Error(authErr?.message || 'Email hoặc mật khẩu Supabase Auth không chính xác.');
+    throw new Error(authErr?.message || 'Email/Tên đăng nhập hoặc mật khẩu không chính xác.');
   }
 
-  const userProfile = await fetchSysUserByEmail(cleanEmail);
+  const userProfile = await fetchSysUserByEmail(resolvedEmail);
   if (!userProfile) {
     await supabase.auth.signOut();
-    throw new Error(`Tài khoản "${cleanEmail}" chưa được khai báo trong bảng sys_users.`);
+    throw new Error(`Tài khoản "${resolvedEmail}" chưa được khai báo trong bảng sys_users.`);
   }
   try {
     assertActiveUserStatus(userProfile);
@@ -68,6 +120,7 @@ export async function registerWithSupabaseEmail(params: {
   const cleanName = params.fullName.trim();
   // Strictly lock Admin role creation from client-side registration
   const safeDept: 'SALES' | 'XNK' = params.department === 'XNK' ? 'XNK' : 'SALES';
+  const safeRole: 'Sale' | 'XNK' = safeDept === 'XNK' ? 'XNK' : 'Sale';
 
   const existing = await fetchSysUserByEmail(cleanEmail);
   if (existing) {
@@ -81,7 +134,7 @@ export async function registerWithSupabaseEmail(params: {
       data: {
         full_name: cleanName,
         department: safeDept,
-        role: 'Staff',
+        role: safeRole,
       },
     },
   });
@@ -96,7 +149,7 @@ export async function registerWithSupabaseEmail(params: {
     employee_id: empId,
     full_name: cleanName,
     department: safeDept,
-    role: 'Staff',
+    role: safeRole,
     email: cleanEmail,
     status: 'PENDING',
   };

@@ -159,11 +159,11 @@ export const App: React.FC = () => {
         setActiveView('dashboard');
         return;
       }
-      const prev = prevViewRef.current;
+      const wasDashboard = activeView === 'dashboard';
       prevViewRef.current = activeView;
       setActiveView(nextView);
       setHighlightedId(highlightId);
-      if (nextView === 'dashboard' && prev !== 'dashboard') {
+      if (nextView === 'dashboard' && !wasDashboard) {
         void syncData({ silent: true });
       }
     },

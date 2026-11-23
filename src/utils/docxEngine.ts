@@ -249,7 +249,8 @@ export function buildTemplateFieldContext(
   const incotermPlace = originIncotermCodes.includes(incoterm) ? pol : pod;
 
   const allocated = computeSilentFobUnitPrices(items, totalSelling, products, pricingRates);
-  const pool = computeOrderPalletSummary(items, Boolean(extraMeta?.use_pallet), pricingRates);
+  const usePalletFlag = extraMeta?.use_pallet ?? (toNum(prop?.total_pallets) > 0);
+  const pool = computeOrderPalletSummary(items, usePalletFlag, pricingRates);
   const firstProd = items[0]
     ? products.find((p) => p.sku_code.toLowerCase() === items[0].sku.toLowerCase())
     : products.find((p) => p.sku_code.toLowerCase() === String(order?.sku_code || inq?.sku_code || '').toLowerCase());

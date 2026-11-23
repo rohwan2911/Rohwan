@@ -64,8 +64,8 @@ html, body {
 }
 
 .app-sidebar {
-  width: 260px;
-  min-width: 260px;
+  width: 272px;
+  min-width: 272px;
   background: linear-gradient(180deg, #07281c 0%, #0b3a27 65%, #0f4a33 100%);
   border-right: 2px solid var(--border);
   transition: width 0.2s ease, min-width 0.2s ease;
@@ -265,6 +265,36 @@ html, body {
   background-color: #ffffff;
   border-color: #0f4a33;
   box-shadow: 0 0 0 2px rgba(244, 217, 138, 0.55);
+}
+
+.login-input-group .agri-input {
+  background-color: #d7eee4;
+  color: #0b2418;
+}
+
+.login-input-group .login-input-icon {
+  color: #0f4a33;
+  transition: color 0.15s ease;
+}
+
+.login-input-group:focus-within .agri-input {
+  background-color: #172e26;
+  color: #ffffff;
+  border-color: #f4d98a;
+  box-shadow: 0 0 0 2px rgba(244, 217, 138, 0.45);
+}
+
+.login-input-group:focus-within .agri-input::placeholder {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.login-input-group:focus-within .login-input-icon {
+  color: #ffffff;
+}
+
+.login-input-group:focus-within select.agri-input option {
+  background-color: #172e26;
+  color: #ffffff;
 }
 
 .agri-btn-primary {

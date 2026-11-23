@@ -24,6 +24,7 @@ import {
   isReeferProduct,
   isRepriceRequestedStatus,
   isWaitingPricingStatus,
+  parseInsuranceCodeString,
   parseOrderItems,
   resolvePackingSpec,
   solveOptimalContainerMix,
@@ -146,7 +147,6 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
 
   const loadOrderIntoCalculator = (orderId: string) => {
     setSelectedOrderId(orderId);
-    setSelectedScheduleId('');
     setAiMessages([]);
     setAiBestTerm('');
     setAiBestReason('');
@@ -156,42 +156,105 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
 
     const inq = data.inquiries.find((i) => i.order_id === orderId);
     if (!inq) {
+      setSelectedScheduleId('');
       setItemsState([]);
       return;
     }
     const cus = data.consignees.find((c) => c.consignee_id === inq.consignee_id);
+    const existingProp = data.proposals.find((p) => p.order_id === orderId);
+    const existingMeta = proposalMetaMap[orderId];
     const parsed = parseOrderItems(inq, data.products, data.pricingRates);
     setItemsState(parsed);
 
-    const pal = parsed.some((it) => it.palletCode === 'PKG-PLT-YES');
+    const pal = existingMeta?.use_pallet ?? (existingProp ? toNum(existingProp.total_pallets) > 0 : parsed.some((it) => it.palletCode === 'PKG-PLT-YES'));
     setUsePallet(pal);
     const stdPlt = resolvePackingSpec('PKG-PLT-YES', data.pricingRates).rate || 18;
-    setPalletRate(stdPlt.toFixed(2));
+    const savedPltRate =
+      existingProp && toNum(existingProp.total_pallets) > 0 && toNum(existingProp.pallet_fee) > 0
+        ? toNum(existingProp.pallet_fee) / toNum(existingProp.total_pallets)
+        : stdPlt;
+    setPalletRate(savedPltRate.toFixed(2));
     setCountryFilter(cus?.country || '');
     setPodFilter('');
 
     const optMix = solveOptimalContainerMix(parsed, pal, data.products, data.pricingRates);
-    setQ20dc(optMix.qty20DC);
-    setQ40dc(optMix.qty40DC);
-    setQ40hc(optMix.qty40HC);
-    setQ20rf(optMix.qty20RF);
-    setQ40rf(optMix.qty40RF);
-    setQ40rh(optMix.qty40RH);
+    let nextQ20dc = optMix.qty20DC;
+    let nextQ40dc = optMix.qty40DC;
+    let nextQ40hc = optMix.qty40HC;
+    let nextQ20rf = optMix.qty20RF;
+    let nextQ40rf = optMix.qty40RF;
+    let nextQ40rh = optMix.qty40RH;
 
-    const hasLclAuto = optMix.dryMode === 'LCL' || optMix.reeferMode === 'LCL';
-    setShowFwdCompare(hasLclAuto);
-    setExecOption(hasLclAuto ? 'FWD_ALL' : 'SELF');
-    if (hasLclAuto) {
-      setSelfOceanChecked(false);
-    } else {
-      setSelfOceanChecked(true);
-      setFwdOcean(0);
+    if (existingProp?.container_type) {
+      const ctStr = existingProp.container_type;
+      const matchQty = (typeRegex: RegExp) => {
+        const m = ctStr.match(new RegExp(`(\\d+)\\s*x\\s*${typeRegex.source}`, 'i'));
+        return m ? parseInt(m[1], 10) : 0;
+      };
+      const parsed20dc = matchQty(/20['’]?\s*DC/);
+      const parsed40dc = matchQty(/40['’]?\s*DC/);
+      const parsed40hc = matchQty(/40['’]?\s*HC/);
+      const parsed20rf = matchQty(/20['’]?\s*RF/);
+      const parsed40rf = matchQty(/40['’]?\s*RF/);
+      const parsed40rh = matchQty(/40['’]?\s*RH/);
+      const sumParsed = parsed20dc + parsed40dc + parsed40hc + parsed20rf + parsed40rf + parsed40rh;
+      if (sumParsed > 0) {
+        nextQ20dc = parsed20dc;
+        nextQ40dc = parsed40dc;
+        nextQ40hc = parsed40hc;
+        nextQ20rf = parsed20rf;
+        nextQ40rf = parsed40rf;
+        nextQ40rh = parsed40rh;
+      } else if (ctStr.toUpperCase().includes('LCL')) {
+        nextQ20dc = 0;
+        nextQ40dc = 0;
+        nextQ40hc = 0;
+        nextQ20rf = 0;
+        nextQ40rf = 0;
+        nextQ40rh = 0;
+      }
     }
 
-    const desired = (inq.desired_incoterm || 'CIF').toUpperCase();
+    setQ20dc(nextQ20dc);
+    setQ40dc(nextQ40dc);
+    setQ40hc(nextQ40hc);
+    setQ20rf(nextQ20rf);
+    setQ40rf(nextQ40rf);
+    setQ40rh(nextQ40rh);
+
+    setSelectedScheduleId(existingProp?.schedule_id || '');
+    setLclBasis(existingMeta?.lcl_basis === 'TON' ? 'TON' : 'CBM');
+    setLclRate(existingMeta?.lcl_rate && existingMeta.lcl_rate > 0 ? existingMeta.lcl_rate : 65);
+    setMarginPct(existingMeta?.margin_pct !== undefined ? existingMeta.margin_pct : 12);
+    setMinMarginPct(existingMeta?.min_margin_pct !== undefined ? existingMeta.min_margin_pct : 5);
+    setDestExtra(existingMeta?.dest_extra !== undefined ? existingMeta.dest_extra : 0);
+    setCalcNote(existingMeta?.note || '');
+
+    const hasLclAuto =
+      (nextQ20dc + nextQ40dc + nextQ40hc + nextQ20rf + nextQ40rf + nextQ40rh === 0 && parsed.length > 0) ||
+      optMix.dryMode === 'LCL' ||
+      optMix.reeferMode === 'LCL';
+    const savedExec = existingMeta?.freight_exec_option || (hasLclAuto ? 'FWD_ALL' : 'SELF');
+    setExecOption(savedExec);
+    setShowFwdCompare(hasLclAuto || savedExec !== 'SELF' || toNum(existingMeta?.fwd_ocean) > 0 || toNum(existingMeta?.fwd_trucking) > 0);
+    setFwdOcean(toNum(existingMeta?.fwd_ocean));
+    setFwdTruck(toNum(existingMeta?.fwd_trucking));
+    setFwdCustoms(toNum(existingMeta?.fwd_customs));
+    setFwdPermits(toNum(existingMeta?.fwd_permits));
+    setSelfTruckRate(toNum(existingMeta?.self_trucking));
+    setSelfTruckChecked(toNum(existingMeta?.self_trucking) > 0 && toNum(existingMeta?.fwd_trucking) === 0);
+    setSelfOceanChecked(!hasLclAuto && toNum(existingMeta?.fwd_ocean) === 0);
+    setSelfCustomsChecked(toNum(existingMeta?.fwd_customs) === 0);
+    setSelfPermitsChecked(toNum(existingMeta?.fwd_permits) === 0);
+
+    const desired = (existingProp?.recommended_incoterm || inq.desired_incoterm || 'CIF').toUpperCase();
+    const savedTerms = existingProp?.proposed_incoterms
+      ? existingProp.proposed_incoterms.split(',').map((t) => t.trim().toUpperCase()).filter(Boolean)
+      : [];
     const isComp = String(inq.quotation_mode || '').toUpperCase().includes('COMP');
-    const initTerms = [desired];
-    if (isComp) {
+    const initTerms = savedTerms.length > 0 ? savedTerms : [desired];
+    if (!initTerms.includes(desired)) initTerms.unshift(desired);
+    if (isComp && savedTerms.length === 0) {
       ['FOB', 'CIF', 'CIP'].forEach((t) => {
         if (!initTerms.includes(t) && initTerms.length < 3) initTerms.push(t);
       });
@@ -202,7 +265,14 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
     if (rule) {
       setIncludeFreight(rule.includeFreight);
       setIncludeInsurance(rule.includeIns);
-      setInsBaseCode(rule.includeIns ? (desired === 'CIP' ? 'INS-ICC-A' : 'INS-ICC-C') : 'INS-NONE');
+      if (existingProp?.insurance_code) {
+        const parsedIns = parseInsuranceCodeString(existingProp.insurance_code, data.pricingRates);
+        setInsBaseCode(parsedIns.baseCode);
+        setInsAddons(parsedIns.addonCodes);
+      } else {
+        setInsBaseCode(rule.includeIns ? (desired === 'CIP' ? 'INS-ICC-A' : 'INS-ICC-C') : 'INS-NONE');
+        setInsAddons([]);
+      }
     }
   };
 
@@ -1353,6 +1423,13 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                   </tr>
                 );
               })}
+              {data.proposals.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="text-center py-8 opacity-75">
+                    Chưa có phương án tính giá nào được lập.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

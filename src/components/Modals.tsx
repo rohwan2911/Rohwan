@@ -386,7 +386,12 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       ? `Báo giá ${cleanQuoteNoForCustomer(ctx.extraMeta?.quotation_no || '', target.orderId)}`
       : `${target.kind} · ${ctx.order?.contract_no || target.orderId}`;
 
-  const safeDocFileName = `${cleanQuoteTitle.replace(/[^a-zA-Z0-9_-]+/g, '_')}.docx`;
+  const safeDocFileName = `${cleanQuoteTitle
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd')
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')}.docx`;
 
   const flushDirectEditHtml = (): string | null => {
     if (directEditMode && editableRef.current) {

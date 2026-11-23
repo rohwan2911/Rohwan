@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Lock, Mail, Sprout, AlertTriangle, LogIn, UserPlus, User, Building2, CheckCircle2 } from 'lucide-react';
 import { isSupabaseConfigured, registerWithSupabaseEmail, signInWithSupabaseEmail } from '../lib/supabase';
 import type { SysUser } from '../types';
+import { capitalizeWordsPreservingSpaces } from '../utils/calculations';
 
 export const COMPANY_LOGO_URL =
   'https://cqxchzwksyfwguzavqbz.supabase.co/storage/v1/object/public/images/logo-icon.png';
@@ -35,7 +36,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
     if (mode === 'login') {
       if (!email.trim() || !password) {
-        setError('Vui lòng nhập đầy đủ Email và Mật khẩu.');
+        setError('Vui lòng nhập Email / Tên đăng nhập và Mật khẩu.');
         return;
       }
       setLoading(true);
@@ -140,7 +141,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         )}
 
         {error && (
-          <div className="mb-4 p-3 rounded-xl bg-[#8c3b3b] border border-[#6e2b2b] text-xs font-semibold text-white">
+          <div className="mb-3 px-3 py-2 rounded-xl bg-[#8c3b3b] border border-[#6e2b2b] text-xs font-semibold text-white leading-snug">
             {error}
           </div>
         )}
@@ -159,12 +160,25 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                 <label className="block text-xs font-bold text-[#fff5d6] mb-1">
                   Họ và tên nhân sự *
                 </label>
-                <div className="relative">
-                  <User className="w-4 h-4 text-[#0f4a33] absolute left-3 top-1/2 -translate-y-1/2" />
+                <div className="relative login-input-group">
+                  <User className="login-input-icon w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
                     type="text"
                     value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
+                    onChange={(e) => {
+                      const el = e.currentTarget;
+                      const start = el.selectionStart;
+                      const end = el.selectionEnd;
+                      const formatted = capitalizeWordsPreservingSpaces(el.value);
+                      setFullName(formatted);
+                      if (start !== null && end !== null) {
+                        window.requestAnimationFrame(() => {
+                          if (document.activeElement === el) {
+                            el.setSelectionRange(start, end);
+                          }
+                        });
+                      }
+                    }}
                     placeholder="Nguyễn Văn A"
                     className="agri-input pl-9"
                     required
@@ -176,8 +190,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                 <label className="block text-xs font-bold text-[#fff5d6] mb-1">
                   Phòng ban đăng ký *
                 </label>
-                <div className="relative">
-                  <Building2 className="w-4 h-4 text-[#0f4a33] absolute left-3 top-1/2 -translate-y-1/2" />
+                <div className="relative login-input-group">
+                  <Building2 className="login-input-icon w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <select
                     value={department}
                     onChange={(e) => setDepartment(e.target.value === 'XNK' ? 'XNK' : 'SALES')}
@@ -193,17 +207,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
           <div>
             <label className="block text-xs font-bold text-[#fff5d6] mb-1">
-              Email nhân sự *
+              {mode === 'login' ? 'Email hoặc Tên đăng nhập *' : 'Email nhân sự *'}
             </label>
-            <div className="relative">
-              <Mail className="w-4 h-4 text-[#0f4a33] absolute left-3 top-1/2 -translate-y-1/2" />
+            <div className="relative login-input-group">
+              <Mail className="login-input-icon w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
-                type="email"
+                type={mode === 'login' ? 'text' : 'email'}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@greenagri-vn.com"
+                placeholder={mode === 'login' ? 'Nhập email, họ tên hoặc mã nhân viên...' : 'name@greenagri-vn.com'}
                 className="agri-input pl-9"
-                autoComplete="email"
+                autoComplete={mode === 'login' ? 'username' : 'email'}
                 required
               />
             </div>
@@ -213,8 +227,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             <label className="block text-xs font-bold text-[#fff5d6] mb-1">
               Mật khẩu *
             </label>
-            <div className="relative">
-              <Lock className="w-4 h-4 text-[#0f4a33] absolute left-3 top-1/2 -translate-y-1/2" />
+            <div className="relative login-input-group">
+              <Lock className="login-input-icon w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="password"
                 value={password}
@@ -232,8 +246,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
               <label className="block text-xs font-bold text-[#fff5d6] mb-1">
                 Xác nhận mật khẩu *
               </label>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-[#0f4a33] absolute left-3 top-1/2 -translate-y-1/2" />
+              <div className="relative login-input-group">
+                <Lock className="login-input-icon w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                 <input
                   type="password"
                   value={confirmPassword}

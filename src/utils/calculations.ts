@@ -47,6 +47,10 @@ export function normalizePlainText(val: unknown): string {
   return String(val ?? '').replace(/^'/, '').trim();
 }
 
+export function capitalizeWordsPreservingSpaces(val: string): string {
+  return String(val || '').replace(/(^|\s)(\S)/g, (_, space, ch) => `${space}${ch.toLocaleUpperCase('vi-VN')}`);
+}
+
 export function todayIsoDate(): string {
   const d = new Date();
   const y = d.getFullYear();
@@ -73,7 +77,7 @@ export function normalizeRole(roleOrDept?: string, deptFallback?: string): RoleT
   const hasXnkKeyword = (s: string) =>
     s.includes('XNK') || s.includes('LOGISTIC') || s.includes('XUAT NHAP KHAU') || s.includes('CHUNG TU') || s.includes('CUOC');
   const hasSalesKeyword = (s: string) =>
-    s.includes('SALES') || s.includes('KINH DOANH');
+    s.includes('SALE') || s.includes('KINH DOANH');
 
   if (deptFallback !== undefined) {
     if (hasAdminKeyword(first) || hasAdminKeyword(second)) return 'ADMIN';
@@ -185,7 +189,7 @@ export function getNextContractMilestone(stageNum: number): { nextStatus: string
 export function stripInternalCodesForCustomer(text: string): string {
   return String(text || '')
     .replace(/\bTMP_[A-Z0-9_]+\b/gi, '')
-    .replace(/\bORD-\d{6,}(?:-\d+)?\b/gi, '')
+    .replace(/\b(?:QT-)?ORD-\d{6,}(?:-\d+)?\b/gi, '')
     .replace(/[-_](?:V|R)\d+\b/gi, '')
     .replace(/\s{2,}/g, ' ')
     .trim();

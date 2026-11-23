@@ -450,8 +450,8 @@ const ContractBookingModal: React.FC<ContractBookingModalProps> = ({
               <input value={order.pod} onChange={(e) => onChangeOrder({ ...order, pod: e.target.value })} className="agri-input" />
             </div>
             <div className="sm:col-span-4">
-              <label className="block font-bold mb-1">Link File Hợp đồng đã ký (Google Drive / URL)</label>
-              <input value={order.contract_link} onChange={(e) => onChangeOrder({ ...order, contract_link: e.target.value })} placeholder="https://..." className="agri-input" />
+              <label className="block font-bold mb-1">Link File Hợp đồng đã ký (Supabase Storage Path / URL)</label>
+              <input value={order.contract_link} onChange={(e) => onChangeOrder({ ...order, contract_link: e.target.value })} placeholder="orders/..." className="agri-input" />
             </div>
           </div>
 

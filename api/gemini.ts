@@ -98,8 +98,8 @@ async function handleSmartFillTemplate(ai: GoogleGenAI, body: AiRequestBody) {
     },
   });
 
-  const text = (response.text || '{}').trim();
-  const parsed = JSON.parse(text);
+  const rawText = (response.text || '{}').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  const parsed = JSON.parse(rawText || '{}');
   return {
     success: true,
     ...parsed,
@@ -180,8 +180,8 @@ export async function runGeminiIncotermAdvisor(body: AiRequestBody, apiKey: stri
     },
   });
 
-  const text = (response.text || '{}').trim();
-  const parsed = JSON.parse(text);
+  const rawText = (response.text || '{}').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  const parsed = JSON.parse(rawText || '{}');
   return {
     success: true,
     ...parsed,

@@ -387,11 +387,10 @@ export function generateExportDocumentHtml(
   `);
 }
 
-export function buildQuotationEmailSubject(inq: InquiryQuotation, prop: PricingProposal | undefined, extraMeta: ProposalExtraMeta | undefined, products: ProductCatalog[]): string {
+export function buildQuotationEmailSubject(inq: InquiryQuotation, _prop: PricingProposal | undefined, _extraMeta: ProposalExtraMeta | undefined, products: ProductCatalog[]): string {
   const items = parseOrderItems(inq, products);
   const itemNames = items.map((i) => stripInternalCodesForCustomer(i.name_eng || i.name)).filter(Boolean).slice(0, 2).join(', ') || 'Vietnamese Agricultural Products';
-  const cleanRef = cleanQuoteNoForCustomer(extraMeta?.quotation_no || '', inq.order_id);
-  return `[GREEN AGRI-EXPORTS] Official Quotation – ${itemNames} (${cleanRef})`;
+  return `[GREEN AGRI-EXPORTS] Official Quotation – ${itemNames}`;
 }
 
 export function buildQuotationEmailHtml(inq: InquiryQuotation, cus: ConsigneeDirectory | undefined, prop: PricingProposal | undefined, extraMeta: ProposalExtraMeta | undefined, sch: ShippingSchedule | undefined, products: ProductCatalog[], overrideIncoterm?: string, overrideSellingPrice?: number): string {

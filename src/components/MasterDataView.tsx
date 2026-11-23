@@ -10,7 +10,7 @@ import type {
   TemplatePlaceholder,
   ViewId,
 } from '../types';
-import { computeFreightExpiryStatus, fmtUSD, normalizePlainText, todayIsoDate, toNum } from '../utils/calculations';
+import { capitalizeWordsPreservingSpaces, computeFreightExpiryStatus, fmtUSD, normalizePlainText, todayIsoDate, toNum } from '../utils/calculations';
 import {
   applyAiTagsToDocx,
   extractDocxParagraphBlocks,
@@ -866,7 +866,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                   employee_id: `EMP-${String(data.users.length + 1).padStart(3, '0')}`,
                   full_name: '',
                   department: 'SALES',
-                  role: 'Staff',
+                  role: 'Sale',
                   email: '',
                   status: 'Active',
                 },
@@ -971,7 +971,25 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
               </div>
               <div>
                 <label className="block font-bold mb-1">Họ tên *</label>
-                <input placeholder="Họ tên" value={usrModal.form.full_name} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, full_name: e.target.value } })} className="agri-input" />
+                <input
+                  placeholder="Họ tên"
+                  value={usrModal.form.full_name}
+                  onChange={(e) => {
+                    const el = e.currentTarget;
+                    const start = el.selectionStart;
+                    const end = el.selectionEnd;
+                    const formatted = capitalizeWordsPreservingSpaces(el.value);
+                    setUsrModal({ ...usrModal, form: { ...usrModal.form!, full_name: formatted } });
+                    if (start !== null && end !== null) {
+                      window.requestAnimationFrame(() => {
+                        if (document.activeElement === el) {
+                          el.setSelectionRange(start, end);
+                        }
+                      });
+                    }
+                  }}
+                  className="agri-input"
+                />
               </div>
               <div className="sm:col-span-2">
                 <label className="block font-bold mb-1">Email Supabase Auth *</label>
@@ -991,7 +1009,21 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
               )}
               <div>
                 <label className="block font-bold mb-1">Phòng ban</label>
-                <select value={usrModal.form.department} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, department: e.target.value } })} className="agri-input">
+                <select
+                  value={usrModal.form.department}
+                  onChange={(e) => {
+                    const dept = e.target.value;
+                    const syncedRole = !usrModal.isEdit
+                      ? dept === 'ADMIN'
+                        ? 'Admin'
+                        : dept === 'XNK'
+                        ? 'XNK'
+                        : 'Sale'
+                      : usrModal.form!.role;
+                    setUsrModal({ ...usrModal, form: { ...usrModal.form!, department: dept, role: syncedRole } });
+                  }}
+                  className="agri-input"
+                >
                   <option value="SALES">SALES</option>
                   <option value="XNK">XNK</option>
                   <option value="ADMIN">ADMIN</option>
@@ -999,7 +1031,18 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
               </div>
               <div>
                 <label className="block font-bold mb-1">Vai trò</label>
-                <input placeholder="Staff / Manager / Admin" value={usrModal.form.role} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, role: e.target.value } })} className="agri-input" />
+                <select
+                  value={usrModal.form.role}
+                  onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, role: e.target.value } })}
+                  className="agri-input"
+                >
+                  <option value="Sale">Sale</option>
+                  <option value="XNK">XNK</option>
+                  <option value="Admin">Admin</option>
+                  {!['Sale', 'XNK', 'Admin'].includes(usrModal.form.role) && usrModal.form.role && (
+                    <option value={usrModal.form.role}>{usrModal.form.role}</option>
+                  )}
+                </select>
               </div>
               <div className="sm:col-span-2">
                 <label className="block font-bold mb-1">Trạng thái</label>
