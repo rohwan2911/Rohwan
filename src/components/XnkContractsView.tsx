@@ -76,7 +76,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
 
   if (activeView === 'xnk-documents') {
     return (
-      <div className="space-y-4">
+      <div key="xnk-documents" className="space-y-4">
         <div className="agri-table-wrap">
           <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex items-center justify-between">
             <h3 className="text-sm font-extrabold text-[#fff5d6] flex items-center gap-2">
@@ -201,7 +201,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
   }
 
   return (
-    <div className="space-y-5">
+    <div key="xnk-contract" className="space-y-5">
       {pendingConfirmed.length > 0 && (
         <div className="agri-card p-4 space-y-3 border-l-4 border-l-[#f4d98a]">
           <div className="flex items-center justify-between">
@@ -345,6 +345,13 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                   </tr>
                 );
               })}
+              {filteredOrders.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="text-center py-8 opacity-75">
+                    Chưa có Hợp đồng Ngoại thương nào.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

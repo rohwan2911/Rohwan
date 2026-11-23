@@ -35,7 +35,7 @@ import type {
   ToastMessage,
   ViewId,
 } from './types';
-import { normalizeRole, WORKFLOW_STATUS } from './utils/calculations';
+import { isQuickCaptureStatus, isWaitingPricingStatus, normalizeRole, WORKFLOW_STATUS } from './utils/calculations';
 import { LoginScreen } from './components/LoginScreen';
 import { NAV_GROUPS, Sidebar, TopHeader } from './components/SidebarHeader';
 import { DashboardView } from './components/DashboardView';
@@ -170,6 +170,14 @@ export const App: React.FC = () => {
     [activeView, canAccessView, role, syncData]
   );
 
+  const pendingQuickLogCount = useMemo(() => {
+    return data.inquiries.filter((i) => isQuickCaptureStatus(i.inquiry_status)).length;
+  }, [data.inquiries]);
+
+  const pendingPricingCount = useMemo(() => {
+    return data.inquiries.filter((i) => isWaitingPricingStatus(i.inquiry_status)).length;
+  }, [data.inquiries]);
+
   const pendingSignCount = useMemo(() => {
     return data.orders.filter((o) => {
       const meta = orderMetaMap[o.order_id];
@@ -205,6 +213,8 @@ export const App: React.FC = () => {
         role={role}
         activeView={activeView}
         collapsed={sidebarCollapsed}
+        pendingQuickLogCount={pendingQuickLogCount}
+        pendingPricingCount={pendingPricingCount}
         pendingSignCount={pendingSignCount}
         onToggleCollapse={() => {
           const next = !sidebarCollapsed;

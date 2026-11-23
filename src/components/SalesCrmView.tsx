@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   Plus,
   Zap,
@@ -10,6 +10,7 @@ import {
   FileText,
   Edit3,
   UserPlus,
+  Calendar,
 } from 'lucide-react';
 import type {
   AppDataState,
@@ -160,6 +161,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
   const [cusModalOpen, setCusModalOpen] = useState(false);
   const [cusForm, setCusForm] = useState<ConsigneeDirectory | null>(null);
   const [cusIsEdit, setCusIsEdit] = useState(false);
+  const dateInputRef = useRef<HTMLInputElement>(null);
 
   const countryOptions = useMemo(() => {
     const set = new Set<string>();
@@ -169,8 +171,9 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
   }, [data.schedules, data.consignees]);
 
   const consigneeOptions = useMemo(() => {
+    const countryQ = cusCountry.trim().toLowerCase();
     return data.consignees
-      .filter((c) => !cusCountry || c.country.toLowerCase() === cusCountry.toLowerCase())
+      .filter((c) => !countryQ || c.country.trim().toLowerCase().includes(countryQ))
       .map((c) => ({
         value: c.consignee_id,
         label: `${c.consignee_name} (${c.consignee_id})`,
@@ -261,10 +264,22 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     setRfqModalOpen(true);
   };
 
-  const handleSelectConsignee = (cid: string) => {
-    setSelectedConsigneeId(cid);
-    const cus = data.consignees.find((c) => c.consignee_id === cid);
+  const handleSelectConsignee = (val: string) => {
+    const trimmed = val.trim();
+    if (!trimmed) {
+      setSelectedConsigneeId('');
+      setCusName('');
+      return;
+    }
+    const low = trimmed.toLowerCase();
+    const cus = data.consignees.find(
+      (c) =>
+        c.consignee_id.trim().toLowerCase() === low ||
+        c.consignee_name.trim().toLowerCase() === low ||
+        `${c.consignee_name} (${c.consignee_id})`.trim().toLowerCase() === low
+    );
     if (cus) {
+      setSelectedConsigneeId(cus.consignee_id);
       setCusName(cus.consignee_name);
       setCusCountry(cus.country);
       setCusAddress(cus.address);
@@ -274,6 +289,9 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
       setCusEmail(cus.email);
       setCusFax(normalizePlainText(cus.fax));
       if (cus.default_payment_term) setPaymentTerm(cus.default_payment_term);
+    } else {
+      setSelectedConsigneeId('');
+      setCusName(val);
     }
   };
 
@@ -283,20 +301,28 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
       onToast('warning', 'Vui lòng nhập Tên khách hàng để ghi nhận nhanh.');
       return;
     }
+    const cleanQuickName = quickCusName.trim().toLowerCase();
+    const cleanQuickEmail = quickEmail.trim().toLowerCase();
+    const matchedCus = data.consignees.find(
+      (c) =>
+        c.consignee_name.trim().toLowerCase() === cleanQuickName ||
+        (cleanQuickEmail && c.email.trim().toLowerCase() === cleanQuickEmail)
+    );
     setQuickSaving(true);
     try {
       await onSaveInquiry({
         saleRep: currentUser.full_name,
         customerInput: {
-          consignee_name: quickCusName.trim(),
-          country: quickCountry.trim(),
-          address: '',
-          tax: '',
-          contact_person: quickContact.trim(),
-          phone: quickPhone.trim(),
-          email: quickEmail.trim(),
-          fax: '',
-          default_payment_term: 'T/T 30/70',
+          consignee_id: matchedCus?.consignee_id,
+          consignee_name: matchedCus?.consignee_name || quickCusName.trim(),
+          country: quickCountry.trim() || matchedCus?.country || '',
+          address: matchedCus?.address || '',
+          tax: matchedCus?.tax || '',
+          contact_person: quickContact.trim() || matchedCus?.contact_person || '',
+          phone: quickPhone.trim() || matchedCus?.phone || '',
+          email: quickEmail.trim() || matchedCus?.email || '',
+          fax: matchedCus?.fax || '',
+          default_payment_term: matchedCus?.default_payment_term || 'T/T 30/70',
         },
         sku_code: '',
         product_name_vie: '',
@@ -355,13 +381,24 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     });
 
     const totalWeight = orderItems.reduce((s, it) => s + it.weight, 0);
+    const cleanNameLow = cusName.trim().toLowerCase();
+    const cleanEmailLow = cusEmail.trim().toLowerCase();
+    const cleanTaxLow = cusTax.trim().toLowerCase();
+    const resolvedExisting =
+      (selectedConsigneeId && data.consignees.find((c) => c.consignee_id === selectedConsigneeId)) ||
+      data.consignees.find(
+        (c) =>
+          c.consignee_name.trim().toLowerCase() === cleanNameLow ||
+          (cleanEmailLow && c.email.trim().toLowerCase() === cleanEmailLow) ||
+          (cleanTaxLow && normalizePlainText(c.tax).toLowerCase() === cleanTaxLow)
+      );
     setRfqSaving(true);
     try {
       await onSaveInquiry({
         existingOrderId: editingOrderId,
         saleRep: currentUser.full_name,
         customerInput: {
-          consignee_id: selectedConsigneeId || undefined,
+          consignee_id: resolvedExisting?.consignee_id || selectedConsigneeId || undefined,
           consignee_name: cusName.trim(),
           country: cusCountry.trim(),
           address: cusAddress.trim(),
@@ -470,7 +507,13 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
             </div>
             <div>
               <label className="block text-[11px] font-bold text-[#fff5d6] mb-1">Quốc gia</label>
-              <SearchableCombo value={quickCountry} onChange={setQuickCountry} options={countryOptions} placeholder="Chọn Quốc gia" />
+              <SearchableCombo
+                value={quickCountry}
+                onChange={setQuickCountry}
+                options={countryOptions}
+                allowCustom
+                placeholder="Chọn hoặc nhập Quốc gia..."
+              />
             </div>
             <div>
               <label className="block text-[11px] font-bold text-[#fff5d6] mb-1">Người liên hệ</label>
@@ -707,12 +750,24 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
               <form onSubmit={handleSubmitFullRfq} className="p-5 space-y-4 text-xs">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="block font-bold text-[#fff5d6] mb-1">Quốc gia (Chọn hoặc nhập mới)</label>
-                    <SearchableCombo value={cusCountry} onChange={setCusCountry} options={countryOptions} placeholder="Chọn hoặc nhập Quốc gia" />
+                    <label className="block font-bold text-[#fff5d6] mb-1">Lọc theo Quốc gia (Chọn hoặc nhập mới)</label>
+                    <SearchableCombo
+                      value={cusCountry}
+                      onChange={setCusCountry}
+                      options={countryOptions}
+                      allowCustom
+                      placeholder="Chọn hoặc nhập Quốc gia..."
+                    />
                   </div>
                   <div className="sm:col-span-2">
                     <label className="block font-bold text-[#fff5d6] mb-1">Chọn Khách hàng có sẵn (tùy chọn)</label>
-                    <SearchableCombo value={selectedConsigneeId} onChange={handleSelectConsignee} options={consigneeOptions} placeholder="Tìm khách hàng cũ hoặc nhập mới bên dưới..." allowCustom={false} />
+                    <SearchableCombo
+                      value={selectedConsigneeId || cusName}
+                      onChange={handleSelectConsignee}
+                      options={consigneeOptions}
+                      placeholder="Tìm khách hàng cũ hoặc nhập tên mới..."
+                      allowCustom
+                    />
                   </div>
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Tên Khách hàng / Công ty *</label>
@@ -721,11 +776,21 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                       onChange={(e) => {
                         const val = e.target.value;
                         setCusName(val);
-                        if (selectedConsigneeId) {
-                          const matched = data.consignees.find((c) => c.consignee_id === selectedConsigneeId);
-                          if (!matched || matched.consignee_name.trim().toLowerCase() !== val.trim().toLowerCase()) {
-                            setSelectedConsigneeId('');
-                          }
+                        const low = val.trim().toLowerCase();
+                        const matched = low
+                          ? data.consignees.find((c) => c.consignee_name.trim().toLowerCase() === low)
+                          : undefined;
+                        if (matched) {
+                          setSelectedConsigneeId(matched.consignee_id);
+                          if (!cusCountry) setCusCountry(matched.country);
+                          if (!cusAddress) setCusAddress(matched.address);
+                          if (!cusTax) setCusTax(normalizePlainText(matched.tax));
+                          if (!cusContact) setCusContact(matched.contact_person);
+                          if (!cusPhone) setCusPhone(normalizePlainText(matched.phone));
+                          if (!cusEmail) setCusEmail(matched.email);
+                          if (!cusFax) setCusFax(normalizePlainText(matched.fax));
+                        } else {
+                          setSelectedConsigneeId('');
                         }
                       }}
                       placeholder="Nhập tên khách hàng hoặc công ty mới..."
@@ -775,66 +840,72 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                     const prod = data.products.find((p) => p.sku_code === ln.sku);
                     const packOpts = getPackingOptionsForProduct(prod, data.pricingRates, data.lookups);
                     return (
-                      <div key={idx} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end bg-white/60 p-2.5 rounded-xl border border-[#186635]/40">
-                        <div className="sm:col-span-4">
-                          <label className="block text-[10.5px] font-bold text-[#07281c] mb-1">Sản phẩm (SKU)</label>
-                          <SearchableCombo
-                            value={ln.sku}
-                            allowCustom={false}
-                            options={productOptions}
-                            onChange={(sku) => {
-                              const p = data.products.find((x) => x.sku_code === sku);
-                              setLines((prev) =>
-                                prev.map((row, i) =>
-                                  i === idx
-                                    ? { ...row, sku, name: p?.product_name_vie || sku, name_eng: p?.product_name_eng || '' }
-                                    : row
-                                )
-                              );
-                            }}
-                          />
-                        </div>
-                        <div className="sm:col-span-3">
-                          <label className="block text-[10.5px] font-bold text-[#07281c] mb-1">Tên tiếng Anh (In Báo giá)</label>
-                          <input
-                            value={ln.name_eng}
-                            onChange={(e) => setLines((prev) => prev.map((r, i) => (i === idx ? { ...r, name_eng: e.target.value } : r)))}
-                            className="agri-input text-xs"
-                          />
-                        </div>
-                        <div className="sm:col-span-3">
-                          <label className="block text-[10.5px] font-bold text-[#07281c] mb-1">Quy cách đóng gói</label>
-                          <select
-                            value={ln.packingCode}
-                            onChange={(e) => setLines((prev) => prev.map((r, i) => (i === idx ? { ...r, packingCode: e.target.value } : r)))}
-                            className="agri-input text-xs"
-                          >
-                            {packOpts.map((pk) => (
-                              <option key={pk.code} value={pk.code}>
-                                {pk.code} – {pk.name} (+${pk.perKgRate.toFixed(2)}/kg)
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="sm:col-span-2 flex items-center gap-1">
-                          <div className="flex-1">
-                            <label className="block text-[10.5px] font-bold text-[#07281c] mb-1">KL (KG)</label>
-                            <input
-                              type="number"
-                              value={ln.weight}
-                              onChange={(e) => setLines((prev) => prev.map((r, i) => (i === idx ? { ...r, weight: toNum(e.target.value) } : r)))}
-                              className="agri-input text-xs font-mono font-bold"
+                      <div key={idx} className="bg-white/60 p-3 rounded-xl border border-[#186635]/40 space-y-2.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-end">
+                          <div>
+                            <label className="block text-[10.5px] font-bold text-[#07281c] mb-1">Sản phẩm (SKU)</label>
+                            <SearchableCombo
+                              value={ln.sku}
+                              allowCustom={false}
+                              options={productOptions}
+                              onChange={(sku) => {
+                                const p = data.products.find((x) => x.sku_code === sku);
+                                setLines((prev) =>
+                                  prev.map((row, i) =>
+                                    i === idx
+                                      ? { ...row, sku, name: p?.product_name_vie || sku, name_eng: p?.product_name_eng || '' }
+                                      : row
+                                  )
+                                );
+                              }}
                             />
                           </div>
-                          {lines.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
-                              className="mt-5 p-1.5 rounded bg-[#8c3b3b] text-white cursor-pointer"
+                          <div>
+                            <label className="block text-[10.5px] font-bold text-[#07281c] mb-1">Tên tiếng Anh (In Báo giá)</label>
+                            <input
+                              value={ln.name_eng}
+                              onChange={(e) => setLines((prev) => prev.map((r, i) => (i === idx ? { ...r, name_eng: e.target.value } : r)))}
+                              className="agri-input text-xs"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row gap-2.5 items-end">
+                          <div className="w-full sm:w-[72%]">
+                            <label className="block text-[10.5px] font-bold text-[#07281c] mb-1">Quy cách đóng gói</label>
+                            <select
+                              value={ln.packingCode}
+                              onChange={(e) => setLines((prev) => prev.map((r, i) => (i === idx ? { ...r, packingCode: e.target.value } : r)))}
+                              className="agri-input text-xs"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
+                              {packOpts.map((pk) => (
+                                <option key={pk.code} value={pk.code}>
+                                  {pk.code} – {pk.name} (+${pk.perKgRate.toFixed(2)}/kg)
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="w-full sm:w-[28%] flex items-end gap-1.5">
+                            <div className="flex-1 min-w-0">
+                              <label className="block text-[10.5px] font-bold text-[#07281c] mb-1">KL (KG)</label>
+                              <input
+                                type="number"
+                                value={ln.weight}
+                                onChange={(e) => setLines((prev) => prev.map((r, i) => (i === idx ? { ...r, weight: toNum(e.target.value) } : r)))}
+                                className="agri-input text-xs font-mono font-bold"
+                              />
+                            </div>
+                            {lines.length > 1 && (
+                              <button
+                                type="button"
+                                title="Xóa dòng sản phẩm"
+                                onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
+                                className="p-2 rounded-lg bg-[#8c3b3b] text-white cursor-pointer shrink-0"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -864,7 +935,46 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   </div>
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Ngày giao dự kiến</label>
-                    <input type="date" value={desiredDate} onChange={(e) => setDesiredDate(e.target.value)} className="agri-input" />
+                    <div className="relative flex items-center">
+                      <input
+                        type="text"
+                        value={
+                          /^\d{4}-\d{2}-\d{2}$/.test(desiredDate)
+                            ? `${desiredDate.slice(8, 10)}/${desiredDate.slice(5, 7)}/${desiredDate.slice(0, 4)}`
+                            : desiredDate
+                        }
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          const dmy = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+                          setDesiredDate(dmy ? `${dmy[3]}-${dmy[2]}-${dmy[1]}` : e.target.value);
+                        }}
+                        placeholder="DD/MM/YYYY"
+                        className="agri-input pr-8 font-mono"
+                      />
+                      <input
+                        ref={dateInputRef}
+                        type="date"
+                        tabIndex={-1}
+                        value={/^\d{4}-\d{2}-\d{2}$/.test(desiredDate) ? desiredDate : ''}
+                        onChange={(e) => setDesiredDate(e.target.value)}
+                        className="sr-only"
+                        aria-hidden="true"
+                      />
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        title="Chọn ngày từ lịch"
+                        onClick={() => {
+                          const el = dateInputRef.current;
+                          if (!el) return;
+                          if (typeof el.showPicker === 'function') el.showPicker();
+                          else el.click();
+                        }}
+                        className="absolute right-2 p-0.5 text-[#0f4a33] hover:text-[#186635] cursor-pointer"
+                      >
+                        <Calendar className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Thanh toán đề xuất</label>
@@ -1018,6 +1128,13 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                     </tr>
                   );
                 })}
+                {quotationRows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="text-center py-8 opacity-75">
+                      Chưa có báo giá nào trong danh sách.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -1080,7 +1197,13 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
 
         <div className="agri-table-wrap">
           <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635]">
-            <h3 className="text-sm font-extrabold text-[#fff5d6]">Hợp đồng Chờ Ký &amp; Xác nhận Khách ({salesContractsList.length})</h3>
+            <h3 className="text-sm font-extrabold text-[#fff5d6]">
+              {contractFilter === 'PENDING'
+                ? `Hợp đồng Chờ Sales đưa ký (${salesContractsList.length})`
+                : contractFilter === 'SIGNED'
+                ? `Hợp đồng Đã ký & Khóa (${salesContractsList.length})`
+                : `Tất cả Hợp đồng (${salesContractsList.length})`}
+            </h3>
           </div>
           <div className="agri-table-scroll">
             <table className="agri-table">
@@ -1177,7 +1300,15 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   );
                 })}
                 {salesContractsList.length === 0 && (
-                  <tr><td colSpan={7} className="text-center py-8 opacity-75">Chưa có hợp đồng nào trong danh sách.</td></tr>
+                  <tr>
+                    <td colSpan={7} className="text-center py-8 opacity-75">
+                      {contractFilter === 'PENDING'
+                        ? 'Chưa có hợp đồng nào đang chờ Sales đưa ký.'
+                        : contractFilter === 'SIGNED'
+                        ? 'Chưa có hợp đồng nào đã ký & khóa.'
+                        : 'Chưa có hợp đồng nào trong danh sách.'}
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
@@ -1296,6 +1427,13 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   </td>
                 </tr>
               ))}
+              {filteredCustomers.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="text-center py-8 opacity-75">
+                    Chưa có khách hàng nào trong danh bạ.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

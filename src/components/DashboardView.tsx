@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Clock, Eye, Ship, Anchor, CalendarClock } from 'lucide-react';
 import type { AppDataState, OrderLogisticsMeta, ProposalExtraMeta, RoleType, ViewId } from '../types';
 import {
@@ -47,10 +47,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return () => window.clearInterval(id);
   }, []);
 
+  const didAutoSelectRef = useRef(false);
+
   useEffect(() => {
-    if (!selectedOrderId) {
+    if (didAutoSelectRef.current) return;
+    if (!selectedOrderId && (data.orders.length > 0 || data.inquiries.length > 0)) {
+      didAutoSelectRef.current = true;
       if (data.orders.length > 0) setSelectedOrderId(data.orders[data.orders.length - 1].order_id);
-      else if (data.inquiries.length > 0) setSelectedOrderId(data.inquiries[data.inquiries.length - 1].order_id);
+      else setSelectedOrderId(data.inquiries[data.inquiries.length - 1].order_id);
     }
   }, [data.orders, data.inquiries, selectedOrderId]);
 
@@ -202,9 +206,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const cusId = order?.consignee_id || inq?.consignee_id || '';
     const cus = data.consignees.find((c) => c.consignee_id === cusId) || null;
     const sch = prop ? data.schedules.find((s) => s.schedule_id === prop.schedule_id) || null : null;
-    const stageNum = order ? getOrderStage6Number(order, meta) : 1;
-    const pct = !order && !inq ? 0 : stageNum >= 7 ? 100 : Math.round((stageNum / 6) * 100);
-    return { order, inq, prop, meta, cus, sch, stageNum, pct };
+    const hasSelection = Boolean(order || inq);
+    const stageNum = !hasSelection ? 0 : order ? getOrderStage6Number(order, meta) : 1;
+    const pct = !hasSelection ? 0 : stageNum >= 7 ? 100 : Math.round((stageNum / 6) * 100);
+    return { order, inq, prop, meta, cus, sch, hasSelection, stageNum, pct };
   }, [selectedOrderId, data, orderMetaMap]);
 
   const freightAlerts = useMemo(() => {
@@ -388,18 +393,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
 
             <div className="lg:col-span-8 agri-table-wrap flex flex-col">
-              <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <CalendarClock className="w-4 h-4 text-[#f4d98a]" />
-                  <h3 className="text-sm font-extrabold text-[#fff5d6]">
-                    Bảng Theo dõi Tất cả 6 Mốc Cut-off (S/I · VGM · CFS · CY · Customs · Draft B/L)
+              <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <CalendarClock className="w-4 h-4 text-[#f4d98a] shrink-0" />
+                  <h3 className="text-sm font-extrabold text-[#fff5d6] leading-snug">
+                    Theo dõi Hạn Cut-off Đơn hàng (S/I · VGM · CFS · CY · Customs · Draft B/L)
                   </h3>
                 </div>
-                <span className="px-2 py-0.5 rounded bg-[#07281c] text-[#f4d98a] font-mono text-xs font-bold">
+                <span className="px-2 py-0.5 rounded bg-[#07281c] text-[#f4d98a] font-mono text-xs font-bold whitespace-nowrap shrink-0">
                   {cutoffAlerts.length} mốc đang chạy
                 </span>
               </div>
-              <div className="agri-table-scroll flex-1 max-h-[340px]">
+              <div className="agri-table-scroll flex-1 min-h-0 max-h-[340px]">
                 <table className="agri-table">
                   <thead>
                     <tr>
@@ -586,10 +591,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       strokeDashoffset={314 - (314 * selectedDetail.pct) / 100}
                     />
                   </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-2xl font-extrabold font-mono text-[#f4d98a]">{selectedDetail.pct}%</span>
-                    <span className="text-[10px] text-[#9bccb8]">
-                      {selectedDetail.stageNum >= 7 ? 'Hoàn tất' : `Mốc ${selectedDetail.stageNum}/6`}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-2">
+                    <span className="text-2xl font-extrabold font-mono text-[#f4d98a]">
+                      {selectedDetail.hasSelection ? `${selectedDetail.pct}%` : '—'}
+                    </span>
+                    <span className="text-[10px] text-[#9bccb8] leading-tight mt-0.5">
+                      {!selectedDetail.hasSelection
+                        ? 'Chưa chọn đơn'
+                        : selectedDetail.stageNum >= 7
+                        ? 'Hoàn tất'
+                        : `Mốc ${selectedDetail.stageNum}/6`}
                     </span>
                   </div>
                 </div>
@@ -597,8 +608,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <div className="w-full space-y-1.5 text-xs">
                   {WORKFLOW_6_STAGES.map((st, idx) => {
                     const num = idx + 1;
-                    const done = selectedDetail.stageNum > num || selectedDetail.stageNum >= 7;
-                    const active = selectedDetail.stageNum === num;
+                    const done = selectedDetail.hasSelection && (selectedDetail.stageNum > num || selectedDetail.stageNum >= 7);
+                    const active = selectedDetail.hasSelection && selectedDetail.stageNum === num;
                     return (
                       <div
                         key={st}

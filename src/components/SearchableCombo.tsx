@@ -48,7 +48,11 @@ export const SearchableCombo: React.FC<SearchableComboProps> = ({
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
         if (allowCustom && open) {
           const trimmed = query.trim();
-          const matchedOpt = options.find((o) => o.label.toLowerCase() === trimmed.toLowerCase());
+          const matchedOpt = options.find(
+            (o) =>
+              o.label.trim().toLowerCase() === trimmed.toLowerCase() ||
+              o.value.trim().toLowerCase() === trimmed.toLowerCase()
+          );
           const committed = matchedOpt ? matchedOpt.value : trimmed;
           if (committed !== value) onChange(committed);
         }
@@ -71,7 +75,11 @@ export const SearchableCombo: React.FC<SearchableComboProps> = ({
   }, [options, query, open, selectedLabel]);
 
   const trimmedQuery = query.trim();
-  const hasExact = options.some((o) => o.value.toLowerCase() === trimmedQuery.toLowerCase() || o.label.toLowerCase() === trimmedQuery.toLowerCase());
+  const hasExact = options.some(
+    (o) =>
+      o.value.trim().toLowerCase() === trimmedQuery.toLowerCase() ||
+      o.label.trim().toLowerCase() === trimmedQuery.toLowerCase()
+  );
 
   return (
     <div ref={wrapRef} className={`relative ${className}`}>
@@ -94,7 +102,7 @@ export const SearchableCombo: React.FC<SearchableComboProps> = ({
             }
             if (!open) setOpen(true);
           }}
-          className={`w-full pr-12 pl-3 py-1.5 text-xs sm:text-[13px] font-semibold rounded-lg border-[1.5px] outline-none transition-colors ${
+          className={`w-full ${value && !disabled ? 'pr-14' : 'pr-8'} pl-3 py-1.5 text-xs sm:text-[13px] font-semibold rounded-lg border-[1.5px] outline-none transition-colors ${
             dark
               ? 'bg-[#0b3324] border-[#2f7d3e] text-[#fff5d6] placeholder-[#9bccb8]/60 focus:border-[#f4d98a]'
               : 'bg-[#d7eee4] border-[#186635] text-[#0b2418] placeholder-[#1e4231]/60 focus:bg-white'
@@ -104,12 +112,13 @@ export const SearchableCombo: React.FC<SearchableComboProps> = ({
           <button
             type="button"
             tabIndex={-1}
+            title="Xóa lựa chọn"
             onClick={() => {
               onChange('');
               setQuery('');
               setOpen(false);
             }}
-            className={`absolute right-6 p-0.5 rounded ${dark ? 'text-[#d2ebe0] hover:text-[#f4d98a]' : 'text-[#0f4a33] hover:text-[#8c3b3b]'}`}
+            className={`absolute right-7 p-1 rounded cursor-pointer ${dark ? 'text-[#d2ebe0] hover:text-[#f4d98a]' : 'text-[#0f4a33] hover:text-[#8c3b3b]'}`}
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -123,7 +132,7 @@ export const SearchableCombo: React.FC<SearchableComboProps> = ({
             setOpen((prev) => !prev);
             if (!open) setQuery('');
           }}
-          className={`absolute right-1.5 p-0.5 ${dark ? 'text-[#f4d98a]' : 'text-[#0f4a33]'}`}
+          className={`absolute right-1.5 p-1 cursor-pointer ${dark ? 'text-[#f4d98a]' : 'text-[#0f4a33]'}`}
         >
           <ChevronDown className="w-4 h-4" />
         </button>

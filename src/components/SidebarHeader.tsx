@@ -91,6 +91,8 @@ interface SidebarProps {
   role: RoleType;
   activeView: ViewId;
   collapsed: boolean;
+  pendingQuickLogCount: number;
+  pendingPricingCount: number;
   pendingSignCount: number;
   onToggleCollapse: () => void;
   onNavigate: (view: ViewId) => void;
@@ -103,6 +105,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   role,
   activeView,
   collapsed,
+  pendingQuickLogCount,
+  pendingPricingCount,
   pendingSignCount,
   onToggleCollapse,
   onNavigate,
@@ -111,9 +115,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside className={`app-sidebar flex flex-col shrink-0 select-none ${collapsed ? 'is-collapsed' : ''}`}>
-      <div className="p-3.5 border-b border-[#186635] flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-11 h-11 rounded-full bg-[#f6f3e3] border-2 border-[#f4d98a] p-0.5 flex items-center justify-center shrink-0 shadow overflow-hidden">
+      <div
+        className={`border-b border-[#186635] flex items-center ${
+          collapsed ? 'flex-col gap-2 px-2 py-3' : 'justify-between gap-3 px-3.5 py-3.5'
+        }`}
+      >
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <div className="w-10 h-10 rounded-full bg-[#f6f3e3] border-2 border-[#f4d98a] p-0.5 flex items-center justify-center shrink-0 shadow overflow-hidden">
             {!logoError ? (
               <img
                 src={COMPANY_LOGO_URL}
@@ -125,16 +133,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Sprout className="w-5 h-5 text-[#0f4a33]" />
             )}
           </div>
-          <div className="sidebar-hide-collapsed min-w-0">
-            <div className="text-xs font-extrabold text-[#fff5d6] tracking-wide whitespace-nowrap">GREEN AGRI-EXPORTS</div>
-            <div className="text-[10.5px] text-[#9bccb8] whitespace-nowrap">Nông Sản Xanh · ERP</div>
+          <div className="sidebar-hide-collapsed min-w-0 flex-1 pr-2 overflow-hidden">
+            <div className="text-[11px] font-extrabold text-[#fff5d6] tracking-normal whitespace-nowrap truncate">
+              GREEN AGRI-EXPORTS
+            </div>
+            <div className="text-[10.5px] text-[#9bccb8] whitespace-nowrap truncate">Nông Sản Xanh · ERP</div>
           </div>
         </div>
         <button
           type="button"
           onClick={onToggleCollapse}
           title={collapsed ? 'Mở rộng menu' : 'Thu gọn menu'}
-          className="p-1.5 rounded-lg text-[#f4d98a] hover:bg-white/10 shrink-0"
+          className="p-1.5 rounded-lg text-[#f4d98a] hover:bg-white/10 shrink-0 cursor-pointer"
         >
           {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
         </button>
@@ -163,10 +173,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     >
                       <Icon className="w-4 h-4 shrink-0" />
                       <span className="sidebar-hide-collapsed flex-1 truncate">{item.label}</span>
+                      {item.id === 'sales-inquiry' && pendingQuickLogCount > 0 && (
+                        <em className="not-italic sidebar-hide-collapsed px-1.5 py-0.5 rounded-full bg-[#f4d98a] text-[#07281c] text-[10px] font-extrabold leading-none shrink-0">
+                          {pendingQuickLogCount}
+                        </em>
+                      )}
+                      {item.id === 'xnk-pricing' && pendingPricingCount > 0 && (
+                        <em className="not-italic sidebar-hide-collapsed px-1.5 py-0.5 rounded-full bg-[#f4d98a] text-[#07281c] text-[10px] font-extrabold leading-none shrink-0">
+                          {pendingPricingCount}
+                        </em>
+                      )}
                       {item.id === 'sales-contracts' && pendingSignCount > 0 && (
-                        <span className="sidebar-hide-collapsed px-1.5 py-0.5 rounded-full bg-[#f4d98a] text-[#07281c] text-[10px] font-extrabold">
+                        <em className="not-italic sidebar-hide-collapsed px-1.5 py-0.5 rounded-full bg-[#f4d98a] text-[#07281c] text-[10px] font-extrabold leading-none shrink-0">
                           {pendingSignCount}
-                        </span>
+                        </em>
                       )}
                     </button>
                   );
