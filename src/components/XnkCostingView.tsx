@@ -11,6 +11,7 @@ import {
   buildCombinedInsuranceClauseEng,
   buildContainerMixState,
   computeCustomsSplit,
+  computeDomesticTruckingForMix,
   computeInsurancePremiumExact,
   computeItemPackingAndPallet,
   computeLocalChargesForMix,
@@ -77,7 +78,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
   const [q20rf, setQ20rf] = useState(0);
   const [q40rf, setQ40rf] = useState(0);
   const [q40rh, setQ40rh] = useState(0);
-  const [lclBasis, setLclBasis] = useState<'CBM' | 'TON'>('CBM');
+  const [lclBasis, setLclBasis] = useState<'WM' | 'CBM' | 'TON'>('WM');
   const [lclRate, setLclRate] = useState(65);
 
   // Route & Schedule
@@ -109,6 +110,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
   const [insAddons, setInsAddons] = useState<string[]>([]);
   const [manualInsurance, setManualInsurance] = useState('');
   const [destExtra, setDestExtra] = useState(0);
+  const [importDutyUsd, setImportDutyUsd] = useState(0);
   const [calcNote, setCalcNote] = useState('');
 
   // 2-Way Cross-Locked Self vs FWD Matrix
@@ -223,13 +225,24 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
     setQ40rh(nextQ40rh);
 
     setSelectedScheduleId(existingProp?.schedule_id || '');
-    setLclBasis(existingMeta?.lcl_basis === 'TON' ? 'TON' : 'CBM');
+    setLclBasis(existingMeta?.lcl_basis === 'TON' ? 'TON' : existingMeta?.lcl_basis === 'CBM' ? 'CBM' : 'WM');
     setLclRate(existingMeta?.lcl_rate && existingMeta.lcl_rate > 0 ? existingMeta.lcl_rate : 65);
     setMarginPct(existingMeta?.margin_pct !== undefined ? existingMeta.margin_pct : 12);
     setMinMarginPct(existingMeta?.min_margin_pct !== undefined ? existingMeta.min_margin_pct : 5);
     setDestExtra(existingMeta?.dest_extra !== undefined ? existingMeta.dest_extra : 0);
+    setImportDutyUsd(existingMeta?.import_duty_usd !== undefined ? toNum(existingMeta.import_duty_usd) : 0);
     setCalcNote(existingMeta?.note || '');
 
+    const initMix = buildContainerMixState(
+      { q20dc: nextQ20dc, q40dc: nextQ40dc, q40hc: nextQ40hc, q20rf: nextQ20rf, q40rf: nextQ40rf, q40rh: nextQ40rh },
+      parsed,
+      pal,
+      'WM',
+      65,
+      data.products,
+      data.pricingRates
+    );
+    const defaultTruck = computeDomesticTruckingForMix(initMix, data.pricingRates);
     const hasLclAuto =
       (nextQ20dc + nextQ40dc + nextQ40hc + nextQ20rf + nextQ40rf + nextQ40rh === 0 && parsed.length > 0) ||
       optMix.dryMode === 'LCL' ||
@@ -241,8 +254,9 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
     setFwdTruck(toNum(existingMeta?.fwd_trucking));
     setFwdCustoms(toNum(existingMeta?.fwd_customs));
     setFwdPermits(toNum(existingMeta?.fwd_permits));
-    setSelfTruckRate(toNum(existingMeta?.self_trucking));
-    setSelfTruckChecked(toNum(existingMeta?.self_trucking) > 0 && toNum(existingMeta?.fwd_trucking) === 0);
+    const savedSelfTruck = existingMeta?.self_trucking !== undefined ? toNum(existingMeta.self_trucking) : defaultTruck;
+    setSelfTruckRate(savedSelfTruck);
+    setSelfTruckChecked(savedSelfTruck > 0 && toNum(existingMeta?.fwd_trucking) === 0);
     setSelfOceanChecked(!hasLclAuto && toNum(existingMeta?.fwd_ocean) === 0);
     setSelfCustomsChecked(toNum(existingMeta?.fwd_customs) === 0);
     setSelfPermitsChecked(toNum(existingMeta?.fwd_permits) === 0);
@@ -370,6 +384,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
 
   const schOceanRes = useMemo(() => computeScheduleOceanAndMissing(activeSch, mix), [activeSch, mix]);
   const fullLocalTotal = useMemo(() => computeLocalChargesForMix(mix, data.pricingRates), [mix, data.pricingRates]);
+  const defaultTruckRate = useMemo(() => computeDomesticTruckingForMix(mix, data.pricingRates), [mix, data.pricingRates]);
   const customsSplit = useMemo(() => computeCustomsSplit(data.pricingRates), [data.pricingRates]);
 
   const selectedInsRatePct = useMemo(() => {
@@ -389,59 +404,129 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
     [insBaseCode, insAddons, recIncoterm, data.pricingRates]
   );
 
-  // Final Calculations for Khung 4
+  // Final Calculations for Khung 4 (Exact Incoterms 2020 & Insurance 110% Formulas)
   const costing = useMemo(() => {
-    const effOcean = includeFreight ? schOceanRes.ocean : 0;
-    const effSurcharge = includeFreight ? schOceanRes.surcharge : 0;
+    const goodsAndPack = goodsCost + effectivePackingCost;
+    const exwSell = Math.round(goodsAndPack * (1 + marginPct / 100) * 100) / 100;
+
+    const effSelfTruckVal = selfTruckChecked ? (selfTruckRate > 0 ? selfTruckRate : defaultTruckRate) : 0;
+    const activeTrucking = selfTruckChecked ? effSelfTruckVal : fwdTruck;
+    const originCharges = activeTrucking + fullLocalTotal + customsSplit.customsTotal;
+    const fobSell = Math.round((exwSell + originCharges) * 100) / 100;
+
+    const schOcean = schOceanRes.ocean;
+    const schSurcharge = schOceanRes.surcharge;
+    const freightF = (schOcean + schSurcharge) > 0
+      ? (schOcean + schSurcharge)
+      : (mix.hasLcl && fwdOcean > 0 ? fwdOcean : 0);
+    const cfrSell = Math.round((fobSell + freightF) * 100) / 100;
+
+    const defaultCifPct = toNum(insuranceCatalog.byCode['INS-ICC-C']?.standard_rate) || 0.08;
+    const defaultCipPct = toNum(insuranceCatalog.byCode['INS-ICC-A']?.standard_rate) || 0.25;
+    const cifRatePct = recIncoterm === 'CIF' && selectedInsRatePct > 0 ? selectedInsRatePct : defaultCifPct;
+    const cipRatePct = recIncoterm === 'CIP' && selectedInsRatePct > 0 ? selectedInsRatePct : defaultCipPct;
+    const insCif = computeInsurancePremiumExact(cfrSell, cifRatePct);
+    const insCip = computeInsurancePremiumExact(cfrSell, cipRatePct);
+    const cifSell = Math.round((cfrSell + insCif) * 100) / 100;
+
     const isExw = recIncoterm === 'EXW';
+    const isFobGroup = recIncoterm === 'FCA' || recIncoterm === 'FAS' || recIncoterm === 'FOB';
+    const isCfrGroup = recIncoterm === 'CFR' || recIncoterm === 'CPT';
+    const isCif = recIncoterm === 'CIF';
+    const isCip = recIncoterm === 'CIP';
+    const isDestGroup = recIncoterm === 'DAP' || recIncoterm === 'DPU' || recIncoterm === 'DDP';
+
+    const effTrucking = isExw ? 0 : activeTrucking;
     const localTotal = isExw ? 0 : fullLocalTotal;
     const customsTotal = isExw ? 0 : customsSplit.customsTotal;
-    const isDest = recIncoterm === 'DAP' || recIncoterm === 'DPU' || recIncoterm === 'DDP';
-    const effDest = isDest ? toNum(destExtra) : 0;
-    const totalFreightLocal = effOcean + effSurcharge + localTotal + customsTotal + effDest;
+    const effOcean = !isExw && !isFobGroup && includeFreight
+      ? (schOcean > 0 ? schOcean : (mix.hasLcl && fwdOcean > 0 ? fwdOcean : 0))
+      : 0;
+    const effSurcharge = !isExw && !isFobGroup && includeFreight ? schSurcharge : 0;
+    const effDest = isDestGroup
+      ? toNum(destExtra) + (recIncoterm === 'DDP' ? toNum(importDutyUsd) : 0)
+      : 0;
 
-    const exwSell = (goodsCost + effectivePackingCost) * (1 + marginPct / 100);
-    const fobSell = (goodsCost + effectivePackingCost + fullLocalTotal + customsSplit.customsTotal) * (1 + marginPct / 100);
-    const cfrSell = (goodsCost + effectivePackingCost + fullLocalTotal + customsSplit.customsTotal + schOceanRes.ocean + schOceanRes.surcharge) * (1 + marginPct / 100);
-    const cifInsExact = computeInsurancePremiumExact(cfrSell, recIncoterm === 'CIF' ? (selectedInsRatePct || 0.08) : 0.08);
-    const cifSell = cfrSell + cifInsExact;
+    let effInsurance = 0;
+    if (isCif && includeInsurance) {
+      effInsurance = manualInsurance !== '' ? toNum(manualInsurance) : insCif;
+    } else if (isCip && includeInsurance) {
+      effInsurance = manualInsurance !== '' ? toNum(manualInsurance) : insCip;
+    } else if (isDestGroup && includeInsurance) {
+      const ratePct = selectedInsRatePct > 0 ? selectedInsRatePct : defaultCifPct;
+      effInsurance = manualInsurance !== '' ? toNum(manualInsurance) : computeInsurancePremiumExact(cfrSell, ratePct);
+    } else if (isExw || isFobGroup || isCfrGroup || !includeInsurance) {
+      effInsurance = 0;
+    }
 
-    const cPlusF = goodsCost + effectivePackingCost + totalFreightLocal;
-    const autoIns = includeInsurance ? computeInsurancePremiumExact(cPlusF * (1 + marginPct / 100), selectedInsRatePct) : 0;
-    const effInsurance = includeInsurance ? (manualInsurance !== '' ? toNum(manualInsurance) : autoIns) : 0;
+    const totalFreightLocal = effTrucking + localTotal + customsTotal + effOcean + effSurcharge + effDest;
+    const finalSelling = isExw
+      ? exwSell
+      : isFobGroup
+      ? fobSell
+      : Math.round((fobSell + effOcean + effSurcharge + effDest + effInsurance) * 100) / 100;
 
-    const baseCost = goodsCost + effectivePackingCost + totalFreightLocal + effInsurance;
-    const finalSelling = baseCost * (1 + marginPct / 100);
-    const computedFloor = baseCost * (1 + minMarginPct / 100);
+    const computedFloor = Math.round(
+      (goodsAndPack * (1 + minMarginPct / 100) +
+        (isExw ? 0 : originCharges) +
+        effOcean +
+        effSurcharge +
+        effDest +
+        effInsurance) *
+        100
+    ) / 100;
     const floorPrice = manualFloorPrice !== '' ? toNum(manualFloorPrice) : computedFloor;
 
-    // Self vs FWD Comparison
+    // 2-Way Cross-Locked Self vs FWD Comparison
     const selfOceanTotal = mix.hasLcl ? null : effOcean + effSurcharge + localTotal;
     const effFwdOcean = fwdOcean > 0 ? fwdOcean : effOcean + effSurcharge + (mix.hasLcl ? 0 : localTotal);
     const effFwdCustoms = fwdCustoms > 0 ? fwdCustoms : customsSplit.customsExportUsd;
     const effFwdPermits = fwdPermits > 0 ? fwdPermits : customsSplit.permitsUsd;
-    const fwdAllTotal = effFwdOcean + fwdTruck + effFwdCustoms + effFwdPermits;
-    const bestTruck = selfTruckRate > 0 && fwdTruck > 0 ? Math.min(selfTruckRate, fwdTruck) : (fwdTruck > 0 ? fwdTruck : selfTruckRate);
-    const hybridTotal = Math.min(selfOceanTotal ?? effFwdOcean, effFwdOcean) + bestTruck + customsSplit.customsExportUsd + customsSplit.permitsUsd;
-    const selfTotal = selfOceanTotal !== null ? selfOceanTotal + customsSplit.customsExportUsd + customsSplit.permitsUsd + selfTruckRate : null;
+    const fwdAllTotal = Math.round((effFwdOcean + fwdTruck + effFwdCustoms + effFwdPermits) * 100) / 100;
+
+    const hybridOcean = selfOceanChecked && selfOceanTotal !== null ? selfOceanTotal : effFwdOcean;
+    const hybridTruck = selfTruckChecked ? effSelfTruckVal : fwdTruck;
+    const hybridCustoms = selfCustomsChecked ? customsSplit.customsExportUsd : effFwdCustoms;
+    const hybridPermits = selfPermitsChecked ? customsSplit.permitsUsd : effFwdPermits;
+    const hybridTotal = Math.round((hybridOcean + hybridTruck + hybridCustoms + hybridPermits) * 100) / 100;
+
+    const selfTotal = selfOceanTotal !== null
+      ? Math.round((selfOceanTotal + customsSplit.customsExportUsd + customsSplit.permitsUsd + effSelfTruckVal) * 100) / 100
+      : null;
     const internalCost = execOption === 'SELF' && selfTotal !== null ? selfTotal : execOption === 'HYBRID' ? hybridTotal : fwdAllTotal;
-    const buyerCharge = totalFreightLocal;
+    const buyerCharge = Math.round(totalFreightLocal * 100) / 100;
     const internalProfit = Math.round((buyerCharge - internalCost) * 100) / 100;
 
     return {
-      effOcean, effSurcharge, localTotal, customsTotal, effDest, totalFreightLocal,
-      effInsurance, finalSelling, floorPrice, computedFloor,
-      exwSell: Math.round(exwSell * 100) / 100,
-      fobSell: Math.round(fobSell * 100) / 100,
-      cfrSell: Math.round(cfrSell * 100) / 100,
-      cifSell: Math.round(cifSell * 100) / 100,
-      selfTotal, hybridTotal, fwdAllTotal, internalCost, buyerCharge, internalProfit,
+      effTrucking,
+      effOcean,
+      effSurcharge,
+      localTotal,
+      customsTotal,
+      effDest,
+      totalFreightLocal,
+      effInsurance,
+      finalSelling,
+      floorPrice,
+      computedFloor,
+      exwSell,
+      fobSell,
+      cfrSell,
+      cifSell,
+      effSelfTruckVal,
+      selfTotal,
+      hybridTotal,
+      fwdAllTotal,
+      internalCost,
+      buyerCharge,
+      internalProfit,
     };
   }, [
-    includeFreight, schOceanRes, recIncoterm, fullLocalTotal, customsSplit, destExtra,
-    goodsCost, effectivePackingCost, marginPct, selectedInsRatePct, includeInsurance,
-    manualInsurance, minMarginPct, manualFloorPrice, mix.hasLcl, fwdOcean, fwdCustoms,
-    fwdPermits, fwdTruck, selfTruckRate, execOption,
+    goodsCost, effectivePackingCost, marginPct, selfTruckChecked, selfTruckRate, defaultTruckRate,
+    fwdTruck, fullLocalTotal, customsSplit, schOceanRes, mix.hasLcl, fwdOcean,
+    insuranceCatalog, recIncoterm, selectedInsRatePct, includeFreight, destExtra, importDutyUsd,
+    includeInsurance, manualInsurance, minMarginPct, manualFloorPrice, fwdCustoms, fwdPermits,
+    selfOceanChecked, selfCustomsChecked, selfPermitsChecked, execOption,
   ]);
 
   const applyIncotermToKhung4 = (code: string) => {
@@ -537,29 +622,39 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
     }
   };
 
-  // Khung 3 comparison rows
+  // Khung 3 comparison rows (synchronized with Khung 4 exact Incoterms 2020 formulas)
   const comparisonRows = useMemo(() => {
+    const iccCRate = toNum(insuranceCatalog.byCode['INS-ICC-C']?.standard_rate) || 0.08;
     const iccARate = toNum(insuranceCatalog.byCode['INS-ICC-A']?.standard_rate) || 0.25;
     const goodsPack = goodsCost + effectivePackingCost;
+    const originFees = (selfTruckChecked ? costing.effSelfTruckVal : fwdTruck) + fullLocalTotal + customsSplit.customsTotal;
+    const freightF = (schOceanRes.ocean + schOceanRes.surcharge) > 0
+      ? (schOceanRes.ocean + schOceanRes.surcharge)
+      : (mix.hasLcl && fwdOcean > 0 ? fwdOcean : 0);
+
     return INCOTERMS_2020_MATRIX.filter((r) => proposedIncoterms.includes(r.code)).map((row) => {
       const exwVal = Math.round(goodsPack * (1 + marginPct / 100) * 100) / 100;
-      const localAndCustoms = row.includeLocal ? fullLocalTotal + customsSplit.customsTotal : 0;
-      const freight = row.includeFreight ? schOceanRes.ocean + schOceanRes.surcharge : 0;
-      const dest = row.includeDest ? destExtra : 0;
+      const localAndCustoms = row.includeLocal ? originFees : 0;
+      const freight = row.includeFreight ? freightF : 0;
+      const dest = row.includeDest ? toNum(destExtra) + (row.code === 'DDP' ? toNum(importDutyUsd) : 0) : 0;
       const appliedFees = Math.round((localAndCustoms + freight + dest) * 100) / 100;
       let ins = 0;
       let insLabel = '';
       if (row.code === 'CIF') {
-        ins = computeInsurancePremiumExact(exwVal + appliedFees, 0.08);
-        insLabel = 'ICC C (0.08%)';
+        ins = computeInsurancePremiumExact(exwVal + localAndCustoms + freight, iccCRate);
+        insLabel = `ICC C (${iccCRate.toFixed(2)}%)`;
       } else if (row.code === 'CIP') {
-        ins = computeInsurancePremiumExact(exwVal + appliedFees, iccARate);
+        ins = computeInsurancePremiumExact(exwVal + localAndCustoms + freight, iccARate);
         insLabel = `ICC A (${iccARate.toFixed(2)}%)`;
       }
       const total = Math.round((exwVal + appliedFees + ins) * 100) / 100;
       return { row, exwVal, appliedFees, ins, insLabel, total };
     });
-  }, [proposedIncoterms, insuranceCatalog, goodsCost, effectivePackingCost, marginPct, fullLocalTotal, customsSplit, schOceanRes, destExtra]);
+  }, [
+    proposedIncoterms, insuranceCatalog, goodsCost, effectivePackingCost, marginPct,
+    selfTruckChecked, costing.effSelfTruckVal, fwdTruck, fullLocalTotal, customsSplit,
+    schOceanRes, mix.hasLcl, fwdOcean, destExtra, importDutyUsd,
+  ]);
 
   const optimalCode = useMemo(() => {
     if (aiBestTerm && proposedIncoterms.includes(aiBestTerm)) return aiBestTerm;
@@ -613,8 +708,9 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
         cfr_price: costing.cfrSell,
         cif_price: costing.cifSell,
         dest_extra: destExtra,
+        import_duty_usd: importDutyUsd,
         freight_exec_option: execOption,
-        self_trucking: selfTruckRate,
+        self_trucking: costing.effSelfTruckVal,
         fwd_ocean: fwdOcean,
         fwd_trucking: fwdTruck,
         fwd_customs: fwdCustoms,
@@ -794,9 +890,10 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                     {mix.summaryStr || 'Chưa phân bổ container'}
                   </span>
                   {mix.hasLcl && (
-                    <div className="flex items-center gap-2 bg-[#f4d98a] text-[#07281c] px-2.5 py-1 rounded-lg font-bold">
-                      <span>LCL (&lt;55% cont 20'): {mix.lclCbm.toFixed(2)} CBM · {(mix.lclWeightKg / 1000).toFixed(2)} Tấn</span>
-                      <select value={lclBasis} onChange={(e) => setLclBasis(e.target.value as 'CBM' | 'TON')} className="px-1 rounded bg-white">
+                    <div className="flex flex-wrap items-center gap-2 bg-[#f4d98a] text-[#07281c] px-2.5 py-1 rounded-lg font-bold">
+                      <span>LCL (&lt;55% cont 20'): {mix.lclCbm.toFixed(2)} CBM · {(mix.lclWeightKg / 1000).toFixed(2)} Tấn · W/M: {mix.lclWm.toFixed(2)}</span>
+                      <select value={lclBasis} onChange={(e) => setLclBasis(e.target.value as 'WM' | 'CBM' | 'TON')} className="px-1.5 py-0.5 rounded bg-white">
+                        <option value="WM">Theo W/M (max Tấn, CBM)</option>
                         <option value="CBM">Theo CBM</option>
                         <option value="TON">Theo Tấn</option>
                       </select>
@@ -879,7 +976,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
           </h3>
           <button type="button" disabled={aiLoading} onClick={() => handleAskAi(true)} className="agri-btn-gold flex items-center gap-1.5">
             <Sparkles className="w-4 h-4" />
-            <span>{aiLoading ? 'AI đang phân tích...' : 'Phân tích đơn hàng bằng AI'}</span>
+            <span>{aiLoading ? 'Loading...' : 'Phân tích đơn hàng bằng AI'}</span>
           </button>
         </div>
 
@@ -1064,7 +1161,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 text-xs">
           <div className="lg:col-span-7 agri-card-inner p-4 space-y-3">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
               <div>
                 <label className="block font-bold mb-1">Biên LN mục tiêu (%)</label>
                 <input type="number" step="0.5" value={marginPct} onChange={(e) => setMarginPct(toNum(e.target.value))} className="agri-input font-mono font-bold" />
@@ -1091,6 +1188,17 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                   disabled={!['DAP', 'DPU', 'DDP'].includes(recIncoterm)}
                   value={destExtra}
                   onChange={(e) => setDestExtra(toNum(e.target.value))}
+                  className="agri-input font-mono disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block font-bold mb-1">Thuế NK (DDP $)</label>
+                <input
+                  type="number"
+                  step="1"
+                  disabled={recIncoterm !== 'DDP'}
+                  value={importDutyUsd}
+                  onChange={(e) => setImportDutyUsd(toNum(e.target.value))}
                   className="agri-input font-mono disabled:opacity-50"
                 />
               </div>
@@ -1170,7 +1278,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                         <th className="p-1.5 text-left">Hạng mục</th>
                         <th className="p-1.5 text-center">Công ty Tự làm</th>
                         <th className="p-1.5 text-center">Phí Tự làm ($)</th>
-                        <th className="p-1.5 text-center">Báo giá FWD ($)</th>
+                        <th className="p-1.5 text-center">Thuê ngoài FWD ($)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1213,7 +1321,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                               setSelfTruckChecked(e.target.checked);
                               if (e.target.checked) {
                                 setFwdTruck(0);
-                                if (selfTruckRate === 0) setSelfTruckRate(180);
+                                if (selfTruckRate === 0 && defaultTruckRate > 0) setSelfTruckRate(defaultTruckRate);
                               }
                             }}
                           />
@@ -1222,7 +1330,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                           <input
                             type="number"
                             disabled={!selfTruckChecked}
-                            value={selfTruckRate}
+                            value={selfTruckChecked ? (selfTruckRate > 0 ? selfTruckRate : defaultTruckRate) : selfTruckRate}
                             onChange={(e) => setSelfTruckRate(toNum(e.target.value))}
                             className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
                           />
@@ -1301,17 +1409,48 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                   </table>
 
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                    <div className="flex gap-1.5">
+                    <div className="flex flex-wrap gap-1.5">
                       {!mix.hasLcl && (
-                        <button type="button" onClick={() => setExecOption('SELF')} className={`px-2 py-1 rounded font-bold cursor-pointer ${execOption === 'SELF' ? 'bg-[#0f4a33] text-[#f4d98a]' : 'bg-[#d7eee4]'}`}>
-                          100% SELF ({fmtUSD(costing.selfTotal || 0)})
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExecOption('SELF');
+                            setSelfOceanChecked(true);
+                            setSelfCustomsChecked(true);
+                            setSelfPermitsChecked(true);
+                            if (defaultTruckRate > 0) {
+                              setSelfTruckChecked(true);
+                              if (selfTruckRate === 0) setSelfTruckRate(defaultTruckRate);
+                            }
+                            setFwdOcean(0);
+                            setFwdTruck(0);
+                            setFwdCustoms(0);
+                            setFwdPermits(0);
+                          }}
+                          className={`px-2 py-1 rounded font-bold cursor-pointer ${execOption === 'SELF' ? 'bg-[#0f4a33] text-[#f4d98a]' : 'bg-[#d7eee4]'}`}
+                        >
+                          Công ty tự làm 100% ({fmtUSD(costing.selfTotal || 0)})
                         </button>
                       )}
-                      <button type="button" onClick={() => setExecOption('HYBRID')} className={`px-2 py-1 rounded font-bold cursor-pointer ${execOption === 'HYBRID' ? 'bg-[#0f4a33] text-[#f4d98a]' : 'bg-[#d7eee4]'}`}>
-                        HYBRID ({fmtUSD(costing.hybridTotal)})
+                      <button
+                        type="button"
+                        onClick={() => setExecOption('HYBRID')}
+                        className={`px-2 py-1 rounded font-bold cursor-pointer ${execOption === 'HYBRID' ? 'bg-[#0f4a33] text-[#f4d98a]' : 'bg-[#d7eee4]'}`}
+                      >
+                        Thuê FWD vài hạng mục / Kết hợp tối ưu ({fmtUSD(costing.hybridTotal)})
                       </button>
-                      <button type="button" onClick={() => setExecOption('FWD_ALL')} className={`px-2 py-1 rounded font-bold cursor-pointer ${execOption === 'FWD_ALL' ? 'bg-[#0f4a33] text-[#f4d98a]' : 'bg-[#d7eee4]'}`}>
-                        FWD_ALL ({fmtUSD(costing.fwdAllTotal)})
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setExecOption('FWD_ALL');
+                          setSelfOceanChecked(false);
+                          setSelfTruckChecked(false);
+                          setSelfCustomsChecked(false);
+                          setSelfPermitsChecked(false);
+                        }}
+                        className={`px-2 py-1 rounded font-bold cursor-pointer ${execOption === 'FWD_ALL' ? 'bg-[#0f4a33] text-[#f4d98a]' : 'bg-[#d7eee4]'}`}
+                      >
+                        Thuê FWD trọn gói 100% ({fmtUSD(costing.fwdAllTotal)})
                       </button>
                     </div>
                     <div className="font-mono font-bold text-[#07281c]">
@@ -1328,9 +1467,9 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
               <div className="text-[11px] font-bold uppercase text-[#f4d98a] mb-2">Tổng hợp Cấu trúc Giá ({recIncoterm})</div>
               <div className="flex justify-between"><span>Giá vốn hàng hóa:</span><span className="font-mono font-bold">{fmtUSD(goodsCost)}</span></div>
               <div className="flex justify-between"><span>Bao bì &amp; Pallet:</span><span className="font-mono font-bold">{fmtUSD(effectivePackingCost)}</span></div>
+              <div className="flex justify-between"><span>Trucking + Local + Hải quan/C/O:</span><span className="font-mono">{fmtUSD(costing.effTrucking + costing.localTotal + costing.customsTotal)}</span></div>
               <div className="flex justify-between"><span>Cước biển + Phụ phí tàu:</span><span className="font-mono">{fmtUSD(costing.effOcean + costing.effSurcharge)}</span></div>
-              <div className="flex justify-between"><span>Local Charges + Hải quan/C/O:</span><span className="font-mono">{fmtUSD(costing.localTotal + costing.customsTotal)}</span></div>
-              <div className="flex justify-between"><span>Phí Đích &amp; Bảo hiểm:</span><span className="font-mono">{fmtUSD(costing.effDest + costing.effInsurance)}</span></div>
+              <div className="flex justify-between"><span>Phí Đích (+ Thuế NK) &amp; Bảo hiểm:</span><span className="font-mono">{fmtUSD(costing.effDest + costing.effInsurance)}</span></div>
               <div className="border-t border-white/15 pt-2 flex justify-between text-base font-extrabold text-[#f4d98a]">
                 <span>GIÁ BÁN ĐỀ XUẤT:</span>
                 <span className="font-mono">{fmtUSD(costing.finalSelling)}</span>
@@ -1364,7 +1503,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
               className="w-full agri-btn-gold py-2.5 flex items-center justify-center gap-2 text-xs disabled:opacity-50"
             >
               <Save className="w-4 h-4" />
-              <span>{saving ? 'Đang lưu phương án...' : 'Lưu & Gửi Báo giá cho Kinh doanh'}</span>
+              <span>{saving ? 'Loading...' : 'Lưu & Gửi Báo giá cho Kinh doanh'}</span>
             </button>
           </div>
         </div>

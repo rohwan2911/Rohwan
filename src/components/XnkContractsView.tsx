@@ -516,7 +516,7 @@ const ContractBookingModal: React.FC<ContractBookingModalProps> = ({
           <div className="flex justify-end gap-2">
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-[#07281c] text-white font-bold cursor-pointer">Hủy</button>
             <button type="button" disabled={saving} onClick={onSave} className="agri-btn-gold px-5">
-              {saving ? 'Đang lưu...' : 'Lưu Cập nhật Hợp đồng & Cut-off'}
+              {saving ? 'Loading...' : 'Lưu Cập nhật Hợp đồng & Cut-off'}
             </button>
           </div>
         </div>

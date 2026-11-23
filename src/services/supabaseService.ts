@@ -169,7 +169,11 @@ export async function fetchAllAppData(): Promise<AppDataState> {
 // ==========================================
 export async function downloadTemplateDocx(storagePath: string): Promise<ArrayBuffer> {
   assertConfigured();
-  const clean = String(storagePath || '').replace(/^\/+/, '').trim();
+  const clean = String(storagePath || '')
+    .trim()
+    .replace(/^\/+/, '')
+    .replace(/^documents\//i, '')
+    .replace(/^\/+/, '');
   if (!clean) throw new Error('Đường dẫn phôi mẫu trống.');
 
   const primary = await supabase.storage.from('documents').download(clean);
@@ -216,7 +220,12 @@ export async function uploadGeneratedOrderDocx(
   const cleanOrderId = String(orderId || 'MISC').replace(/[^a-zA-Z0-9_-]/g, '_');
   const safeFile = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
   const finalFile = safeFile.toLowerCase().endsWith('.docx') ? safeFile : `${safeFile}.docx`;
-  const folder = kind === 'QUOTATION' ? `quotations/${cleanOrderId}` : `orders/${cleanOrderId}`;
+  const folder =
+    kind === 'CONTRACT'
+      ? 'contracts'
+      : kind === 'QUOTATION'
+      ? `quotations/${cleanOrderId}`
+      : `orders/${cleanOrderId}`;
   const path = `${folder}/${finalFile}`;
 
   if (path.startsWith('templates/')) {
@@ -264,7 +273,7 @@ export async function openDocumentWithSignedUrl(storagePathOrUrl: string, downlo
 export function isStoredDocumentPath(val?: string): boolean {
   const s = String(val || '').trim();
   if (!s) return false;
-  return /^https?:\/\//i.test(s) || /^(orders|quotations|templates)\//i.test(s) || /\.docx$/i.test(s);
+  return /^https?:\/\//i.test(s) || /^(orders|quotations|contracts|templates)\//i.test(s) || /\.docx$/i.test(s);
 }
 
 export async function saveGeneratedDocumentRecord(

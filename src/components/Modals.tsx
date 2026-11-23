@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { renderAsync } from 'docx-preview';
 import {
   X,
   Printer,
@@ -19,6 +20,7 @@ import type {
   AppDataState,
   OrderLogisticsMeta,
   ProposalExtraMeta,
+  SysUser,
 } from '../types';
 import {
   buildCombinedInsuranceClauseEng,
@@ -29,30 +31,27 @@ import {
   fmtNumber,
   fmtUSD,
   formatCurrency,
+  getOrderStage6Number,
   INCOTERMS_2020_MATRIX,
   parseInsuranceCodeString,
   parseOrderItems,
+  resolvePackingSpec,
   stripInternalCodesForCustomer,
   toNum,
   WORKFLOW_6_STAGES,
-  getOrderStage6Number,
 } from '../utils/calculations';
 import {
   buildExportEmailHtml,
   buildQuotationEmailHtml,
   buildQuotationEmailSubject,
-  generateContractDocHtml,
-  generateExportDocumentHtml,
-  generateQuotationDocHtml,
 } from '../utils/documentHtml';
 import {
   buildTemplateFieldContext,
   extractPlaceholdersFromDocx,
   numberToEnglishWordsUsd,
-  renderDocxAndPreviewHtml,
+  renderPopulatedDocxBytes,
   selectMatchingTemplates,
   TemplateFieldDescriptor,
-  wrapMammothPreviewHtml,
 } from '../utils/docxEngine';
 import {
   downloadTemplateDocx,
@@ -68,6 +67,7 @@ export interface PreviewModalTarget {
 interface DocumentPreviewModalProps {
   target: PreviewModalTarget | null;
   data: AppDataState;
+  currentUser?: SysUser;
   orderMetaMap: Record<string, OrderLogisticsMeta>;
   proposalMetaMap: Record<string, ProposalExtraMeta>;
   allowQuickAdjust: boolean;
@@ -82,6 +82,7 @@ interface DocumentPreviewModalProps {
 export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   target,
   data,
+  currentUser,
   orderMetaMap,
   proposalMetaMap,
   allowQuickAdjust,
@@ -92,8 +93,9 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   onDocumentSaved,
   onToast,
 }) => {
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const editableRef = useRef<HTMLDivElement>(null);
+  const docxBodyRef = useRef<HTMLDivElement>(null);
+  const docxStyleRef = useRef<HTMLDivElement>(null);
+  const printFrameRef = useRef<HTMLIFrameElement>(null);
 
   const [templateMode, setTemplateMode] = useState<'STANDARD' | 'COMPARISON'>('STANDARD');
   const [adjIncoterm, setAdjIncoterm] = useState('CIF');
@@ -105,16 +107,14 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [templateBuffer, setTemplateBuffer] = useState<ArrayBuffer | null>(null);
-  const [detectedKeys, setDetectedKeys] = useState<string[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [descriptors, setDescriptors] = useState<TemplateFieldDescriptor[]>([]);
   const [itemsRows, setItemsRows] = useState<Array<Record<string, string>>>([]);
   const [renderedDocxBytes, setRenderedDocxBytes] = useState<Uint8Array | null>(null);
-  const [docxPreviewHtml, setDocxPreviewHtml] = useState<string>('');
+  const [loadError, setLoadError] = useState<string>('');
 
   const [showFieldEditor, setShowFieldEditor] = useState(false);
   const [directEditMode, setDirectEditMode] = useState(false);
-  const [customBodyHtml, setCustomBodyHtml] = useState<string>('');
 
   const [docLoading, setDocLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -146,7 +146,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     return selectMatchingTemplates(data.templates, target.kind, ctx.items, data.products);
   }, [target, ctx, data.templates, data.products]);
 
-  // Initialize metadata & pick default .docx template whenever target changes
+  // Initialize metadata & auto-pick active .docx template whenever target changes
   useEffect(() => {
     if (!target || !ctx) return;
     if (target.kind === 'QUOTATION' && ctx.inq) {
@@ -174,8 +174,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     setShowEmailPane(false);
     setShowFieldEditor(false);
     setDirectEditMode(false);
-    setCustomBodyHtml('');
-    setDocxPreviewHtml('');
+    setLoadError('');
     setRenderedDocxBytes(null);
     setTemplateBuffer(null);
 
@@ -189,11 +188,13 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       const compTpl = matchingTemplates.find((t) =>
         /tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
       );
-      const stdTpl = matchingTemplates.find(
-        (t) =>
-          !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`) &&
-          /01|standard|chuan/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
-      ) || matchingTemplates.find((t) => !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`));
+      const stdTpl =
+        matchingTemplates.find(
+          (t) =>
+            !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`) &&
+            /01|standard|chuan/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
+        ) ||
+        matchingTemplates.find((t) => !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`));
       bestTpl = (wantComp ? compTpl : stdTpl)?.template_id || matchingTemplates[0]?.template_id || '';
     } else {
       bestTpl = matchingTemplates[0]?.template_id || '';
@@ -201,14 +202,14 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     setSelectedTemplateId(bestTpl);
   }, [target?.orderId, target?.kind]);
 
-  // Download & render selected .docx template from Supabase Storage "documents" bucket
+  // Download & populate selected .docx template from Supabase Storage "documents" bucket
   useEffect(() => {
     if (!target || !ctx) return;
-    const tpl = matchingTemplates.find((t) => t.template_id === selectedTemplateId);
+    const tpl = matchingTemplates.find((t) => t.template_id === selectedTemplateId) || matchingTemplates[0];
     if (!tpl || !tpl.google_doc_file_id) {
       setTemplateBuffer(null);
       setRenderedDocxBytes(null);
-      setDocxPreviewHtml('');
+      setLoadError('Chưa có mẫu chứng từ phù hợp được kích hoạt cho loại hồ sơ này.');
       const built = buildTemplateFieldContext(
         {
           kind: target.kind,
@@ -222,13 +223,15 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
           products: data.products,
           pricingRates: data.pricingRates,
           lookups: data.lookups,
+          incoterms: data.incoterms,
+          users: data.users,
+          currentUser,
           templatePlaceholders: data.templatePlaceholders,
           overrideIncoterm: target.kind === 'QUOTATION' ? adjIncoterm : undefined,
           overrideSellingPrice: target.kind === 'QUOTATION' && toNum(adjPrice) > 0 ? toNum(adjPrice) : undefined,
         },
         []
       );
-      setDetectedKeys([]);
       setFieldValues(built.fields);
       setDescriptors(built.descriptors);
       setItemsRows(built.itemsTableRows);
@@ -238,6 +241,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
     let cancelled = false;
     setDocLoading(true);
+    setLoadError('');
 
     (async () => {
       try {
@@ -259,6 +263,9 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             products: data.products,
             pricingRates: data.pricingRates,
             lookups: data.lookups,
+            incoterms: data.incoterms,
+            users: data.users,
+            currentUser,
             templatePlaceholders: data.templatePlaceholders,
             overrideIncoterm: target.kind === 'QUOTATION' ? adjIncoterm : undefined,
             overrideSellingPrice: target.kind === 'QUOTATION' && toNum(adjPrice) > 0 ? toNum(adjPrice) : undefined,
@@ -266,22 +273,19 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
           keys
         );
 
-        const rendered = await renderDocxAndPreviewHtml(buf, built.fields, built.itemsTableRows);
+        const docxBytes = await renderPopulatedDocxBytes(buf, built.fields, built.itemsTableRows);
         if (cancelled) return;
 
         setTemplateBuffer(buf);
-        setDetectedKeys(keys);
         setFieldValues(built.fields);
         setDescriptors(built.descriptors);
         setItemsRows(built.itemsTableRows);
-        setRenderedDocxBytes(rendered.docxBytes);
-        setDocxPreviewHtml(rendered.previewHtml);
-        setCustomBodyHtml('');
-      } catch {
+        setRenderedDocxBytes(docxBytes);
+      } catch (err: any) {
         if (cancelled) return;
         setTemplateBuffer(null);
         setRenderedDocxBytes(null);
-        setDocxPreviewHtml('');
+        setLoadError(err?.message || 'Không thể tải và hiển thị mẫu chứng từ.');
       } finally {
         if (!cancelled) setDocLoading(false);
       }
@@ -292,6 +296,53 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     };
   }, [target?.orderId, target?.kind, selectedTemplateId]);
 
+  // Render exact .docx layout via docx-preview whenever renderedDocxBytes updates
+  useEffect(() => {
+    if (!renderedDocxBytes || !docxBodyRef.current || docLoading) return;
+    let cancelled = false;
+    const bodyEl = docxBodyRef.current;
+    const styleEl = docxStyleRef.current || undefined;
+    bodyEl.innerHTML = '';
+    if (styleEl) styleEl.innerHTML = '';
+
+    const ab = renderedDocxBytes.buffer.slice(
+      renderedDocxBytes.byteOffset,
+      renderedDocxBytes.byteOffset + renderedDocxBytes.byteLength
+    ) as ArrayBuffer;
+
+    renderAsync(ab, bodyEl, styleEl, {
+      className: 'docx-preview-page',
+      inWrapper: true,
+      hideWrapperOnPrint: false,
+      ignoreWidth: false,
+      ignoreHeight: false,
+      ignoreFonts: false,
+      breakPages: true,
+      useBase64URL: true,
+      renderHeaders: true,
+      renderFooters: true,
+      renderFootnotes: true,
+      renderEndnotes: true,
+    })
+      .then(() => {
+        if (cancelled || !docxBodyRef.current) return;
+        docxBodyRef.current.contentEditable = directEditMode ? 'true' : 'false';
+      })
+      .catch(() => {
+        // Ignore transient unmount during render
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [renderedDocxBytes, docLoading]);
+
+  useEffect(() => {
+    if (docxBodyRef.current) {
+      docxBodyRef.current.contentEditable = directEditMode ? 'true' : 'false';
+    }
+  }, [directEditMode]);
+
   const floorForSelectedInc = useMemo(() => {
     if (!ctx?.prop) return 0;
     return computeFloorPriceScaled(ctx.prop, ctx.extraMeta, adjIncoterm);
@@ -299,59 +350,6 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
   const numericAdjPrice = toNum(adjPrice);
   const isBelowFloor = floorForSelectedInc > 0 && numericAdjPrice > 0 && numericAdjPrice < floorForSelectedInc;
-
-  const fallbackHtml = useMemo(() => {
-    if (!target || !ctx) return '';
-    if (target.kind === 'QUOTATION' && ctx.inq) {
-      return generateQuotationDocHtml({
-        inq: ctx.inq,
-        prop: ctx.prop,
-        extraMeta: ctx.extraMeta,
-        cus: ctx.cus,
-        sch: ctx.sch,
-        products: data.products,
-        pricingRates: data.pricingRates,
-        templateMode,
-        overrideIncoterm: adjIncoterm,
-        overrideSellingPrice: numericAdjPrice > 0 ? numericAdjPrice : undefined,
-      });
-    }
-    if (target.kind === 'CONTRACT' && ctx.order) {
-      return generateContractDocHtml({
-        order: ctx.order,
-        meta: ctx.meta,
-        inq: ctx.inq,
-        cus: ctx.cus,
-        products: data.products,
-        pricingRates: data.pricingRates,
-      });
-    }
-    if (ctx.order && (target.kind === 'INVOICE' || target.kind === 'PACKING_LIST' || target.kind === 'CO' || target.kind === 'BL')) {
-      return generateExportDocumentHtml(target.kind, {
-        order: ctx.order,
-        meta: ctx.meta,
-        inq: ctx.inq,
-        cus: ctx.cus,
-        prop: ctx.prop,
-        products: data.products,
-        pricingRates: data.pricingRates,
-      });
-    }
-    return '';
-  }, [target, ctx, data.products, data.pricingRates, templateMode, adjIncoterm, numericAdjPrice]);
-
-  const activeDocHtml = useMemo(() => {
-    if (customBodyHtml) {
-      return wrapMammothPreviewHtml(customBodyHtml);
-    }
-    return docxPreviewHtml || fallbackHtml;
-  }, [customBodyHtml, docxPreviewHtml, fallbackHtml]);
-
-  const editableInnerHtml = useMemo(() => {
-    if (customBodyHtml) return customBodyHtml;
-    const m = (docxPreviewHtml || fallbackHtml).match(/<body[^>]*>([\s\S]*)<\/body>/i);
-    return m ? m[1] : (docxPreviewHtml || fallbackHtml);
-  }, [customBodyHtml, docxPreviewHtml, fallbackHtml]);
 
   const applyBatchFieldsAndRerender = async (
     patch: Record<string, string>,
@@ -361,22 +359,73 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     const nextRows = overrideItemsRows || itemsRows;
     setFieldValues(updated);
     if (overrideItemsRows) setItemsRows(overrideItemsRows);
-    setDescriptors((prev) => prev.map((d) => (patch[d.key] !== undefined ? { ...d, value: patch[d.key] } : d)));
+    setDescriptors((prev) =>
+      prev.map((d) => {
+        const v = patch[d.key] ?? patch[d.key.toUpperCase()];
+        return v !== undefined ? { ...d, value: v } : d;
+      })
+    );
     if (templateBuffer) {
       try {
-        const rendered = await renderDocxAndPreviewHtml(templateBuffer, updated, nextRows);
-        setRenderedDocxBytes(rendered.docxBytes);
-        setDocxPreviewHtml(rendered.previewHtml);
-        setCustomBodyHtml('');
+        const bytes = await renderPopulatedDocxBytes(templateBuffer, updated, nextRows);
+        setRenderedDocxBytes(bytes);
       } catch {
-        // Ignore transient render error while editing
+        // Ignore transient render error while typing
       }
     }
   };
 
-  // Re-render .docx live when user edits fieldValues
+  // Re-render .docx live when user edits any field in CHỈNH DỮ LIỆU
   const handleFieldValueChange = async (key: string, nextVal: string) => {
-    await applyBatchFieldsAndRerender({ [key]: nextVal });
+    const upper = key.toUpperCase();
+    const patch: Record<string, string> = {
+      [key]: nextVal,
+      [upper]: nextVal,
+    };
+
+    // Keep synced alias pairs consistent when user edits in sidebar
+    if (upper === 'CTR_DT' || upper === 'CTR_DATE' || upper === 'CONTRACT_DATE') {
+      patch.CTR_DT = nextVal;
+      patch.CTR_DATE = nextVal;
+      patch.CONTRACT_DATE = nextVal;
+    } else if (upper === 'CTR_NO' || upper === 'CONTRACT_NO') {
+      patch.CTR_NO = nextVal;
+      patch.CONTRACT_NO = nextVal;
+    } else if (upper === 'QUOT_NO' || upper === 'QT_NO' || upper === 'QUOTE_NO') {
+      patch.QUOT_NO = nextVal;
+      patch.QT_NO = nextVal;
+      patch.QUOTE_NO = nextVal;
+    } else if (upper === 'QUOT_DT' || upper === 'QT_DT' || upper === 'QT_DATE' || upper === 'QUOTE_DATE') {
+      patch.QUOT_DT = nextVal;
+      patch.QT_DT = nextVal;
+      patch.QT_DATE = nextVal;
+      patch.QUOTE_DATE = nextVal;
+    } else if (upper === 'CNE_TEL' || upper === 'CNE_PHONE' || upper === 'BUYER_TEL') {
+      patch.CNE_TEL = nextVal;
+      patch.CNE_PHONE = nextVal;
+      patch.BUYER_TEL = nextVal;
+    } else if (upper === 'BUYER_NAME' || upper === 'BUYER_REP' || upper === 'CNE_CONTACT') {
+      patch[upper] = nextVal;
+    } else if (upper === 'TOTAL_AMT' || upper === 'TOT_AMT' || upper === 'TOTAL_AMOUNT' || upper === 'CTR_VAL') {
+      patch.TOTAL_AMT = nextVal;
+      patch.TOT_AMT = nextVal;
+      patch.TOTAL_AMOUNT = nextVal;
+      const numVal = toNum(nextVal);
+      if (numVal > 0) {
+        const words = numberToEnglishWordsUsd(numVal);
+        patch.TOTAL_AMT_WORDS = words;
+        patch.TOT_AMT_WORDS = words;
+        patch.AMOUNT_IN_WORDS = words;
+        if (upper !== 'CTR_VAL') patch.CTR_VAL = formatCurrency(numVal);
+      }
+    }
+
+    let nextRows: Array<Record<string, string>> | undefined;
+    if (itemsRows.length > 0 && itemsRows[0][upper] !== undefined) {
+      nextRows = itemsRows.map((r, i) => (i === 0 ? { ...r, [upper]: nextVal } : r));
+    }
+
+    await applyBatchFieldsAndRerender(patch, nextRows);
   };
 
   if (!target || !ctx) return null;
@@ -386,62 +435,53 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       ? `Báo giá ${cleanQuoteNoForCustomer(ctx.extraMeta?.quotation_no || '', target.orderId)}`
       : `${target.kind} · ${ctx.order?.contract_no || target.orderId}`;
 
-  const safeDocFileName = `${cleanQuoteTitle
+  const safeDocFileName = `${(
+    target.kind === 'CONTRACT' && ctx.order?.contract_no
+      ? ctx.order.contract_no
+      : cleanQuoteTitle
+  )
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[đĐ]/g, 'd')
     .replace(/[^a-zA-Z0-9_-]+/g, '_')
     .replace(/^_+|_+$/g, '')}.docx`;
 
-  const flushDirectEditHtml = (): string | null => {
-    if (directEditMode && editableRef.current) {
-      const edited = editableRef.current.innerHTML;
-      setCustomBodyHtml(edited);
-      setDirectEditMode(false);
-      return edited;
-    }
-    return null;
-  };
-
   const handlePrint = () => {
-    const flushed = flushDirectEditHtml();
-    if (flushed !== null) {
-      window.setTimeout(() => iframeRef.current?.contentWindow?.print(), 140);
-      return;
-    }
-    iframeRef.current?.contentWindow?.print();
+    const bodyHtml = docxBodyRef.current?.innerHTML || '';
+    const styleHtml = docxStyleRef.current?.innerHTML || '';
+    const frame = printFrameRef.current;
+    if (!frame || !bodyHtml) return;
+    const doc = frame.contentDocument || frame.contentWindow?.document;
+    if (!doc) return;
+    doc.open();
+    doc.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${cleanQuoteTitle}</title>${styleHtml}<style>@media print { body { margin: 0; background: #fff; } .docx-preview-page-wrapper { background: #fff !important; padding: 0 !important; box-shadow: none !important; } }</style></head><body>${bodyHtml}</body></html>`);
+    doc.close();
+    window.setTimeout(() => {
+      frame.contentWindow?.focus();
+      frame.contentWindow?.print();
+    }, 180);
   };
 
-  const handleDownloadDocxOrHtml = () => {
-    const flushed = flushDirectEditHtml();
-    if (renderedDocxBytes && flushed === null && !customBodyHtml) {
-      const blob = new Blob([renderedDocxBytes.slice().buffer], {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = safeDocFileName;
-      a.click();
-      URL.revokeObjectURL(url);
-      onToast('success', `Đã tải xuống file Word (${safeDocFileName}).`);
+  const handleDownloadDocx = () => {
+    if (!renderedDocxBytes) {
+      onToast('warning', 'Chứng từ chưa sẵn sàng để tải xuống.');
       return;
     }
-    const htmlToDownload = flushed !== null ? wrapMammothPreviewHtml(flushed) : activeDocHtml;
-    const blob = new Blob([htmlToDownload], { type: 'text/html;charset=utf-8' });
+    const blob = new Blob([renderedDocxBytes.slice().buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = safeDocFileName.replace(/\.docx$/i, '.html');
+    a.download = safeDocFileName;
     a.click();
     URL.revokeObjectURL(url);
-    onToast('success', 'Đã tải xuống file chứng từ.');
+    onToast('success', `Đã tải xuống file Word (${safeDocFileName}).`);
   };
 
   const handleSaveGeneratedToStorage = async (markSent = false): Promise<string | null> => {
-    flushDirectEditHtml();
     if (!renderedDocxBytes) {
-      onToast('info', 'Chưa có phôi .docx được gắn cho loại chứng từ này. Bạn có thể thêm phôi .docx tại mục Quản lý Phôi mẫu.');
+      onToast('warning', 'Chưa có chứng từ để lưu.');
       return null;
     }
     const storagePath = await uploadGeneratedOrderDocx(target.orderId, target.kind, safeDocFileName, renderedDocxBytes);
@@ -466,41 +506,86 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             data.pricingRates
           )
         : 'To be covered by Buyer';
-    const freightValue = toNum(ctx.prop?.total_freight_local);
+
+    const freightCost = ['CFR', 'CPT', 'CIF', 'CIP', 'DAP', 'DPU', 'DDP'].includes(incUpper)
+      ? Math.max(
+          0,
+          (ctx.extraMeta?.cfr_price && ctx.extraMeta?.fob_price
+            ? ctx.extraMeta.cfr_price - ctx.extraMeta.fob_price
+            : toNum(ctx.prop?.total_freight_local))
+        )
+      : 0;
+    const insCost = incUpper === 'CIF' || incUpper === 'CIP' ? toNum(ctx.prop?.insurance_cost) : 0;
+    const destCost = ['DAP', 'DPU', 'DDP'].includes(incUpper)
+      ? toNum(ctx.extraMeta?.dest_extra) + (incUpper === 'DDP' ? toNum(ctx.extraMeta?.import_duty_usd) : 0)
+      : 0;
+    const extras = freightCost + insCost + destCost;
+    const subtotalAmt = extras > 0 && extras < sellingVal ? Math.round((sellingVal - extras) * 100) / 100 : sellingVal;
+
     const freightStr = originCodes.includes(incUpper)
       ? 'Freight Collect'
-      : freightValue > 0
-      ? `Freight Prepaid (${fmtUSD(freightValue)})`
+      : freightCost > 0
+      ? `Freight Prepaid (${fmtUSD(freightCost)})`
       : 'Freight Prepaid';
     const valFmt = formatCurrency(sellingVal);
     const usdFmt = fmtUSD(sellingVal);
     const words = numberToEnglishWordsUsd(sellingVal);
     const totalNw = toNum(ctx.order?.nw_confirmed_kgs) || toNum(ctx.inq?.net_weight_kgs) || 0;
-    const avgUnit = totalNw > 0 ? (sellingVal / totalNw).toFixed(3) : fieldValues.UNIT_PRICE || '0.000';
+    const avgUnit = totalNw > 0 ? `$${(subtotalAmt / totalNw).toFixed(3)}` : fieldValues.UNIT_PRICE || '$0.000';
 
-    const allocated = computeSilentFobUnitPrices(ctx.items, sellingVal, data.products, data.pricingRates);
-    const nextItemsRows = allocated.map((row, idx) => ({
-      NO: String(idx + 1),
-      SKU: row.item.sku,
-      PROD_NAME_ENG: row.item.name_eng || row.item.name,
-      PROD_NAME_VIE: row.item.name,
-      PACKING: row.item.packingName || row.item.packingCode,
-      QTY_KGS: fmtNumber(row.item.weight),
-      CARTONS: fmtNumber(row.item.cartons),
-      UNIT_PRICE: fmtUSD(row.unitPricePerKg),
-      AMOUNT: fmtUSD(row.lineTotalUsd),
-    }));
+    const itemTarget = target.kind === 'QUOTATION' ? subtotalAmt : sellingVal;
+    const allocated = computeSilentFobUnitPrices(ctx.items, itemTarget, data.products, data.pricingRates);
+    const nextItemsRows = allocated.map((row, idx) => {
+      const prod = data.products.find((p) => p.sku_code.toLowerCase() === row.item.sku.toLowerCase());
+      const packSpec = resolvePackingSpec(row.item.packingCode, data.pricingRates);
+      const packEng = packSpec.engText || row.item.packingName || row.item.packingCode;
+      return {
+        NO: String(idx + 1),
+        ITEM_STT: String(idx + 1),
+        SKU: row.item.sku,
+        ITEM_SKU: row.item.sku,
+        PROD_NAME_ENG: row.item.name_eng || row.item.name,
+        PROD_NAME_VIE: row.item.name,
+        ITEM_NAME: row.item.name_eng || row.item.name,
+        ITEM_DESC: row.item.name_eng || row.item.name,
+        ITEM_HS: prod?.hs_code || '0810.90',
+        PACKING: packEng,
+        ITEM_PACK: packEng,
+        ITEM_UNIT: 'KGS',
+        QTY_KGS: fmtNumber(row.item.weight),
+        ITEM_QTY: fmtNumber(row.item.weight),
+        ITEM_NW: fmtNumber(row.item.weight),
+        ITEM_GW: fmtNumber(row.item.grossWeightKg || row.item.weight),
+        CARTONS: fmtNumber(row.item.cartons),
+        ITEM_CARTONS: fmtNumber(row.item.cartons),
+        UNIT_PRICE: fmtUSD(row.unitPricePerKg),
+        ITEM_PRICE: fmtUSD(row.unitPricePerKg),
+        AMOUNT: fmtUSD(row.lineTotalUsd),
+        ITEM_AMT: fmtUSD(row.lineTotalUsd),
+      };
+    });
 
     return {
       patch: {
         INCOTERM: incUpper,
         APPLIED_INCOTERM: incUpper,
         INCOTERM_PLACE: incPlace,
+        SUBTOTAL_AMT: fmtUSD(subtotalAmt),
+        SUBTOTAL: fmtUSD(subtotalAmt),
+        FREIGHT_AMT: fmtUSD(freightCost),
+        OCEAN_FREIGHT: fmtUSD(freightCost),
+        INS_AMT: fmtUSD(insCost),
+        INSURANCE_AMT: fmtUSD(insCost),
+        INS_COST: fmtUSD(insCost),
+        DEST_AMT: fmtUSD(destCost),
+        DEST_CHARGES: fmtUSD(destCost),
         CTR_VAL: valFmt,
         CONTRACT_VALUE: valFmt,
         TOT_AMT: usdFmt,
+        TOTAL_AMT: usdFmt,
         TOTAL_AMOUNT: usdFmt,
         TOT_AMT_WORDS: words,
+        TOTAL_AMT_WORDS: words,
         AMOUNT_IN_WORDS: words,
         INS_TERM: insTerm,
         INSURANCE_TERM: insTerm,
@@ -538,33 +623,30 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                     }
                   }
                 }}
-                className="px-2.5 py-1.5 rounded-lg bg-[#07281c] border border-[#f4d98a]/60 text-[#fff5d6] text-xs font-bold max-w-[220px]"
+                className="px-2.5 py-1.5 rounded-lg bg-[#07281c] border border-[#f4d98a]/60 text-[#fff5d6] text-xs font-bold max-w-[240px]"
               >
                 {matchingTemplates.map((t) => (
                   <option key={t.template_id} value={t.template_id}>
-                    Phôi .docx: {t.document_name}
+                    {t.document_name}
                   </option>
                 ))}
-                <option value="">Mẫu HTML Chuẩn hệ thống</option>
               </select>
             )}
 
-            {target.kind === 'QUOTATION' && (
+            {target.kind === 'QUOTATION' && matchingTemplates.length > 1 && (
               <div className="flex items-center bg-[#07281c] rounded-lg p-0.5 border border-[#186635]">
                 <button
                   type="button"
                   onClick={() => {
                     setTemplateMode('STANDARD');
-                    if (matchingTemplates.length > 0 && selectedTemplateId !== '') {
-                      const stdTpl =
-                        matchingTemplates.find(
-                          (t) =>
-                            !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`) &&
-                            /01|standard|chuan/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
-                        ) ||
-                        matchingTemplates.find((t) => !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`));
-                      if (stdTpl) setSelectedTemplateId(stdTpl.template_id);
-                    }
+                    const stdTpl =
+                      matchingTemplates.find(
+                        (t) =>
+                          !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`) &&
+                          /01|standard|chuan/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
+                      ) ||
+                      matchingTemplates.find((t) => !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`));
+                    if (stdTpl) setSelectedTemplateId(stdTpl.template_id);
                   }}
                   className={`px-2.5 py-1 rounded-md text-[11px] font-bold cursor-pointer ${templateMode === 'STANDARD' ? 'bg-[#f4d98a] text-[#07281c]' : 'text-[#d2ebe0]'}`}
                 >
@@ -574,12 +656,10 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                   type="button"
                   onClick={() => {
                     setTemplateMode('COMPARISON');
-                    if (matchingTemplates.length > 0 && selectedTemplateId !== '') {
-                      const compTpl = matchingTemplates.find((t) =>
-                        /tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
-                      );
-                      if (compTpl) setSelectedTemplateId(compTpl.template_id);
-                    }
+                    const compTpl = matchingTemplates.find((t) =>
+                      /tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
+                    );
+                    if (compTpl) setSelectedTemplateId(compTpl.template_id);
                   }}
                   className={`px-2.5 py-1 rounded-md text-[11px] font-bold cursor-pointer ${templateMode === 'COMPARISON' ? 'bg-[#f4d98a] text-[#07281c]' : 'text-[#d2ebe0]'}`}
                 >
@@ -596,17 +676,12 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               }`}
             >
               <ListChecks className="w-3.5 h-3.5" />
-              <span>Chỉnh trường ({descriptors.length})</span>
+              <span>Chỉnh dữ liệu</span>
             </button>
 
             <button
               type="button"
-              onClick={() => {
-                if (directEditMode && editableRef.current) {
-                  setCustomBodyHtml(editableRef.current.innerHTML);
-                }
-                setDirectEditMode((s) => !s);
-              }}
+              onClick={() => setDirectEditMode((s) => !s)}
               className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer border ${
                 directEditMode ? 'bg-[#f4d98a] text-[#07281c] border-[#f4d98a]' : 'bg-[#07281c] text-[#fff5d6] border-[#186635]'
               }`}
@@ -623,7 +698,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                 try {
                   const savedPath = await handleSaveGeneratedToStorage(false);
                   if (savedPath) {
-                    onToast('success', 'Đã lưu chứng từ (.docx) vào hồ sơ đơn hàng.');
+                    onToast('success', 'Đã lưu chứng từ vào hồ sơ đơn hàng.');
                   }
                 } catch (err: any) {
                   onToast('error', err?.message || 'Lỗi lưu chứng từ.');
@@ -648,8 +723,9 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
             <button
               type="button"
+              disabled={!renderedDocxBytes}
               onClick={handlePrint}
-              className="px-3 py-1.5 rounded-lg bg-[#f4d98a] text-[#07281c] text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+              className="px-3 py-1.5 rounded-lg bg-[#f4d98a] text-[#07281c] text-xs font-extrabold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
               <Printer className="w-3.5 h-3.5" />
               <span>In / PDF</span>
@@ -657,11 +733,12 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
             <button
               type="button"
-              onClick={handleDownloadDocxOrHtml}
-              className="px-2.5 py-1.5 rounded-lg bg-[#07281c] text-[#fff5d6] border border-[#186635] text-xs font-semibold flex items-center gap-1 cursor-pointer"
+              disabled={!renderedDocxBytes}
+              onClick={handleDownloadDocx}
+              className="px-2.5 py-1.5 rounded-lg bg-[#07281c] text-[#fff5d6] border border-[#186635] text-xs font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
             >
               <FileDown className="w-3.5 h-3.5" />
-              <span>{renderedDocxBytes ? 'Tải .docx' : 'Tải File'}</span>
+              <span>Tải .docx</span>
             </button>
 
             <button
@@ -770,14 +847,13 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
           {showFieldEditor && (
             <div className="lg:col-span-4 bg-[#0b3a27] border-r-2 border-[#186635] p-3.5 overflow-y-auto space-y-2.5 max-h-[600px]">
               <div className="text-xs font-extrabold text-[#f4d98a] uppercase tracking-wider">
-                Chỉnh sửa Trường dữ liệu ({detectedKeys.length > 0 ? `${detectedKeys.length} biến trong phôi` : 'Chuẩn'})
+                CHỈNH DỮ LIỆU
               </div>
               {descriptors.map((d) => (
                 <div key={d.key} className="space-y-1">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-mono font-bold text-[#fff5d6]">{`{{${d.key}}}`}</span>
-                    <span className="text-[#9bccb8] truncate max-w-[140px]" title={d.description}>{d.description}</span>
-                  </div>
+                  <label className="block text-[11px] font-bold text-[#fff5d6]">
+                    {d.description}
+                  </label>
                   <input
                     type="text"
                     value={fieldValues[d.key] ?? d.value ?? ''}
@@ -786,6 +862,11 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                   />
                 </div>
               ))}
+              {descriptors.length === 0 && (
+                <div className="text-xs text-[#9bccb8] italic py-4">
+                  Chưa có trường dữ liệu có thể chỉnh sửa.
+                </div>
+              )}
             </div>
           )}
 
@@ -796,23 +877,26 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                 : showFieldEditor || showEmailPane
                 ? 'lg:col-span-8'
                 : 'lg:col-span-12'
-            } relative bg-white min-h-[460px] overflow-hidden`}
+            } relative bg-[#cbd5d1] min-h-[480px] max-h-[600px] overflow-auto`}
           >
+            <div ref={docxStyleRef} className="hidden" />
+            <iframe ref={printFrameRef} title="print-docx" className="hidden" />
+
             {docLoading ? (
               <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2.5 bg-[#d7eee4] text-[#07281c]">
                 <Loader2 className="w-6 h-6 animate-spin text-[#0f4a33]" />
-                <span className="text-xs font-bold">Đang tải chứng từ...</span>
+                <span className="text-xs font-bold">Loading...</span>
               </div>
-            ) : directEditMode ? (
-              <div
-                ref={editableRef}
-                contentEditable
-                suppressContentEditableWarning
-                dangerouslySetInnerHTML={{ __html: editableInnerHtml }}
-                className="w-full h-full min-h-[520px] max-h-[600px] overflow-y-auto p-8 text-slate-900 bg-white outline-none text-[13px] leading-relaxed"
-              />
+            ) : loadError && !renderedDocxBytes ? (
+              <div className="flex flex-col items-center justify-center h-full min-h-[460px] p-6 text-center text-[#07281c] bg-[#d7eee4]">
+                <AlertTriangle className="w-7 h-7 text-[#8c3b3b] mb-2" />
+                <div className="text-xs font-bold max-w-md">{loadError}</div>
+              </div>
             ) : (
-              <iframe ref={iframeRef} title={cleanQuoteTitle} srcDoc={activeDocHtml} className="w-full h-full min-h-[520px] border-0" />
+              <div
+                ref={docxBodyRef}
+                className="w-full min-h-[480px] p-3 sm:p-4 outline-none"
+              />
             )}
           </div>
 
@@ -831,7 +915,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-[#9bccb8] mb-1">Tiêu đề Email (Không chứa mã nội bộ)</label>
+                <label className="block text-[11px] text-[#9bccb8] mb-1">Tiêu đề Email</label>
                 <input
                   type="text"
                   value={emailSubject}
@@ -840,7 +924,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                 />
               </div>
               <div className="flex-1">
-                <label className="block text-[11px] text-[#9bccb8] mb-1">Xem trước nội dung Email HTML</label>
+                <label className="block text-[11px] text-[#9bccb8] mb-1">Xem trước nội dung Email</label>
                 <div
                   className="bg-white text-slate-900 p-3 rounded-xl border border-[#186635] text-xs leading-relaxed max-h-60 overflow-y-auto"
                   dangerouslySetInnerHTML={{ __html: emailBodyHtml }}
@@ -881,6 +965,31 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                   >
                     <Send className="w-3.5 h-3.5" />
                     <span>Xác nhận Đã gửi Báo giá cho Khách</span>
+                  </button>
+                )}
+                {target.kind !== 'QUOTATION' && renderedDocxBytes && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      try {
+                        const saved = await handleSaveGeneratedToStorage(false);
+                        if (saved) {
+                          const plain = emailBodyHtml.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '');
+                          navigator.clipboard?.writeText(`Subject: ${emailSubject}\n\n${plain}`);
+                          onToast('success', 'Đã lưu chứng từ vào hồ sơ và sao chép nội dung email.');
+                        }
+                      } catch (err: any) {
+                        onToast('error', err?.message || 'Lỗi lưu chứng từ.');
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                    className="flex-1 agri-btn-gold flex items-center justify-center gap-1.5 text-xs"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Lưu chứng từ &amp; Copy Email</span>
                   </button>
                 )}
               </div>

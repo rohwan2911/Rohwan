@@ -370,6 +370,7 @@ export function computeOrderPalletSummary(items: OrderItem[], usePallet: boolean
   let packingTareKg = 0;
   let cargoCbm = 0;
   const distinctPackSpecs = new Set<string>();
+  const distinctSkus = new Set<string>();
 
   items.forEach((it) => {
     const w = Math.max(0, toNum(it.weight));
@@ -382,6 +383,9 @@ export function computeOrderPalletSummary(items: OrderItem[], usePallet: boolean
     if (c.cartons > 0 && spec.code) {
       distinctPackSpecs.add(spec.code.toUpperCase());
     }
+    if (w > 0 && it.sku) {
+      distinctSkus.add(it.sku.trim().toUpperCase());
+    }
     totalCartons += c.cartons;
     skuPackingCost += c.packingCost;
     cargoNetKg += w;
@@ -389,7 +393,7 @@ export function computeOrderPalletSummary(items: OrderItem[], usePallet: boolean
     cargoCbm += c.cbm;
   });
 
-  const hasMixedPacking = distinctPackSpecs.size >= 2;
+  const hasMixedPacking = distinctPackSpecs.size >= 2 || distinctSkus.size >= 2;
   const lossFactor = hasMixedPacking ? 1.05 : 1.0;
   const totalPallets = usePallet && rawPalletFractions > 0 ? Math.ceil(rawPalletFractions * lossFactor) : 0;
   const stdPltRate = pltSpec.rate > 0 ? pltSpec.rate : 18;
@@ -548,7 +552,7 @@ export interface ContainerMixState {
   lclWeightKg: number;
   lclCbm: number;
   lclWm: number;
-  lclBasis: 'CBM' | 'TON';
+  lclBasis: 'WM' | 'CBM' | 'TON';
   lclRate: number;
   lclFreight: number;
   summaryStr: string;
@@ -558,7 +562,7 @@ export function buildContainerMixState(
   qtys: { q20dc: number; q40dc: number; q40hc: number; q20rf: number; q40rf: number; q40rh: number },
   items: OrderItem[],
   usePallet: boolean,
-  lclBasis: 'CBM' | 'TON',
+  lclBasis: 'WM' | 'CBM' | 'TON',
   lclRate: number,
   products: ProductCatalog[],
   pricingRates: PricingRate[]
@@ -599,7 +603,9 @@ export function buildContainerMixState(
   const lclWeightKg = lclDryWeightKg + lclRfWeightKg;
   const lclCbm = lclDryCbm + lclRfCbm;
   const lclWm = lclDryWm + lclRfWm;
-  const lclFreight = hasLcl ? Math.round((lclBasis === 'TON' ? (lclWeightKg / 1000) * lclRate : lclCbm * lclRate) * 100) / 100 : 0;
+  const lclUnits =
+    lclBasis === 'WM' ? lclWm : lclBasis === 'TON' ? lclWeightKg / 1000 : lclCbm;
+  const lclFreight = hasLcl ? Math.round(lclUnits * lclRate * 100) / 100 : 0;
 
   const parts: string[] = [];
   if (q20dc > 0) parts.push(`${q20dc} x 20'DC`);
@@ -738,6 +744,67 @@ export function computeLocalChargesForMix(mix: ContainerMixState, pricingRates: 
       }
     });
   return Math.round(total * 100) / 100;
+}
+
+export function computeDomesticTruckingForMix(mix: ContainerMixState, pricingRates: PricingRate[]): number {
+  if (mix.total === 0 && !mix.hasLcl) return 0;
+  const truckRows = pricingRates.filter((r) => {
+    const cat = String(r.fee_category || '').toUpperCase();
+    const code = String(r.fee_code || '').toUpperCase();
+    const name = String(r.fee_name_vie || '').toLowerCase();
+    return cat.includes('TRUCK') || cat.includes('INLAND') || cat.includes('DOMESTIC') || code.startsWith('TRK') || name.includes('trucking') || name.includes('vận tải nội địa') || name.includes('kéo cont');
+  });
+  if (truckRows.length === 0) return 0;
+
+  let matchedTotal = 0;
+  let usedContMatch = false;
+  const cnt20 = mix.q20dc + mix.q20rf;
+  const cnt40 = mix.q40dc + mix.q40hc + mix.q40rf + mix.q40rh;
+
+  truckRows.forEach((tr) => {
+    const scope = String(tr.scope_or_cont_type || '').toUpperCase().replace(/'/g, '');
+    const unit = String(tr.unit_basis || '').toLowerCase();
+    const fee = toNum(tr.standard_rate);
+    if (fee <= 0) return;
+
+    if (scope.includes('LCL') && mix.hasLcl && mix.total === 0) {
+      matchedTotal += unit.includes('cbm') || unit.includes('w/m') ? fee * Math.max(1, mix.lclWm) : fee;
+      usedContMatch = true;
+    } else if (mix.total > 0) {
+      if (scope === '20DC' || scope === '20GP' || scope === '20') {
+        matchedTotal += fee * mix.q20dc;
+        usedContMatch = true;
+      } else if (scope === '40DC' || scope === '40GP' || scope === '40HC' || scope === '40') {
+        matchedTotal += fee * (scope === '40HC' ? mix.q40hc : scope.startsWith('40D') ? mix.q40dc : (mix.q40dc + mix.q40hc));
+        usedContMatch = true;
+      } else if (scope === '20RF') {
+        matchedTotal += fee * mix.q20rf;
+        usedContMatch = true;
+      } else if (scope === '40RF' || scope === '40RH') {
+        matchedTotal += fee * (scope === '40RH' ? mix.q40rh : mix.q40rf);
+        usedContMatch = true;
+      } else if (scope.includes('20') && cnt20 > 0) {
+        matchedTotal += fee * cnt20;
+        usedContMatch = true;
+      } else if (scope.includes('40') && cnt40 > 0) {
+        matchedTotal += fee * cnt40;
+        usedContMatch = true;
+      }
+    }
+  });
+
+  if (!usedContMatch) {
+    const general = truckRows.find((tr) => {
+      const sc = String(tr.scope_or_cont_type || '').toUpperCase();
+      return !sc || sc === 'ALL' || sc === 'SHIPMENT';
+    }) || truckRows[0];
+    if (general) {
+      const unit = String(general.unit_basis || '').toLowerCase();
+      const fee = toNum(general.standard_rate);
+      matchedTotal = unit.includes('cont') && mix.total > 0 ? fee * mix.total : fee;
+    }
+  }
+  return Math.round(matchedTotal * 100) / 100;
 }
 
 export function computeCustomsSplit(pricingRates: PricingRate[]) {
@@ -1046,6 +1113,7 @@ export function computeSellingPriceScaled(
   const cfr = toNum(extraMeta?.cfr_price);
   const cif = toNum(extraMeta?.cif_price);
   const dest = toNum(extraMeta?.dest_extra);
+  const duty = inc === 'DDP' ? toNum(extraMeta?.import_duty_usd) : 0;
   if (inc === 'EXW' && exw > 0) return Math.round(exw * 100) / 100;
   if ((inc === 'FOB' || inc === 'FCA' || inc === 'FAS') && fob > 0) return Math.round(fob * 100) / 100;
   if ((inc === 'CFR' || inc === 'CPT') && cfr > 0) return Math.round(cfr * 100) / 100;
@@ -1058,7 +1126,7 @@ export function computeSellingPriceScaled(
   }
   if (inc === 'DAP' || inc === 'DPU' || inc === 'DDP') {
     const baseD = cfr > 0 ? cfr : (cif > 0 ? cif : baseSelling);
-    if (baseD > 0) return Math.round((baseD + dest) * 100) / 100;
+    if (baseD > 0) return Math.round((baseD + dest + duty) * 100) / 100;
   }
   return Math.round(baseSelling * 100) / 100;
 }

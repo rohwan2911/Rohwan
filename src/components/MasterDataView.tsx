@@ -583,7 +583,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
         <div className="agri-table-wrap">
           <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex items-center justify-between gap-2">
             <h3 className="text-sm font-extrabold text-[#fff5d6] flex items-center gap-2">
-              <FileCode2 className="w-4 h-4 text-[#f4d98a]" /> Quản lý Phôi mẫu Chứng từ .docx (template_manager)
+              <FileCode2 className="w-4 h-4 text-[#f4d98a]" /> Quản lý Phôi mẫu Chứng từ (.docx)
             </h3>
             <button
               type="button"
@@ -671,11 +671,11 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
           </div>
         </div>
 
-        {/* Từ điển biến chuẩn template_placeholders */}
+        {/* Từ điển biến chuẩn */}
         <div className="agri-table-wrap">
           <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635]">
             <h3 className="text-sm font-extrabold text-[#fff5d6]">
-              Từ điển Biến Phôi mẫu (template_placeholders · {data.templatePlaceholders.length} biến)
+              Từ điển Trường Dữ liệu Chứng từ
             </h3>
           </div>
           <div className="agri-table-scroll">
@@ -709,7 +709,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                 {data.templatePlaceholders.length === 0 && (
                   <tr>
                     <td colSpan={5} className="text-center py-6 opacity-75">
-                      Chưa có bản ghi trong bảng template_placeholders.
+                      Chưa có dữ liệu từ điển trường chứng từ.
                     </td>
                   </tr>
                 )}
@@ -853,7 +853,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
       <div className="agri-table-wrap">
         <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex items-center justify-between gap-2">
           <h3 className="text-sm font-extrabold text-[#fff5d6] flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-[#f4d98a]" /> Tài khoản &amp; Phân quyền Nhân sự (sys_users)
+            <ShieldCheck className="w-4 h-4 text-[#f4d98a]" /> Tài khoản &amp; Phân quyền Nhân sự
           </h3>
           <button
             type="button"
@@ -962,7 +962,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
         <div className="fixed inset-0 z-50 bg-[#07281c]/75 flex items-center justify-center p-4">
           <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl w-full max-w-lg p-5 text-[#f4f8f5] space-y-3 text-xs">
             <h4 className="text-base font-extrabold text-[#fff5d6]">
-              {usrModal.isEdit ? `Cập nhật Nhân sự (${usrModal.form.employee_id})` : 'Thêm Nhân sự Mới (sys_users)'}
+              {usrModal.isEdit ? `Cập nhật Nhân sự (${usrModal.form.employee_id})` : 'Thêm Nhân sự Mới'}
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>

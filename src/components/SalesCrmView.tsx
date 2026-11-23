@@ -528,7 +528,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
               <input value={quickNote} onChange={(e) => setQuickNote(e.target.value)} className="agri-input text-xs" placeholder="Sản phẩm quan tâm..." />
             </div>
             <button type="submit" disabled={quickSaving} className="agri-btn-primary py-2">
-              {quickSaving ? 'Đang lưu...' : 'Lưu Ghi nhận nhanh'}
+              {quickSaving ? 'Loading...' : 'Lưu Ghi nhận nhanh'}
             </button>
           </form>
         </div>
@@ -992,7 +992,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                     Hủy
                   </button>
                   <button type="submit" disabled={rfqSaving} className="agri-btn-gold px-5">
-                    {rfqSaving ? 'Đang lưu...' : 'Lưu & Gửi XNK Tính giá'}
+                    {rfqSaving ? 'Loading...' : 'Lưu & Gửi XNK Tính giá'}
                   </button>
                 </div>
               </form>

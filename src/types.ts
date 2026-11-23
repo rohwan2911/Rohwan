@@ -261,8 +261,9 @@ export interface ProposalExtraMeta {
   buyer_charge_usd?: number;
   internal_profit_usd?: number;
   use_pallet?: boolean;
-  lcl_basis?: 'CBM' | 'TON';
+  lcl_basis?: 'WM' | 'CBM' | 'TON';
   lcl_rate?: number;
+  import_duty_usd?: number;
   note?: string;
 }
 

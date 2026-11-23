@@ -269,9 +269,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             {mode === 'login' ? <LogIn className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
             <span>
               {loading
-                ? mode === 'login'
-                  ? 'Đang xác thực Supabase...'
-                  : 'Đang tạo tài khoản...'
+                ? 'Loading...'
                 : mode === 'login'
                 ? 'Đăng nhập Hệ thống'
                 : 'Gửi Yêu cầu Đăng ký'}

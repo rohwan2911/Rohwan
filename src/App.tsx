@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { adminProvisionAuthCredential, restoreSupabaseUserSession, signOutSupabase } from './lib/supabase';
 import {
   advanceContractMilestone,
@@ -188,8 +189,9 @@ export const App: React.FC = () => {
 
   if (authChecking) {
     return (
-      <div className="login-emerald-bg flex items-center justify-center text-[#fff5d6] text-sm font-bold">
-        Đang kiểm tra phiên đăng nhập Supabase...
+      <div className="login-emerald-bg flex items-center justify-center gap-2 text-[#fff5d6] text-sm font-bold">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        <span>Loading...</span>
       </div>
     );
   }
@@ -440,6 +442,7 @@ export const App: React.FC = () => {
       <DocumentPreviewModal
         target={previewTarget}
         data={data}
+        currentUser={currentUser}
         orderMetaMap={orderMetaMap}
         proposalMetaMap={proposalMetaMap}
         allowQuickAdjust={role === 'SALES' || role === 'ADMIN'}
