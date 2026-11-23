@@ -17,6 +17,7 @@ import {
   computeLocalChargesForMix,
   computeOrderPalletSummary,
   computeScheduleOceanAndMissing,
+  fmtDecimal,
   fmtNumber,
   fmtUSD,
   getInsuranceCatalog,
@@ -26,6 +27,7 @@ import {
   isRepriceRequestedStatus,
   isWaitingPricingStatus,
   parseInsuranceCodeString,
+  parseLocaleNumber,
   parseOrderItems,
   resolvePackingSpec,
   solveOptimalContainerMix,
@@ -68,7 +70,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
   const [selectedOrderId, setSelectedOrderId] = useState('');
   const [itemsState, setItemsState] = useState<OrderItem[]>([]);
   const [usePallet, setUsePallet] = useState(false);
-  const [palletRate, setPalletRate] = useState('18.00');
+  const [palletRate, setPalletRate] = useState('18,00');
   const [packingManualCost, setPackingManualCost] = useState<string>('');
 
   // 6 ISO Containers + LCL
@@ -79,7 +81,8 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
   const [q40rf, setQ40rf] = useState(0);
   const [q40rh, setQ40rh] = useState(0);
   const [lclBasis, setLclBasis] = useState<'WM' | 'CBM' | 'TON'>('WM');
-  const [lclRate, setLclRate] = useState(65);
+  const [lclRateStr, setLclRateStr] = useState('65,00');
+  const lclRate = parseLocaleNumber(lclRateStr);
 
   // Route & Schedule
   const [countryFilter, setCountryFilter] = useState('');
@@ -101,30 +104,39 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
   const [aiBestReason, setAiBestReason] = useState('');
 
   // Khung 4 Pricing & Insurance
-  const [marginPct, setMarginPct] = useState(12);
-  const [minMarginPct, setMinMarginPct] = useState(5);
+  const [marginPctStr, setMarginPctStr] = useState('12');
+  const [minMarginPctStr, setMinMarginPctStr] = useState('5');
+  const marginPct = parseLocaleNumber(marginPctStr);
+  const minMarginPct = parseLocaleNumber(minMarginPctStr);
   const [manualFloorPrice, setManualFloorPrice] = useState('');
   const [includeFreight, setIncludeFreight] = useState(true);
   const [includeInsurance, setIncludeInsurance] = useState(true);
   const [insBaseCode, setInsBaseCode] = useState('INS-ICC-A');
   const [insAddons, setInsAddons] = useState<string[]>([]);
   const [manualInsurance, setManualInsurance] = useState('');
-  const [destExtra, setDestExtra] = useState(0);
-  const [importDutyUsd, setImportDutyUsd] = useState(0);
+  const [destExtraStr, setDestExtraStr] = useState('');
+  const [importDutyStr, setImportDutyStr] = useState('');
+  const destExtra = parseLocaleNumber(destExtraStr);
+  const importDutyUsd = parseLocaleNumber(importDutyStr);
   const [calcNote, setCalcNote] = useState('');
 
   // 2-Way Cross-Locked Self vs FWD Matrix
   const [showFwdCompare, setShowFwdCompare] = useState(false);
   const [execOption, setExecOption] = useState<'SELF' | 'HYBRID' | 'FWD_ALL'>('SELF');
   const [selfOceanChecked, setSelfOceanChecked] = useState(true);
-  const [fwdOcean, setFwdOcean] = useState(0);
+  const [fwdOceanStr, setFwdOceanStr] = useState('');
   const [selfTruckChecked, setSelfTruckChecked] = useState(false);
-  const [selfTruckRate, setSelfTruckRate] = useState(0);
-  const [fwdTruck, setFwdTruck] = useState(0);
+  const [selfTruckRateStr, setSelfTruckRateStr] = useState('');
+  const [fwdTruckStr, setFwdTruckStr] = useState('');
   const [selfCustomsChecked, setSelfCustomsChecked] = useState(true);
-  const [fwdCustoms, setFwdCustoms] = useState(0);
+  const [fwdCustomsStr, setFwdCustomsStr] = useState('');
   const [selfPermitsChecked, setSelfPermitsChecked] = useState(true);
-  const [fwdPermits, setFwdPermits] = useState(0);
+  const [fwdPermitsStr, setFwdPermitsStr] = useState('');
+  const fwdOcean = parseLocaleNumber(fwdOceanStr);
+  const selfTruckRate = parseLocaleNumber(selfTruckRateStr);
+  const fwdTruck = parseLocaleNumber(fwdTruckStr);
+  const fwdCustoms = parseLocaleNumber(fwdCustomsStr);
+  const fwdPermits = parseLocaleNumber(fwdPermitsStr);
   const [saving, setSaving] = useState(false);
 
   const insuranceCatalog = useMemo(() => getInsuranceCatalog(data.pricingRates), [data.pricingRates]);
@@ -176,7 +188,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
       existingProp && toNum(existingProp.total_pallets) > 0 && toNum(existingProp.pallet_fee) > 0
         ? toNum(existingProp.pallet_fee) / toNum(existingProp.total_pallets)
         : stdPlt;
-    setPalletRate(savedPltRate.toFixed(2));
+    setPalletRate(fmtDecimal(savedPltRate, 2));
     setCountryFilter(cus?.country || '');
     setPodFilter('');
 
@@ -227,11 +239,11 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
 
     setSelectedScheduleId(existingProp?.schedule_id || '');
     setLclBasis(existingMeta?.lcl_basis === 'TON' ? 'TON' : existingMeta?.lcl_basis === 'CBM' ? 'CBM' : 'WM');
-    setLclRate(existingMeta?.lcl_rate && existingMeta.lcl_rate > 0 ? existingMeta.lcl_rate : 65);
-    setMarginPct(existingMeta?.margin_pct !== undefined ? existingMeta.margin_pct : 12);
-    setMinMarginPct(existingMeta?.min_margin_pct !== undefined ? existingMeta.min_margin_pct : 5);
-    setDestExtra(existingMeta?.dest_extra !== undefined ? existingMeta.dest_extra : 0);
-    setImportDutyUsd(existingMeta?.import_duty_usd !== undefined ? toNum(existingMeta.import_duty_usd) : 0);
+    setLclRateStr(fmtDecimal(existingMeta?.lcl_rate && existingMeta.lcl_rate > 0 ? existingMeta.lcl_rate : 65, 2));
+    setMarginPctStr(fmtNumber(existingMeta?.margin_pct !== undefined ? existingMeta.margin_pct : 12, 2));
+    setMinMarginPctStr(fmtNumber(existingMeta?.min_margin_pct !== undefined ? existingMeta.min_margin_pct : 5, 2));
+    setDestExtraStr(existingMeta?.dest_extra ? fmtDecimal(existingMeta.dest_extra, 2) : '');
+    setImportDutyStr(existingMeta?.import_duty_usd ? fmtDecimal(existingMeta.import_duty_usd, 2) : '');
     setCalcNote(existingMeta?.note || '');
 
     const initMix = buildContainerMixState(
@@ -251,12 +263,12 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
     const savedExec = existingMeta?.freight_exec_option || (hasLclAuto ? 'FWD_ALL' : 'SELF');
     setExecOption(savedExec);
     setShowFwdCompare(hasLclAuto || savedExec !== 'SELF' || toNum(existingMeta?.fwd_ocean) > 0 || toNum(existingMeta?.fwd_trucking) > 0);
-    setFwdOcean(toNum(existingMeta?.fwd_ocean));
-    setFwdTruck(toNum(existingMeta?.fwd_trucking));
-    setFwdCustoms(toNum(existingMeta?.fwd_customs));
-    setFwdPermits(toNum(existingMeta?.fwd_permits));
+    setFwdOceanStr(toNum(existingMeta?.fwd_ocean) > 0 ? fmtDecimal(existingMeta?.fwd_ocean, 2) : '');
+    setFwdTruckStr(toNum(existingMeta?.fwd_trucking) > 0 ? fmtDecimal(existingMeta?.fwd_trucking, 2) : '');
+    setFwdCustomsStr(toNum(existingMeta?.fwd_customs) > 0 ? fmtDecimal(existingMeta?.fwd_customs, 2) : '');
+    setFwdPermitsStr(toNum(existingMeta?.fwd_permits) > 0 ? fmtDecimal(existingMeta?.fwd_permits, 2) : '');
     const savedSelfTruck = existingMeta?.self_trucking !== undefined ? toNum(existingMeta.self_trucking) : defaultTruck;
-    setSelfTruckRate(savedSelfTruck);
+    setSelfTruckRateStr(savedSelfTruck > 0 ? fmtDecimal(savedSelfTruck, 2) : '');
     setSelfTruckChecked(savedSelfTruck > 0 && toNum(existingMeta?.fwd_trucking) === 0);
     setSelfOceanChecked(!hasLclAuto && toNum(existingMeta?.fwd_ocean) === 0);
     setSelfCustomsChecked(toNum(existingMeta?.fwd_customs) === 0);
@@ -390,7 +402,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
     return insuranceCatalog.basePolicies.map((p) => ({
       value: p.fee_code,
       label: `${p.fee_code} · ${p.fee_name_vie}`,
-      subLabel: `Tỷ lệ phí: ${p.standard_rate.toFixed(2)}%`,
+      subLabel: `Tỷ lệ phí: ${fmtDecimal(p.standard_rate, 2)}%`,
     }));
   }, [insuranceCatalog.basePolicies]);
 
@@ -662,10 +674,10 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
       let insLabel = '';
       if (row.code === 'CIF') {
         ins = computeInsurancePremiumExact(exwVal + localAndCustoms + freight, iccCRate);
-        insLabel = `ICC C (${iccCRate.toFixed(2)}%)`;
+        insLabel = `ICC C (${fmtDecimal(iccCRate, 2)}%)`;
       } else if (row.code === 'CIP') {
         ins = computeInsurancePremiumExact(exwVal + localAndCustoms + freight, iccARate);
-        insLabel = `ICC A (${iccARate.toFixed(2)}%)`;
+        insLabel = `ICC A (${fmtDecimal(iccARate, 2)}%)`;
       }
       const total = Math.round((exwVal + appliedFees + ins) * 100) / 100;
       return { row, exwVal, appliedFees, ins, insLabel, total };
@@ -811,7 +823,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                     const packComboOptions = packOpts.map((pk) => ({
                       value: pk.code,
                       label: `${pk.code} – ${pk.name}`,
-                      subLabel: `+$${pk.perKgRate.toFixed(2)}/kg`,
+                      subLabel: `+$${fmtDecimal(pk.perKgRate, 2)}/kg`,
                     }));
                     const calc = computeItemPackingAndPallet(it.weight, it.packingCode, it.packingExtra, data.pricingRates);
                     return (
@@ -846,22 +858,30 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
               <div className="lg:col-span-5 space-y-2">
                 <label className="inline-flex items-center gap-2 font-bold cursor-pointer">
                   <input type="checkbox" checked={usePallet} onChange={(e) => { setUsePallet(e.target.checked); setPackingManualCost(''); }} className="accent-[#0f4a33]" />
-                  <span>Đóng Pallet gỗ ISPM-15 (18 kg · 0.17 CBM/pallet)</span>
+                  <span>Đóng Pallet gỗ ISPM-15 (18 kg · 0,17 CBM/pallet)</span>
                 </label>
                 <div className="flex flex-wrap gap-3 text-[11px] font-mono">
                   <span>Thùng: <strong>{fmtNumber(palletPool.totalCartons)}</strong></span>
                   <span>Pallet: <strong>{fmtNumber(palletPool.totalPallets)}</strong></span>
-                  <span>GW: <strong>{fmtNumber(palletPool.totalGrossWeightKg)} KG</strong></span>
-                  <span>CBM: <strong>{palletPool.totalCbm.toFixed(3)}</strong></span>
+                  <span>GW: <strong>{fmtDecimal(palletPool.totalGrossWeightKg, 2)} KG</strong></span>
+                  <span>CBM: <strong>{fmtDecimal(palletPool.totalCbm, 3)}</strong></span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px]">Phí/Pallet ($):</span>
-                  <input type="number" step="0.5" value={palletRate} onChange={(e) => { setPalletRate(e.target.value); setPackingManualCost(''); }} className="w-20 px-2 py-0.5 rounded border border-[#186635] font-mono" />
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="VD: 18,00"
+                    value={palletRate}
+                    onChange={(e) => { setPalletRate(e.target.value); setPackingManualCost(''); }}
+                    className="w-20 px-2 py-0.5 rounded border border-[#186635] font-mono"
+                  />
                   <span className="text-[11px]">Tổng Bao bì &amp; Pallet ($):</span>
                   <input
-                    type="number"
-                    step="0.01"
-                    value={packingManualCost !== '' ? packingManualCost : palletPool.totalPackingPalletCost.toFixed(2)}
+                    type="text"
+                    inputMode="decimal"
+                    placeholder={fmtDecimal(palletPool.totalPackingPalletCost, 2)}
+                    value={packingManualCost !== '' ? packingManualCost : fmtDecimal(palletPool.totalPackingPalletCost, 2)}
                     onChange={(e) => setPackingManualCost(e.target.value)}
                     className="w-24 px-2 py-0.5 rounded border border-[#186635] font-mono font-bold"
                   />
@@ -911,13 +931,13 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                   </span>
                   {mix.hasLcl && (
                     <div className="flex flex-wrap items-center gap-2 bg-[#f4d98a] text-[#07281c] px-2.5 py-1 rounded-lg font-bold">
-                      <span>LCL (&lt;55% cont 20'): {mix.lclCbm.toFixed(2)} CBM · {(mix.lclWeightKg / 1000).toFixed(2)} Tấn · W/M: {mix.lclWm.toFixed(2)}</span>
+                      <span>LCL (&lt;55% cont 20'): {fmtDecimal(mix.lclCbm, 2)} CBM · {fmtDecimal(mix.lclWeightKg / 1000, 2)} Tấn · W/M: {fmtDecimal(mix.lclWm, 2)}</span>
                       <select value={lclBasis} onChange={(e) => setLclBasis(e.target.value as 'WM' | 'CBM' | 'TON')} className="px-1.5 py-0.5 rounded bg-white">
                         <option value="WM">Theo W/M (max Tấn, CBM)</option>
                         <option value="CBM">Theo CBM</option>
                         <option value="TON">Theo Tấn</option>
                       </select>
-                      <input type="number" value={lclRate} onChange={(e) => setLclRate(toNum(e.target.value))} className="w-16 px-1 rounded bg-white font-mono" />
+                      <input type="text" inputMode="decimal" placeholder="VD: 65,00" value={lclRateStr} onChange={(e) => setLclRateStr(e.target.value)} className="w-16 px-1 rounded bg-white font-mono" />
                       <span>$/đv</span>
                     </div>
                   )}
@@ -1224,18 +1244,19 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
               <div>
                 <label className="block font-bold mb-1">Biên LN mục tiêu (%)</label>
-                <input type="number" step="0.5" value={marginPct} onChange={(e) => setMarginPct(toNum(e.target.value))} className="agri-input font-mono font-bold" />
+                <input type="text" inputMode="decimal" placeholder="VD: 12" value={marginPctStr} onChange={(e) => setMarginPctStr(e.target.value)} className="agri-input font-mono font-bold" />
               </div>
               <div>
                 <label className="block font-bold mb-1">Biên LN sàn (%)</label>
-                <input type="number" step="0.5" value={minMarginPct} onChange={(e) => setMinMarginPct(toNum(e.target.value))} className="agri-input font-mono" />
+                <input type="text" inputMode="decimal" placeholder="VD: 5" value={minMarginPctStr} onChange={(e) => setMinMarginPctStr(e.target.value)} className="agri-input font-mono" />
               </div>
               <div>
                 <label className="block font-bold mb-1">Giá Sàn Floor ($)</label>
                 <input
-                  type="number"
-                  step="0.01"
-                  value={manualFloorPrice !== '' ? manualFloorPrice : costing.computedFloor.toFixed(2)}
+                  type="text"
+                  inputMode="decimal"
+                  placeholder={fmtDecimal(costing.computedFloor, 2)}
+                  value={manualFloorPrice !== '' ? manualFloorPrice : fmtDecimal(costing.computedFloor, 2)}
                   onChange={(e) => setManualFloorPrice(e.target.value)}
                   className="agri-input font-mono font-bold"
                 />
@@ -1243,22 +1264,24 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
               <div>
                 <label className="block font-bold mb-1">Phí Đích DAP/DPU/DDP</label>
                 <input
-                  type="number"
-                  step="1"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="VD: 450,00"
                   disabled={!['DAP', 'DPU', 'DDP'].includes(recIncoterm)}
-                  value={destExtra}
-                  onChange={(e) => setDestExtra(toNum(e.target.value))}
+                  value={destExtraStr}
+                  onChange={(e) => setDestExtraStr(e.target.value)}
                   className="agri-input font-mono disabled:opacity-50"
                 />
               </div>
               <div>
                 <label className="block font-bold mb-1">Thuế NK (DDP $)</label>
                 <input
-                  type="number"
-                  step="1"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="VD: 320,00"
                   disabled={recIncoterm !== 'DDP'}
-                  value={importDutyUsd}
-                  onChange={(e) => setImportDutyUsd(toNum(e.target.value))}
+                  value={importDutyStr}
+                  onChange={(e) => setImportDutyStr(e.target.value)}
                   className="agri-input font-mono disabled:opacity-50"
                 />
               </div>
@@ -1268,7 +1291,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
             <div className="p-3 rounded-xl bg-white/60 border border-[#186635]/40 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-extrabold text-[#07281c] flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-[#0f4a33]" /> Bảo hiểm V = (C+F)×1.1 / (1-R) · R = {selectedInsRatePct.toFixed(2)}%
+                  <ShieldCheck className="w-4 h-4 text-[#0f4a33]" /> Bảo hiểm V = (C+F)×1,1 / (1-R) · R = {fmtDecimal(selectedInsRatePct, 2)}%
                 </span>
                 <label className="inline-flex items-center gap-1.5 font-bold cursor-pointer">
                   <input type="checkbox" checked={includeInsurance} onChange={(e) => setIncludeInsurance(e.target.checked)} className="accent-[#0f4a33]" />
@@ -1291,9 +1314,10 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                 </div>
                 <div>
                   <input
-                    type="number"
-                    step="0.01"
-                    value={manualInsurance !== '' ? manualInsurance : costing.effInsurance.toFixed(2)}
+                    type="text"
+                    inputMode="decimal"
+                    placeholder={fmtDecimal(costing.effInsurance, 2)}
+                    value={manualInsurance !== '' ? manualInsurance : fmtDecimal(costing.effInsurance, 2)}
                     onChange={(e) => setManualInsurance(e.target.value)}
                     className="agri-input font-mono font-bold"
                     title="Phí bảo hiểm thực tế (USD)"
@@ -1314,7 +1338,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                           setInsAddons((prev) => (checked ? prev.filter((x) => x !== a.fee_code) : [...prev, a.fee_code]));
                         }}
                       />
-                      <span className="font-mono font-bold">{a.fee_code}</span> (+{a.standard_rate.toFixed(2)}%)
+                      <span className="font-mono font-bold">{a.fee_code}</span> (+{fmtDecimal(a.standard_rate, 2)}%)
                     </label>
                   );
                 })}
@@ -1355,20 +1379,21 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                             checked={selfOceanChecked && !mix.hasLcl && fwdOcean === 0}
                             onChange={(e) => {
                               setSelfOceanChecked(e.target.checked);
-                              if (e.target.checked) setFwdOcean(0);
+                              if (e.target.checked) setFwdOceanStr('');
                             }}
                           />
                         </td>
                         <td className="p-1.5 text-center font-mono">{mix.hasLcl ? 'LCL→FWD' : fmtUSD(costing.effOcean + costing.effSurcharge + costing.localTotal)}</td>
                         <td className="p-1.5 text-center">
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="VD: 1.200,00"
                             disabled={selfOceanChecked && !mix.hasLcl}
-                            value={fwdOcean}
+                            value={fwdOceanStr}
                             onChange={(e) => {
-                              const v = toNum(e.target.value);
-                              setFwdOcean(v);
-                              if (v > 0) setSelfOceanChecked(false);
+                              setFwdOceanStr(e.target.value);
+                              if (parseLocaleNumber(e.target.value) > 0) setSelfOceanChecked(false);
                             }}
                             className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
                           />
@@ -1384,30 +1409,33 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                             onChange={(e) => {
                               setSelfTruckChecked(e.target.checked);
                               if (e.target.checked) {
-                                setFwdTruck(0);
-                                if (selfTruckRate === 0 && defaultTruckRate > 0) setSelfTruckRate(defaultTruckRate);
+                                setFwdTruckStr('');
+                                if (selfTruckRate === 0 && defaultTruckRate > 0) setSelfTruckRateStr(fmtDecimal(defaultTruckRate, 2));
                               }
                             }}
                           />
                         </td>
                         <td className="p-1.5 text-center">
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="decimal"
+                            placeholder={defaultTruckRate > 0 ? fmtDecimal(defaultTruckRate, 2) : 'VD: 180,00'}
                             disabled={!selfTruckChecked}
-                            value={selfTruckChecked ? (selfTruckRate > 0 ? selfTruckRate : defaultTruckRate) : selfTruckRate}
-                            onChange={(e) => setSelfTruckRate(toNum(e.target.value))}
+                            value={selfTruckChecked && !selfTruckRateStr && defaultTruckRate > 0 ? fmtDecimal(defaultTruckRate, 2) : selfTruckRateStr}
+                            onChange={(e) => setSelfTruckRateStr(e.target.value)}
                             className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
                           />
                         </td>
                         <td className="p-1.5 text-center">
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="VD: 200,00"
                             disabled={selfTruckChecked}
-                            value={fwdTruck}
+                            value={fwdTruckStr}
                             onChange={(e) => {
-                              const v = toNum(e.target.value);
-                              setFwdTruck(v);
-                              if (v > 0) setSelfTruckChecked(false);
+                              setFwdTruckStr(e.target.value);
+                              if (parseLocaleNumber(e.target.value) > 0) setSelfTruckChecked(false);
                             }}
                             className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
                           />
@@ -1422,20 +1450,21 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                             checked={selfCustomsChecked && fwdCustoms === 0}
                             onChange={(e) => {
                               setSelfCustomsChecked(e.target.checked);
-                              if (e.target.checked) setFwdCustoms(0);
+                              if (e.target.checked) setFwdCustomsStr('');
                             }}
                           />
                         </td>
                         <td className="p-1.5 text-center font-mono">{fmtUSD(customsSplit.customsExportUsd)}</td>
                         <td className="p-1.5 text-center">
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="VD: 120,00"
                             disabled={selfCustomsChecked}
-                            value={fwdCustoms}
+                            value={fwdCustomsStr}
                             onChange={(e) => {
-                              const v = toNum(e.target.value);
-                              setFwdCustoms(v);
-                              if (v > 0) setSelfCustomsChecked(false);
+                              setFwdCustomsStr(e.target.value);
+                              if (parseLocaleNumber(e.target.value) > 0) setSelfCustomsChecked(false);
                             }}
                             className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
                           />
@@ -1450,20 +1479,21 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                             checked={selfPermitsChecked && fwdPermits === 0}
                             onChange={(e) => {
                               setSelfPermitsChecked(e.target.checked);
-                              if (e.target.checked) setFwdPermits(0);
+                              if (e.target.checked) setFwdPermitsStr('');
                             }}
                           />
                         </td>
                         <td className="p-1.5 text-center font-mono">{fmtUSD(customsSplit.permitsUsd)}</td>
                         <td className="p-1.5 text-center">
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="VD: 150,00"
                             disabled={selfPermitsChecked}
-                            value={fwdPermits}
+                            value={fwdPermitsStr}
                             onChange={(e) => {
-                              const v = toNum(e.target.value);
-                              setFwdPermits(v);
-                              if (v > 0) setSelfPermitsChecked(false);
+                              setFwdPermitsStr(e.target.value);
+                              if (parseLocaleNumber(e.target.value) > 0) setSelfPermitsChecked(false);
                             }}
                             className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
                           />
@@ -1484,12 +1514,12 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                             setSelfPermitsChecked(true);
                             if (defaultTruckRate > 0) {
                               setSelfTruckChecked(true);
-                              if (selfTruckRate === 0) setSelfTruckRate(defaultTruckRate);
+                              if (selfTruckRate === 0) setSelfTruckRateStr(fmtDecimal(defaultTruckRate, 2));
                             }
-                            setFwdOcean(0);
-                            setFwdTruck(0);
-                            setFwdCustoms(0);
-                            setFwdPermits(0);
+                            setFwdOceanStr('');
+                            setFwdTruckStr('');
+                            setFwdCustomsStr('');
+                            setFwdPermitsStr('');
                           }}
                           className={`px-2 py-1 rounded font-bold cursor-pointer ${execOption === 'SELF' ? 'bg-[#0f4a33] text-[#f4d98a]' : 'bg-[#d7eee4]'}`}
                         >
@@ -1541,7 +1571,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
               <div className="flex justify-between text-[11px] text-[#9bccb8]">
                 <span>Đơn giá bình quân:</span>
                 <span className="font-mono font-bold">
-                  {selectedInq && selectedInq.net_weight_kgs > 0 ? `${fmtUSD(costing.finalSelling / selectedInq.net_weight_kgs)} / KG` : '$0.00 / KG'}
+                  {selectedInq && selectedInq.net_weight_kgs > 0 ? `${fmtUSD(costing.finalSelling / selectedInq.net_weight_kgs)} / KG` : '$0,00 / KG'}
                 </span>
               </div>
             </div>

@@ -13,34 +13,88 @@ import type {
   SystemLookup,
 } from '../types';
 
-export function toNum(val: unknown): number {
+export function parseLocaleNumber(val: unknown): number {
   if (typeof val === 'number') return Number.isNaN(val) || !Number.isFinite(val) ? 0 : val;
   if (val === null || val === undefined || val === '') return 0;
-  let s = String(val).replace(/[^0-9.,-]/g, '').trim();
+  let s = String(val).trim();
   if (!s) return 0;
-  if (s.includes(',') && !s.includes('.')) {
-    s = s.replace(',', '.');
-  } else {
-    s = s.replace(/,/g, '');
+
+  // Preserve leading minus sign, strip currency symbols, spaces, and non-numeric labels
+  const isNegative = /^-/.test(s.replace(/^\s*[$€£¥₫]\s*/, ''));
+  s = s.replace(/[^0-9.,]/g, '');
+  if (!s) return 0;
+
+  const dotCount = (s.match(/\./g) || []).length;
+  const commaCount = (s.match(/,/g) || []).length;
+
+  if (dotCount > 0 && commaCount > 0) {
+    // Both separators present: whichever appears last is the decimal separator
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+      // Vietnamese / European format: 5.960,00 -> 5960.00
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else {
+      // US format: 5,960.00 -> 5960.00
+      s = s.replace(/,/g, '');
+    }
+  } else if (commaCount > 0) {
+    if (commaCount > 1) {
+      // Multiple commas: thousands separators (e.g. 1,234,567)
+      s = s.replace(/,/g, '');
+    } else {
+      // Single comma: Vietnamese decimal separator (e.g. "2,70", "14,037", "0,25")
+      s = s.replace(',', '.');
+    }
+  } else if (dotCount > 0) {
+    if (dotCount > 1) {
+      // Multiple dots: Vietnamese thousands separators (e.g. "1.250.000")
+      s = s.replace(/\./g, '');
+    } else if (/^[1-9]\d{0,2}\.\d{3}$/.test(s)) {
+      // Single dot with Vietnamese thousands grouping (e.g. "5.960", "27.400", "1.250")
+      s = s.replace(/\./g, '');
+    }
+    // Otherwise keep dot as standard decimal point (e.g. "2.70", "0.125", "16.33")
   }
-  const n = Number(s);
+
+  const n = Number(isNegative ? `-${s}` : s);
   return Number.isNaN(n) || !Number.isFinite(n) ? 0 : n;
 }
 
-export function formatCurrency(value: unknown): string {
-  const n = toNum(value);
-  return Number(n || 0).toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+export function toNum(val: unknown): number {
+  return parseLocaleNumber(val);
+}
+
+export function fmtDecimal(value: unknown, decimals = 2): string {
+  const n = parseLocaleNumber(value);
+  return n.toLocaleString('vi-VN', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
   });
+}
+
+export function formatCurrency(value: unknown): string {
+  return fmtDecimal(value, 2);
 }
 
 export function fmtUSD(num: unknown): string {
   return '$' + formatCurrency(num);
 }
 
-export function fmtNumber(num: unknown): string {
-  return toNum(num).toLocaleString('vi-VN');
+export function fmtNumber(num: unknown, maxDecimals = 3): string {
+  return parseLocaleNumber(num).toLocaleString('vi-VN', {
+    maximumFractionDigits: maxDecimals,
+  });
+}
+
+export function formatEditableNumber(val: unknown, decimals?: number): string {
+  if (val === null || val === undefined || val === '') return '';
+  const n = parseLocaleNumber(val);
+  if (decimals !== undefined) {
+    return n.toLocaleString('vi-VN', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+  }
+  return n.toLocaleString('vi-VN', { maximumFractionDigits: 4 });
 }
 
 export function normalizePlainText(val: unknown): string {
@@ -222,12 +276,12 @@ export const DEFAULT_PACKING_AND_CONTAINER_RATES: Array<Partial<PricingRate>> = 
   { fee_category: 'PACKING', fee_code: 'PKG-IQF-5K', scope_or_cont_type: 'REEFER', fee_name_vie: 'Bao PE khối IQF 5kg + Thùng chống ẩm 15kg', contract_text_eng: '5kg IQF Block Bags in 15kg Waxed Carton', unit_basis: 'Carton', standard_rate: 0.31, provider_or_rule: '15', note: 'Hàng cấp đông bulk 15kg', dim_cm: '45x32x28', net_kg: 15, tare_kg: 1.15, max_per_pallet: 40 },
   { fee_category: 'PACKING', fee_code: 'PKG-PLT-YES', scope_or_cont_type: 'ALL', fee_name_vie: 'Pallet Nhựa / Gỗ Hun Trùng ISPM-15 (Đế pallet + Quấn màng PE)', contract_text_eng: 'Heat-Treated ISPM-15 Export Pallet with Stretch Film', unit_basis: 'Pallet', standard_rate: 18, provider_or_rule: '50 thùng/pallet', note: 'Tải trọng Pallet + màng quấn 18kg · 0.17 CBM/pallet', dim_cm: '120x100x14.17', net_kg: 0, tare_kg: 18, max_per_pallet: 50 },
   { fee_category: 'PACKING', fee_code: 'PKG-PLT-NO', scope_or_cont_type: 'ALL', fee_name_vie: 'Không dùng Pallet (Xếp sàn container - Floor Load)', contract_text_eng: 'Loose Floor-Loaded in Container (No Pallet)', unit_basis: 'Pallet', standard_rate: 0, provider_or_rule: 'Xếp rời tối ưu thể tích', note: 'Không phát sinh phí & bì pallet', dim_cm: '0x0x0', net_kg: 0, tare_kg: 0, max_per_pallet: 0 },
-  { fee_category: 'CONTAINER', fee_code: 'CONT-20GP', scope_or_cont_type: "20'DC", fee_name_vie: "Container 20' Khô tiêu chuẩn (20'DC / 20GP)", contract_text_eng: '20ft General Purpose Dry Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 22,000 KG / 28 CBM / 10 Pallet', dim_cm: '589x235x239', net_kg: 22000, tare_kg: 28, max_per_pallet: 10 },
-  { fee_category: 'CONTAINER', fee_code: 'CONT-40GP', scope_or_cont_type: "40'DC", fee_name_vie: "Container 40' Khô tiêu chuẩn (40'DC / 40GP)", contract_text_eng: '40ft General Purpose Dry Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 26,000 KG / 58 CBM / 20 Pallet', dim_cm: '1203x235x239', net_kg: 26000, tare_kg: 58, max_per_pallet: 20 },
-  { fee_category: 'CONTAINER', fee_code: 'CONT-40HC', scope_or_cont_type: "40'HC", fee_name_vie: "Container 40' Khô Cao (40'HC)", contract_text_eng: '40ft High-Cube Dry Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 26,480 KG / 76 CBM / 21 Pallet', dim_cm: '1203x235x269', net_kg: 26480, tare_kg: 76, max_per_pallet: 21 },
-  { fee_category: 'CONTAINER', fee_code: 'CONT-20RF', scope_or_cont_type: "20'RF", fee_name_vie: "Container 20' Lạnh (20'RF)", contract_text_eng: '20ft Reefer Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 21,000 KG / 24 CBM / 9 Pallet', dim_cm: '544x229x227', net_kg: 21000, tare_kg: 24, max_per_pallet: 9 },
-  { fee_category: 'CONTAINER', fee_code: 'CONT-40RF', scope_or_cont_type: "40'RF", fee_name_vie: "Container 40' Lạnh Tiêu Chuẩn (40'RF)", contract_text_eng: '40ft Standard Reefer Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 25,500 KG / 52 CBM / 20 Pallet', dim_cm: '1156x229x250', net_kg: 25500, tare_kg: 52, max_per_pallet: 20 },
-  { fee_category: 'CONTAINER', fee_code: 'CONT-40RH', scope_or_cont_type: "40'RH", fee_name_vie: "Container 40' Lạnh Cao (40'RH)", contract_text_eng: '40ft High-Cube Reefer Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 25,980 KG / 67 CBM / 20 Pallet', dim_cm: '1158x229x255', net_kg: 25980, tare_kg: 67, max_per_pallet: 20 },
+  { fee_category: 'CONTAINER', fee_code: 'CONT-20GP', scope_or_cont_type: "20'DC", fee_name_vie: "Container 20' Khô tiêu chuẩn (20'DC / 20GP)", contract_text_eng: '20ft General Purpose Dry Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 28.200 KG / 28 CBM / 10 Pallet', dim_cm: '589x235x239', net_kg: 28200, tare_kg: 28, max_per_pallet: 10 },
+  { fee_category: 'CONTAINER', fee_code: 'CONT-40GP', scope_or_cont_type: "40'DC", fee_name_vie: "Container 40' Khô tiêu chuẩn (40'DC / 40GP)", contract_text_eng: '40ft General Purpose Dry Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 26.700 KG / 58 CBM / 20 Pallet', dim_cm: '1203x235x239', net_kg: 26700, tare_kg: 58, max_per_pallet: 20 },
+  { fee_category: 'CONTAINER', fee_code: 'CONT-40HC', scope_or_cont_type: "40'HC", fee_name_vie: "Container 40' Khô Cao (40'HC)", contract_text_eng: '40ft High-Cube Dry Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 26.500 KG / 67 CBM / 21 Pallet', dim_cm: '1203x235x269', net_kg: 26500, tare_kg: 67, max_per_pallet: 21 },
+  { fee_category: 'CONTAINER', fee_code: 'CONT-20RF', scope_or_cont_type: "20'RF", fee_name_vie: "Container 20' Lạnh (20'RF)", contract_text_eng: '20ft Reefer Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 27.400 KG / 24 CBM / 9 Pallet', dim_cm: '544x229x227', net_kg: 27400, tare_kg: 24, max_per_pallet: 9 },
+  { fee_category: 'CONTAINER', fee_code: 'CONT-40RF', scope_or_cont_type: "40'RF", fee_name_vie: "Container 40' Lạnh Tiêu Chuẩn (40'RF)", contract_text_eng: '40ft Standard Reefer Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 29.300 KG / 51 CBM / 20 Pallet', dim_cm: '1156x229x250', net_kg: 29300, tare_kg: 51, max_per_pallet: 20 },
+  { fee_category: 'CONTAINER', fee_code: 'CONT-40RH', scope_or_cont_type: "40'RH", fee_name_vie: "Container 40' Lạnh Cao (40'RH)", contract_text_eng: '40ft High-Cube Reefer Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 29.000 KG / 59 CBM / 20 Pallet', dim_cm: '1158x229x255', net_kg: 29000, tare_kg: 59, max_per_pallet: 20 },
 ];
 
 export interface InsuranceCatalogItem {
@@ -282,9 +336,11 @@ export const INCOTERMS_2020_MATRIX: IncotermMatrixRule[] = [
 ];
 
 export function parseDimCmToCbm(dimCm?: string): number {
-  const m = String(dimCm || '').trim().match(/(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)/i);
+  const m = String(dimCm || '')
+    .trim()
+    .match(/(\d+(?:[.,]\d+)?)\s*[x×*]\s*(\d+(?:[.,]\d+)?)\s*[x×*]\s*(\d+(?:[.,]\d+)?)/i);
   if (!m) return 0;
-  const l = toNum(m[1]), w = toNum(m[2]), h = toNum(m[3]);
+  const l = parseLocaleNumber(m[1]), w = parseLocaleNumber(m[2]), h = parseLocaleNumber(m[3]);
   return l > 0 && w > 0 && h > 0 ? (l * w * h) / 1000000 : 0;
 }
 
@@ -426,26 +482,42 @@ export function computeOrderPalletSummary(items: OrderItem[], usePallet: boolean
 export function resolveContainerSpecs(pricingRates: PricingRate[]) {
   const contRates = pricingRates.filter((r) => String(r.fee_category).toUpperCase() === 'CONTAINER');
   const one = (feeCode: string, shortCode: string, defKg: number, defCbm: number, defPlt: number) => {
-    const defRow = DEFAULT_PACKING_AND_CONTAINER_RATES.find((d) => d.fee_code === feeCode);
     const row = contRates.find((r) => {
-      const fc = String(r.fee_code || '').trim().toUpperCase();
-      const sc = String(r.scope_or_cont_type || '').trim().toUpperCase().replace(/'/g, '');
-      return fc === feeCode || sc === shortCode.toUpperCase().replace(/'/g, '');
+      const fc = String(r.fee_code || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const sc = String(r.scope_or_cont_type || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const targetFc = feeCode.replace(/[^A-Z0-9]/g, '');
+      const targetSc = shortCode.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      return fc === targetFc || sc === targetSc || fc.endsWith(targetSc);
     });
+
+    // Normalize payload KG: guard against metric tons or Vietnamese dot-thousands parsed as float (e.g. 27.4 -> 27,400 KG)
+    let rawKg = parseLocaleNumber(row?.net_kg);
+    if (rawKg > 0 && rawKg < 100) {
+      rawKg = Math.round(rawKg * 1000);
+    }
+    const maxPayloadKg = rawKg >= 5000 && rawKg <= 40000 ? rawKg : defKg;
+
+    // Normalize usable CBM: guard against unreasonable values
+    const rawCbm = parseLocaleNumber(row?.tare_kg);
+    const usableCbm = rawCbm >= 10 && rawCbm <= 100 ? rawCbm : defCbm;
+
+    const rawPlt = parseLocaleNumber(row?.max_per_pallet);
+    const maxPallets = rawPlt >= 4 && rawPlt <= 40 ? Math.floor(rawPlt) : defPlt;
+
     return {
       code: shortCode,
-      maxPayloadKg: toNum(row?.net_kg) > 0 ? toNum(row?.net_kg) : (defRow?.net_kg || defKg),
-      usableCbm: toNum(row?.tare_kg) > 0 ? toNum(row?.tare_kg) : (defRow?.tare_kg || defCbm),
-      maxPallets: toNum(row?.max_per_pallet) > 0 ? toNum(row?.max_per_pallet) : (defRow?.max_per_pallet || defPlt),
+      maxPayloadKg,
+      usableCbm,
+      maxPallets,
     };
   };
   return {
-    '20DC': one('CONT-20GP', '20DC', 22000, 28, 10),
-    '40DC': one('CONT-40GP', '40DC', 26000, 58, 20),
-    '40HC': one('CONT-40HC', '40HC', 26480, 76, 21),
-    "20'RF": one('CONT-20RF', "20'RF", 21000, 24, 9),
-    "40'RF": one('CONT-40RF', "40'RF", 25500, 52, 20),
-    "40'RH": one('CONT-40RH', "40'RH", 25980, 67, 20),
+    '20DC': one('CONT-20GP', '20DC', 28200, 28, 10),
+    '40DC': one('CONT-40GP', '40DC', 26700, 58, 20),
+    '40HC': one('CONT-40HC', '40HC', 26500, 67, 21),
+    "20'RF": one('CONT-20RF', "20'RF", 27400, 24, 9),
+    "40'RF": one('CONT-40RF', "40'RF", 29300, 51, 20),
+    "40'RH": one('CONT-40RH', "40'RH", 29000, 59, 20),
   };
 }
 
@@ -1144,4 +1216,314 @@ export function computeFloorPriceScaled(
   const targetSell = computeSellingPriceScaled(prop, extraMeta, inc) || baseSelling;
   const ratio = baseFloor / baseSelling;
   return Math.round(targetSell * ratio * 100) / 100;
+}
+
+// ==========================================
+// VIETNAMESE-TO-ENGLISH INTERNATIONAL TRADE & LOGISTICS TRANSLATION
+// ==========================================
+const EXACT_LOGISTICS_GLOSSARY: Array<{ keys: string[]; eng: string }> = [
+  // Marine Insurance & Extended Clauses
+  { keys: ['dieu khoan mo rong rui ro hap hoi nong am', 'rui ro hap hoi nong am', 'dieu khoan mo rong hap hoi nong am', 'hap hoi nong am'], eng: 'incl. Sweating & Heating Clause' },
+  { keys: ['bao hiem hang dong lanh', 'bao hiem hang dong lanh frozen food clauses a', 'bao hiem hang lanh', 'bao hiem thuc pham dong lanh'], eng: 'Institute Frozen Food Clauses (A)' },
+  { keys: ['bao hiem moi rui ro', 'bao hiem moi rui ro icc a', 'bao hiem moi rui ro icc a all risks', 'bao hiem dieu kien a'], eng: 'Institute Cargo Clauses (A) - All Risks' },
+  { keys: ['bao hiem dieu kien b', 'bao hiem dieu kien b icc b', 'bao hiem dieu kien b icc b trung binh'], eng: 'Institute Cargo Clauses (B)' },
+  { keys: ['bao hiem dieu kien c', 'bao hiem dieu kien c icc c', 'bao hiem dieu kien c icc c toi thieu'], eng: 'Institute Cargo Clauses (C)' },
+  { keys: ['dieu khoan mo rong chien tranh dinh cong', 'chien tranh dinh cong', 'rui ro chien tranh va dinh cong'], eng: 'incl. War & Strikes Clauses' },
+  { keys: ['dieu khoan mo rong trom cap nuoc ngot', 'trom cap nuoc ngot', 'trom cap va hu hai nuoc ngot'], eng: 'incl. TPND & Fresh Water Damage Clauses' },
+  { keys: ['khong mua bao hiem', 'khong mua bao hiem nguoi mua tu chiu'], eng: 'Insurance excluded (to be covered by Buyer)' },
+  { keys: ['bao hiem hong may lanh', 'rui ro hu hong thiet bi lanh'], eng: 'incl. Refrigeration Breakdown Clause (24 Hours)' },
+  { keys: ['bao hiem hang hoa duong bien'], eng: 'Marine Cargo Insurance' },
+
+  // Local Charges & Port / Shipping Fees
+  { keys: ['phi xep do tai cang', 'phi xep do container tai cang', 'phi thc'], eng: 'Terminal Handling Charge (THC)' },
+  { keys: ['phi chung tu van don', 'phi van don', 'phi lam bill'], eng: 'Bill of Lading (B/L) Documentation Fee' },
+  { keys: ['phi chi niem phong', 'phi seal', 'phi niem phong container'], eng: 'Container Seal Fee' },
+  { keys: ['phi van don va chi', 'phi bill va seal'], eng: 'Bill of Lading & Seal Fee' },
+  { keys: ['phi dien giao hang', 'phi telex release'], eng: 'Telex Release / Surrender B/L Fee' },
+  { keys: ['phi khai bao trong luong', 'phi can vgm', 'phi vgm'], eng: 'Verified Gross Mass (VGM) Filing Fee' },
+  { keys: ['phi cam dien container lanh', 'phi cam dien cont lanh', 'phi chay dien container lanh'], eng: 'Reefer Container Plug-in & Monitoring Charge' },
+  { keys: ['phi kiem tra container lanh truoc dong hang', 'phi pti'], eng: 'Pre-Trip Inspection (PTI) Fee for Reefer Container' },
+  { keys: ['phi ha bai', 'phi nang ha container', 'phi lift on lift off'], eng: 'Container Lift-On / Lift-Off (LO/LO) Charge' },
+  { keys: ['phi van tai noi dia', 'phi keo container', 'phi trucking noi dia', 'cuoc van tai duong bo'], eng: 'Domestic Inland Trucking / Container Haulage' },
+  { keys: ['phi gom hang le', 'phi kho cfs'], eng: 'Container Freight Station (CFS) Handling Charge' },
+  { keys: ['phi xu ly chung tu', 'phi handling'], eng: 'Documentation & Handling Fee' },
+  { keys: ['phi can bang container', 'phi cic'], eng: 'Container Imbalance Charge (CIC)' },
+  { keys: ['phu phi nhien lieu', 'phu phi xang dau', 'phi baf'], eng: 'Bunker Adjustment Factor (BAF)' },
+  { keys: ['phu phi nhien lieu luu huynh thap', 'phi lss'], eng: 'Low Sulphur Fuel Surcharge (LSS)' },
+  { keys: ['phu phi mua cao diem', 'phi pss'], eng: 'Peak Season Surcharge (PSS)' },
+  { keys: ['phu phi nhien lieu khan cap', 'phi ebs'], eng: 'Emergency Bunker Surcharge (EBS)' },
+  { keys: ['phi khai bao an ninh', 'phi ams', 'phi ens'], eng: 'Advance Manifest / Security Filing Fee (AMS/ENS)' },
+  { keys: ['phi luu bai', 'phi luu container tai bai'], eng: 'Container Demurrage Charge' },
+  { keys: ['phi luu vo container'], eng: 'Container Detention Charge' },
+  { keys: ['phi lenh giao hang', 'phi do'], eng: 'Delivery Order (D/O) Fee' },
+  { keys: ['phi ve sinh container'], eng: 'Container Cleaning Fee' },
+
+  // Customs & Export Permits
+  { keys: ['phi khai bao hai quan', 'phi thu tuc hai quan', 'phi hai quan xuat khau', 'thong quan xuat khau'], eng: 'Export Customs Clearance Fee' },
+  { keys: ['phi kiem dich thuc vat', 'kiem dich thuc vat', 'giay kiem dich thuc vat'], eng: 'Phytosanitary Inspection & Certificate Fee' },
+  { keys: ['phi hun trung', 'hun trung container', 'chung thu hun trung'], eng: 'Fumigation Service & Certificate Fee' },
+  { keys: ['phi chung nhan xuat xu', 'phi xin co', 'phi cap co', 'giay chung nhan xuat xu'], eng: 'Certificate of Origin (C/O) Issuance Fee' },
+  { keys: ['phi kiem tra chat luong', 'chung thu y te', 'giay chung nhan ve sinh an toan thuc pham'], eng: 'Health & Food Safety Certificate Fee' },
+  { keys: ['phi chieu xa', 'xu ly chieu xa'], eng: 'Irradiation Quarantine Treatment Fee' },
+  { keys: ['phi xu ly hoi nuoc nong', 'xu ly vht'], eng: 'Vapor Heat Treatment (VHT) Fee' },
+  { keys: ['phi giam dinh hang hoa', 'phi giam dinh sgs'], eng: 'Pre-Shipment Cargo Inspection Fee' },
+
+  // Packaging & Containers
+  { keys: ['khong dung pallet', 'khong dung pallet xep san container', 'xep san container'], eng: 'Loose Floor-Loaded in Container (No Pallet)' },
+  { keys: ['pallet go hun trung ispm 15', 'pallet nhua go hun trung ispm 15', 'pallet go xuat khau'], eng: 'Heat-Treated ISPM-15 Export Pallet with Stretch Film' },
+  { keys: ['thung carton 5 lop lot tui pe 10kg'], eng: '10kg 5-Ply Corrugated Export Carton with PE Liner' },
+  { keys: ['thung carton 5 lop lot tui pe 5kg'], eng: '5kg 5-Ply Corrugated Export Carton with PE Liner' },
+  { keys: ['tui hut chan khong 1kg thung 10kg'], eng: '1kg Vacuum PE Bags in 10kg Export Carton' },
+  { keys: ['tui pe cap dong iqf 1kg thung chong am 10kg'], eng: '1kg IQF PE Bags in 10kg Moisture-Proof Carton' },
+  { keys: ['bao pe khoi iqf 5kg thung chong am 15kg'], eng: '5kg IQF Block Bags in 15kg Waxed Export Carton' },
+  { keys: ['container 20 kho tieu chuan'], eng: '20ft General Purpose Dry Container (20\'DC)' },
+  { keys: ['container 40 kho tieu chuan'], eng: '40ft General Purpose Dry Container (40\'DC)' },
+  { keys: ['container 40 kho cao'], eng: '40ft High-Cube Dry Container (40\'HC)' },
+  { keys: ['container 20 lanh'], eng: '20ft Reefer Container (20\'RF)' },
+  { keys: ['container 40 lanh tieu chuan'], eng: '40ft Standard Reefer Container (40\'RF)' },
+  { keys: ['container 40 lanh cao'], eng: '40ft High-Cube Reefer Container (40\'RH)' },
+
+  // Vietnamese Agricultural Export Products
+  { keys: ['thanh long ruot do', 'thanh long ruot do tuoi'], eng: 'Fresh Red Flesh Dragon Fruit' },
+  { keys: ['thanh long ruot trang', 'thanh long ruot trang tuoi'], eng: 'Fresh White Flesh Dragon Fruit' },
+  { keys: ['sau rieng tuoi', 'sau rieng ri6 tuoi'], eng: 'Fresh Ri6 Durian' },
+  { keys: ['sau rieng monthong tuoi'], eng: 'Fresh Monthong Durian' },
+  { keys: ['sau rieng cap dong nguyen trai'], eng: 'Frozen Whole Durian (IQF)' },
+  { keys: ['sau rieng cap dong tach mui', 'com sau rieng cap dong', 'sau rieng dong lanh'], eng: 'Frozen Durian Pulp / Segments (IQF)' },
+  { keys: ['xoai cat chu', 'xoai cat chu tuoi'], eng: 'Fresh Cat Chu Mango' },
+  { keys: ['xoai cat hoa loc', 'xoai cat hoa loc tuoi'], eng: 'Fresh Cat Hoa Loc Mango' },
+  { keys: ['xoai keo', 'xoai keo tuoi'], eng: 'Fresh Keo Mango' },
+  { keys: ['xoai say deo'], eng: 'Soft Dried Mango Slices' },
+  { keys: ['hat dieu w320', 'nhan hat dieu w320'], eng: 'Cashew Nut Kernels W320' },
+  { keys: ['hat dieu w240', 'nhan hat dieu w240'], eng: 'Cashew Nut Kernels W240' },
+  { keys: ['hat dieu rang muoi'], eng: 'Roasted Salted Cashew Nuts' },
+  { keys: ['tieu den', 'ho tieu den', 'tieu den nguyen hat'], eng: 'Vietnam Black Peppercorns (FAQ / ASTA)' },
+  { keys: ['tieu trang', 'ho tieu trang', 'tieu so'], eng: 'Vietnam White Peppercorns (Double Washed)' },
+  { keys: ['ca phe robusta', 'ca phe nhan robusta'], eng: 'Vietnam Robusta Green Coffee Beans' },
+  { keys: ['ca phe arabica', 'ca phe nhan arabica'], eng: 'Vietnam Arabica Green Coffee Beans' },
+  { keys: ['gao st25', 'gao thom st25'], eng: 'Vietnam ST25 Fragrant Long Grain White Rice' },
+  { keys: ['gao jasmine', 'gao thom jasmine'], eng: 'Vietnam Jasmine Fragrant Rice (5% Broken)' },
+  { keys: ['dua tuoi', 'dua tuoi got kim cuong', 'dua xiem tuoi'], eng: 'Fresh Diamond-Cut Young Coconut' },
+  { keys: ['buoi da xanh', 'buoi da xanh tuoi'], eng: 'Fresh Green Skin Pomelo' },
+  { keys: ['chanh leo', 'chanh day', 'chanh leo tuoi'], eng: 'Fresh Passion Fruit' },
+  { keys: ['chanh leo cap dong', 'dich chanh leo cap dong'], eng: 'Frozen Passion Fruit Pulp' },
+  { keys: ['vai thieu', 'vai thieu tuoi'], eng: 'Fresh Lychee' },
+  { keys: ['nhan long', 'nhan tuoi'], eng: 'Fresh Longan' },
+  { keys: ['chom chom', 'chom chom tuoi'], eng: 'Fresh Rambutan' },
+  { keys: ['mit say', 'mit say gion'], eng: 'Vacuum-Fried Crispy Jackfruit Chips' },
+  { keys: ['chuoi tuoi', 'chuoi gia nam my'], eng: 'Fresh Cavendish Bananas' },
+  { keys: ['que ong', 'que thanh', 'que viet nam'], eng: 'Vietnam Cassia Cinnamon Sticks / Tubes' },
+  { keys: ['hoa hoi', 'hoi kho'], eng: 'Vietnam Dried Star Anise' },
+  { keys: ['gung tuoi'], eng: 'Fresh Washed Ginger' },
+  { keys: ['ot tuoi', 'ot chi thien tuoi'], eng: 'Fresh Red Bird\'s Eye Chili' },
+  { keys: ['ot cap dong'], eng: 'Frozen Red Chili (IQF)' },
+  { keys: ['khoai lang tim', 'khoai lang nhat'], eng: 'Fresh Japanese Purple Sweet Potato' },
+  { keys: ['mang cut', 'mang cut tuoi'], eng: 'Fresh Mangosteen' },
+  { keys: ['bo tuoi', 'bo booth'], eng: 'Fresh Avocado' },
+  { keys: ['chanh khong hat', 'chanh khong hat tuoi'], eng: 'Fresh Seedless Lime' },
+];
+
+const PHRASE_REPLACEMENTS: Array<[RegExp, string]> = [
+  [/điều khoản mở rộng\s*:?\s*/gi, 'incl. '],
+  [/rủi ro hấp hơi[,\s]+nóng ẩm/gi, 'Sweating & Heating Clause'],
+  [/hấp hơi[,\s]+nóng ẩm/gi, 'Sweating & Heating'],
+  [/chiến tranh\s*(?:&|và)\s*đình công/gi, 'War & Strikes Clauses'],
+  [/trộm cắp\s*(?:&|và)\s*nước ngọt/gi, 'TPND & Fresh Water Damage Clauses'],
+  [/bảo hiểm hàng đông lạnh/gi, 'Institute Frozen Food Clauses (A)'],
+  [/bảo hiểm mọi rủi ro/gi, 'Institute Cargo Clauses (A) - All Risks'],
+  [/bảo hiểm điều kiện\s*a/gi, 'Institute Cargo Clauses (A)'],
+  [/bảo hiểm điều kiện\s*b/gi, 'Institute Cargo Clauses (B)'],
+  [/bảo hiểm điều kiện\s*c/gi, 'Institute Cargo Clauses (C)'],
+  [/không mua bảo hiểm/gi, 'Insurance Excluded'],
+  [/người mua tự chịu/gi, 'Covered by Buyer'],
+  [/kiểm dịch thực vật/gi, 'Phytosanitary Inspection'],
+  [/khai báo hải quan/gi, 'Customs Declaration'],
+  [/thủ tục hải quan/gi, 'Customs Clearance'],
+  [/chứng nhận xuất xứ/gi, 'Certificate of Origin (C/O)'],
+  [/hun trùng/gi, 'Fumigation'],
+  [/chiếu xạ/gi, 'Irradiation Treatment'],
+  [/vận tải nội địa/gi, 'Domestic Inland Trucking'],
+  [/kéo container|kéo cont/gi, 'Container Haulage'],
+  [/cắm điện container lạnh|cắm điện cont lạnh/gi, 'Reefer Plug-in & Monitoring'],
+  [/xếp dỡ tại cảng/gi, 'Terminal Handling Charge (THC)'],
+  [/chứng từ vận đơn|vận đơn/gi, 'Bill of Lading (B/L)'],
+  [/niêm phong|chì container/gi, 'Container Seal'],
+  [/hũ pet/gi, 'PET Jars'],
+  [/túi zipper kraft/gi, 'Kraft Zipper Pouches'],
+  [/túi hút chân không/gi, 'Vacuum PE Bags'],
+  [/túi pe cấp đông iqf/gi, 'IQF PE Bags'],
+  [/bao pe khối iqf/gi, 'IQF Block PE Bags'],
+  [/thùng carton 5 lớp lót túi pe/gi, '5-Ply Corrugated Carton with PE Liner'],
+  [/thùng chống ẩm/gi, 'Moisture-Proof Export Carton'],
+  [/thùng carton/gi, 'Export Carton'],
+  [/pallet gỗ hun trùng/gi, 'Heat-Treated Export Pallet'],
+  [/pallet nhựa/gi, 'Plastic Export Pallet'],
+  [/quấn màng pe/gi, 'Stretch Film Wrapped'],
+  [/xếp sàn container/gi, 'Floor-Loaded in Container'],
+  [/không dùng pallet/gi, 'No Pallet'],
+  [/container lạnh cao/gi, 'High-Cube Reefer Container'],
+  [/container lạnh tiêu chuẩn|container lạnh/gi, 'Reefer Container'],
+  [/container khô cao/gi, 'High-Cube Dry Container'],
+  [/container khô tiêu chuẩn|container khô/gi, 'Dry Container'],
+  [/thanh long ruột đỏ/gi, 'Red Flesh Dragon Fruit'],
+  [/thanh long ruột trắng/gi, 'White Flesh Dragon Fruit'],
+  [/thanh long/gi, 'Dragon Fruit'],
+  [/sầu riêng tách múi/gi, 'Durian Pulp Segments'],
+  [/sầu riêng nguyên trái/gi, 'Whole Durian'],
+  [/sầu riêng/gi, 'Durian'],
+  [/xoài cát chu/gi, 'Cat Chu Mango'],
+  [/xoài cát hòa lộc/gi, 'Cat Hoa Loc Mango'],
+  [/xoài keo/gi, 'Keo Mango'],
+  [/xoài/gi, 'Mango'],
+  [/hạt điều rang muối/gi, 'Roasted Salted Cashew Nuts'],
+  [/nhân hạt điều|hạt điều/gi, 'Cashew Nut Kernels'],
+  [/tiêu đen/gi, 'Black Pepper'],
+  [/tiêu trắng|tiêu sọ/gi, 'White Pepper'],
+  [/cà phê nhân/gi, 'Green Coffee Beans'],
+  [/cà phê/gi, 'Coffee'],
+  [/chanh leo|chanh dây/gi, 'Passion Fruit'],
+  [/chôm chôm/gi, 'Rambutan'],
+  [/vải thiều/gi, 'Lychee'],
+  [/nhãn lồng|nhãn/gi, 'Longan'],
+  [/bưởi da xanh/gi, 'Green Skin Pomelo'],
+  [/dừa tươi|dừa xiêm/gi, 'Fresh Young Coconut'],
+  [/măng cụt/gi, 'Mangosteen'],
+  [/chanh không hạt/gi, 'Seedless Lime'],
+  [/mít sấy dẻo/gi, 'Soft Dried Jackfruit'],
+  [/mít sấy giòn|mít sấy/gi, 'Crispy Dried Jackfruit'],
+  [/khoai lang tím/gi, 'Purple Sweet Potato'],
+  [/khoai lang/gi, 'Sweet Potato'],
+  [/gạo thơm/gi, 'Fragrant Rice'],
+  [/gạo/gi, 'Rice'],
+  [/hoa hồi/gi, 'Star Anise'],
+  [/quế ống|quế thanh|quế/gi, 'Cassia Cinnamon'],
+  [/gừng/gi, 'Ginger'],
+  [/nghệ/gi, 'Turmeric'],
+  [/ớt chỉ thiên|ớt/gi, 'Red Chili'],
+  [/chuối/gi, 'Banana'],
+  [/dứa|thơm|khóm/gi, 'Pineapple'],
+  [/cấp đông|đông lạnh/gi, 'Frozen (IQF)'],
+  [/sấy dẻo/gi, 'Soft Dried'],
+  [/sấy khô|sấy giòn/gi, 'Dried'],
+  [/tươi/gi, 'Fresh'],
+  [/xuất khẩu/gi, 'Export'],
+  [/nhập khẩu/gi, 'Import'],
+  [/phụ phí/gi, 'Surcharge'],
+  [/phí /gi, 'Fee '],
+  [/cước biển/gi, 'Ocean Freight'],
+  [/bảo hiểm/gi, 'Insurance'],
+  [/nông sản khô/gi, 'Dried Agricultural Products'],
+  [/nông sản tươi/gi, 'Fresh Agricultural Produce'],
+  [/trái cây tươi/gi, 'Fresh Tropical Fruits'],
+  [/gia vị/gi, 'Spices'],
+  [/hũ/gi, 'Jars'],
+  [/túi/gi, 'Bags'],
+  [/thùng/gi, 'Cartons'],
+  [/bao/gi, 'Sacks'],
+  [/lô hàng/gi, 'Shipment'],
+  [/tiêu chuẩn/gi, 'Standard'],
+  [/tối thiểu/gi, 'Minimum'],
+  [/trung bình/gi, 'Medium'],
+  [/và/gi, '&'],
+];
+
+function normalizeVieLookupKey(text: string): string {
+  return String(text || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function hasVietnameseResidual(text: string): boolean {
+  const s = String(text || '');
+  if (/[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i.test(s)) {
+    return true;
+  }
+  return /\b(cua|cho|trong|tai|theo|voi|hoac|khong|hang|loai|phi|dieu|khoan|rui|ro|mo|rong|bao|hiem|nong|san)\b/i.test(s);
+}
+
+export function translateVIEtoENG(
+  vieText: string,
+  _context?: 'RATE' | 'PRODUCT' | 'INSURANCE' | 'PACKING' | 'CONTAINER' | 'GENERAL'
+): string {
+  const raw = String(vieText || '').trim();
+  if (!raw) return '';
+
+  const key = normalizeVieLookupKey(raw);
+  const exact = EXACT_LOGISTICS_GLOSSARY.find((item) => item.keys.includes(key));
+  if (exact) return exact.eng;
+
+  // Also check exact match after stripping parenthetical notes
+  const withoutParens = normalizeVieLookupKey(raw.replace(/\([^)]*\)/g, ' '));
+  if (withoutParens) {
+    const exactBase = EXACT_LOGISTICS_GLOSSARY.find((item) => item.keys.includes(withoutParens));
+    if (exactBase) return exactBase.eng;
+  }
+
+  let out = raw;
+  for (const [pattern, replacement] of PHRASE_REPLACEMENTS) {
+    out = out.replace(pattern, replacement);
+  }
+
+  out = out
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.;:)])/g, '$1')
+    .replace(/\(\s+/g, '(')
+    .replace(/^Fee\s+(.+)$/i, '$1 Fee')
+    .replace(/Fee\s+Fee/gi, 'Fee')
+    .trim();
+
+  // Capitalize first letter unless starting with "incl."
+  if (out && !/^incl\./i.test(out)) {
+    out = out.charAt(0).toUpperCase() + out.slice(1);
+  }
+  return out;
+}
+
+export async function translateVIEtoENGSmart(
+  vieText: string,
+  context: 'RATE' | 'PRODUCT' | 'INSURANCE' | 'PACKING' | 'CONTAINER' | 'GENERAL' = 'GENERAL'
+): Promise<string> {
+  const raw = String(vieText || '').trim();
+  if (!raw) return '';
+
+  // 1. Instant exact glossary match
+  const key = normalizeVieLookupKey(raw);
+  const exact = EXACT_LOGISTICS_GLOSSARY.find((item) => item.keys.includes(key));
+  if (exact) return exact.eng;
+
+  // 2. Deterministic phrase translation; if zero Vietnamese residual remains, return immediately
+  const localTranslated = translateVIEtoENG(raw, context);
+  if (localTranslated && !hasVietnameseResidual(localTranslated)) {
+    return localTranslated;
+  }
+
+  // 3. Server-side Gemini trade-logistics translation for novel/custom Vietnamese phrases
+  try {
+    const resp = await fetch('/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'translate_logistics',
+        text: raw,
+        context,
+      }),
+    });
+    if (resp.ok) {
+      const json = await resp.json();
+      const translated = String(json?.translatedText || '').trim();
+      if (translated && !hasVietnameseResidual(translated)) {
+        return translated;
+      }
+    }
+  } catch {
+    // Fall through to deterministic cleanup below
+  }
+
+  return localTranslated;
 }

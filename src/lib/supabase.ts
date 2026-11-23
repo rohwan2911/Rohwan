@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { SysUser } from '../types';
+export { parseLocaleNumber } from '../utils/calculations';
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
 const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
@@ -232,4 +233,52 @@ export async function restoreSupabaseUserSession(): Promise<SysUser | null> {
 export async function signOutSupabase(): Promise<void> {
   if (!isSupabaseConfigured) return;
   await supabase.auth.signOut();
+}
+
+export async function deleteTemplateWithStorage(
+  templateId: string,
+  storagePath?: string
+): Promise<void> {
+  if (!isSupabaseConfigured) {
+    throw new Error('Chưa cấu hình VITE_SUPABASE_URL hoặc VITE_SUPABASE_ANON_KEY.');
+  }
+  const cleanId = String(templateId || '').trim();
+  if (!cleanId) {
+    throw new Error('Thiếu mã phôi mẫu (template_id) để xóa.');
+  }
+
+  let normalizedPath = String(storagePath || '').trim();
+  if (normalizedPath) {
+    // Handle full public/signed Storage URLs if present
+    const bucketMarker = '/documents/';
+    const markerIdx = normalizedPath.indexOf(bucketMarker);
+    if (markerIdx >= 0) {
+      normalizedPath = normalizedPath.slice(markerIdx + bucketMarker.length).split('?')[0];
+    }
+    normalizedPath = normalizedPath.replace(/^\/+/, '');
+    if (normalizedPath && !normalizedPath.includes('/')) {
+      normalizedPath = `templates/${normalizedPath}`;
+    }
+  } else {
+    normalizedPath = `templates/${cleanId}.docx`;
+  }
+
+  // 1. Delete physical .docx file from Supabase Storage bucket `documents`
+  if (normalizedPath) {
+    const { error: storageErr } = await supabase.storage
+      .from('documents')
+      .remove([normalizedPath]);
+    if (storageErr && !/not found|no such/i.test(storageErr.message || '')) {
+      throw new Error(`Không thể xóa tệp .docx trên Storage (${normalizedPath}): ${storageErr.message}`);
+    }
+  }
+
+  // 2. Delete record from public.template_manager matching template_id
+  const { error: dbErr } = await supabase
+    .from('template_manager')
+    .delete()
+    .eq('template_id', cleanId);
+  if (dbErr) {
+    throw new Error(`Không thể xóa phôi mẫu khỏi cơ sở dữ liệu: ${dbErr.message}`);
+  }
 }

@@ -1,7 +1,9 @@
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
 interface AiRequestBody {
-  action?: 'incoterm_advisor' | 'smart_fill_template' | 'smart_fill_hash_markers';
+  action?: 'incoterm_advisor' | 'smart_fill_template' | 'smart_fill_hash_markers' | 'translate_logistics';
+  text?: string;
+  context?: string;
   orderId?: string;
   question?: string;
   chatHistory?: Array<{ role: string; text: string }>;
@@ -29,6 +31,55 @@ interface AiRequestBody {
     source_column: string;
     description_vie: string;
   }>;
+}
+
+async function handleTranslateLogistics(ai: GoogleGenAI, body: AiRequestBody) {
+  const sourceText = String(body.text || '').trim();
+  const context = String(body.context || 'GENERAL').toUpperCase();
+  if (!sourceText) {
+    return { success: true, translatedText: '' };
+  }
+
+  const systemInstruction = [
+    'You are a senior international maritime logistics, Incoterms 2020, marine cargo insurance, and agricultural export trade translator.',
+    'Translate the provided Vietnamese logistics/trade/product phrase into concise, idiomatic, contract-ready English.',
+    'STRICT RULES:',
+    '1. Output ONLY pure English international trade terminology with ZERO remaining Vietnamese words or diacritics.',
+    '2. Follow exact ICC / maritime / export contract conventions:',
+    '   - "Điều khoản mở rộng: Rủi ro hấp hơi, nóng ẩm" -> "incl. Sweating & Heating Clause"',
+    '   - "Bảo hiểm hàng đông lạnh" -> "Institute Frozen Food Clauses (A)"',
+    '   - "Bảo hiểm mọi rủi ro" -> "Institute Cargo Clauses (A) - All Risks"',
+    '   - "Phí xếp dỡ tại cảng" -> "Terminal Handling Charge (THC)"',
+    '   - "Phí kiểm dịch thực vật" -> "Phytosanitary Inspection & Certificate Fee"',
+    '3. Keep it concise (suitable for a Sales Contract, Commercial Invoice, Packing List, or Pricing Rate table). Do not add explanations.',
+  ].join('\n');
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-4-hydrogen',
+    contents: `Category: ${context}\nVietnamese text: ${sourceText}`,
+    config: {
+      systemInstruction,
+      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          translatedText: {
+            type: Type.STRING,
+            description: 'Clean, idiomatic international trade English translation with zero Vietnamese words',
+          },
+        },
+        required: ['translatedText'],
+      },
+    },
+  });
+
+  const rawText = (response.text || '{}').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  const parsed = JSON.parse(rawText || '{}');
+  return {
+    success: true,
+    translatedText: String(parsed.translatedText || '').trim(),
+  };
 }
 
 async function handleSmartFillHashMarkers(ai: GoogleGenAI, body: AiRequestBody) {
@@ -214,6 +265,10 @@ export async function runGeminiIncotermAdvisor(body: AiRequestBody, apiKey: stri
       },
     },
   });
+
+  if (body.action === 'translate_logistics') {
+    return handleTranslateLogistics(ai, body);
+  }
 
   if (body.action === 'smart_fill_hash_markers') {
     return handleSmartFillHashMarkers(ai, body);

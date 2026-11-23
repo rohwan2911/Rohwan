@@ -26,6 +26,7 @@ import {
   computeScheduleOceanAndMissing,
   computeSellingPriceScaled,
   computeSilentFobUnitPrices,
+  fmtDecimal,
   fmtNumber,
   fmtUSD,
   formatCurrency,
@@ -886,7 +887,7 @@ export function buildTemplateFieldContext(
       INCOTERM_PLACE: place,
       PRICE: fmtUSD(priceVal),
       OPT_PRICE: fmtUSD(priceVal),
-      UNIT_PRICE: totalNw > 0 ? `$${(priceVal / totalNw).toFixed(3)}/KG` : fmtUSD(priceVal),
+      UNIT_PRICE: totalNw > 0 ? `$${fmtDecimal(priceVal / totalNw, 3)}/KG` : fmtUSD(priceVal),
       RISK_TRANSFER: hb?.risk_transfer_point || place,
       DESC: hb?.contract_text_eng || `${code} ${place} (Incoterms 2020)`,
     };
@@ -1039,7 +1040,7 @@ export function buildTemplateFieldContext(
     GOODS_DESC: sanitizeNoTba(prodNamesEng || firstProd?.product_name_eng, ''),
     HS_CODE: sanitizeNoTba(normalizePlainText(firstProd?.hs_code), '0810.90'),
     STORAGE_TEMP: sanitizeNoTba(firstProd?.storage_temperature, 'Ambient / Dry'),
-    UNIT_PRICE: avgUnitPrice > 0 ? `$${avgUnitPrice.toFixed(3)}` : '$0.000',
+    UNIT_PRICE: avgUnitPrice > 0 ? `$${fmtDecimal(avgUnitPrice, 3)}` : '$0,000',
     NW_KGS: fmtNumber(totalNw),
     TOTAL_NW: fmtNumber(totalNw),
     NET_WEIGHT: `${fmtNumber(totalNw)} KGS`,
@@ -1050,8 +1051,8 @@ export function buildTemplateFieldContext(
     TOTAL_CARTONS: fmtNumber(totalCartons),
     PALLETS: fmtNumber(totalPallets),
     TOTAL_PALLETS: fmtNumber(totalPallets),
-    CBM: totalCbm.toFixed(3),
-    TOTAL_CBM: totalCbm.toFixed(3),
+    CBM: fmtDecimal(totalCbm, 3),
+    TOTAL_CBM: fmtDecimal(totalCbm, 3),
     PACKING_DESC:
       items.map((it) => `${it.name_eng || it.name}: ${resolvePackingSpec(it.packingCode, pricingRates).engText}`).join('; ') ||
       'Export Standard Cartons',

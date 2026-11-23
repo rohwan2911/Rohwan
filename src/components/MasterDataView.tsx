@@ -22,6 +22,8 @@ import {
   Image as ImageIcon,
   Eye,
   FileText,
+  Languages,
+  Lock,
 } from 'lucide-react';
 import { renderAsync } from 'docx-preview';
 import { SearchableCombo } from './SearchableCombo';
@@ -35,7 +37,19 @@ import type {
   TemplatePlaceholder,
   ViewId,
 } from '../types';
-import { capitalizeWordsPreservingSpaces, computeFreightExpiryStatus, fmtUSD, normalizePlainText, todayIsoDate, toNum } from '../utils/calculations';
+import {
+  capitalizeWordsPreservingSpaces,
+  computeFreightExpiryStatus,
+  fmtDecimal,
+  fmtNumber,
+  fmtUSD,
+  formatEditableNumber,
+  normalizePlainText,
+  parseLocaleNumber,
+  todayIsoDate,
+  toNum,
+  translateVIEtoENGSmart,
+} from '../utils/calculations';
 import {
   applyAiTagsToDocx,
   DocxParagraphBlock,
@@ -61,18 +75,198 @@ interface MasterDataViewProps {
   data: AppDataState;
   quickSearch: string;
   highlightedId?: string;
-  onUpsertProduct: (row: ProductCatalog, isEdit: boolean) => Promise<void>;
+  onUpsertProduct: (row: ProductCatalog, isEdit: boolean, silent?: boolean) => Promise<void>;
   onDeleteProduct: (sku: string) => Promise<void>;
-  onUpsertSchedule: (row: ShippingSchedule, isEdit: boolean) => Promise<void>;
+  onUpsertSchedule: (row: ShippingSchedule, isEdit: boolean, silent?: boolean) => Promise<void>;
   onDeleteSchedule: (scheduleId: string) => Promise<void>;
-  onUpsertRate: (row: PricingRate, isEdit: boolean) => Promise<void>;
+  onUpsertRate: (row: PricingRate, isEdit: boolean, silent?: boolean) => Promise<void>;
   onDeleteRate: (feeCode: string) => Promise<void>;
   onUpsertTemplate: (row: TemplateManager, isEdit: boolean) => Promise<void>;
+  onDeleteTemplate: (row: TemplateManager) => Promise<void>;
   onRefreshData?: () => Promise<void>;
   onUpsertUser: (row: SysUser, isEdit: boolean, initialPassword?: string) => Promise<void>;
   onRequestConfirm: (title: string, message: string, onConfirm: () => Promise<void>, danger?: boolean) => void;
   onToast: (type: 'success' | 'error' | 'info' | 'warning', title: string) => void;
 }
+
+interface ProductDraft {
+  product_group: string;
+  sku_code: string;
+  product_name_vie: string;
+  product_name_eng: string;
+  unit_price: string;
+  hs_code: string;
+  container_type: string;
+  storage_temperature: string;
+  image_url: string;
+}
+
+interface ScheduleDraft {
+  schedule_id: string;
+  pol: string;
+  pod: string;
+  country: string;
+  pot: string;
+  shipping_line: string;
+  vessel: string;
+  voyage: string;
+  etd: string;
+  eta: string;
+  rate_20_dc: string;
+  rate_40_dc: string;
+  rate_40_hc: string;
+  rate_20_rf: string;
+  rate_40_rf: string;
+  rate_40_rh: string;
+  baf_fee: string;
+  lss_fee: string;
+  pss_fee: string;
+  b_l_fee: string;
+  seal_fee: string;
+  updated_date: string;
+  expiry_date: string;
+  thc_20_dry: string;
+  thc_40_dry: string;
+  thc_20_reefer: string;
+  thc_40_reefer: string;
+  bill_seal_fee_shipment: string;
+}
+
+interface RateDraft {
+  fee_category: string;
+  fee_code: string;
+  scope_or_cont_type: string;
+  fee_name_vie: string;
+  contract_text_eng: string;
+  unit_basis: string;
+  standard_rate: string;
+  provider_or_rule: string;
+  note: string;
+  dim_cm: string;
+  net_kg: string;
+  tare_kg: string;
+  max_per_pallet: string;
+}
+
+const RATE_CATEGORY_OPTIONS = ['LOCAL_CHARGE', 'CUSTOMS_FEE', 'INSURANCE', 'PACKING', 'CONTAINER'] as const;
+
+const createBlankProductDraft = (lockedGroup: string): ProductDraft => ({
+  product_group: lockedGroup,
+  sku_code: '',
+  product_name_vie: '',
+  product_name_eng: '',
+  unit_price: '',
+  hs_code: '',
+  container_type: '',
+  storage_temperature: '',
+  image_url: '',
+});
+
+const productToDraft = (p: ProductCatalog): ProductDraft => ({
+  product_group: p.product_group || '',
+  sku_code: p.sku_code || '',
+  product_name_vie: p.product_name_vie || '',
+  product_name_eng: p.product_name_eng || '',
+  unit_price: formatEditableNumber(p.unit_price),
+  hs_code: normalizePlainText(p.hs_code),
+  container_type: p.container_type || '',
+  storage_temperature: p.storage_temperature || '',
+  image_url: p.image_url || '',
+});
+
+const createBlankScheduleDraft = (): ScheduleDraft => ({
+  schedule_id: '',
+  pol: '',
+  pod: '',
+  country: '',
+  pot: '',
+  shipping_line: '',
+  vessel: '',
+  voyage: '',
+  etd: '',
+  eta: '',
+  rate_20_dc: '',
+  rate_40_dc: '',
+  rate_40_hc: '',
+  rate_20_rf: '',
+  rate_40_rf: '',
+  rate_40_rh: '',
+  baf_fee: '',
+  lss_fee: '',
+  pss_fee: '',
+  b_l_fee: '',
+  seal_fee: '',
+  updated_date: todayIsoDate(),
+  expiry_date: '',
+  thc_20_dry: '',
+  thc_40_dry: '',
+  thc_20_reefer: '',
+  thc_40_reefer: '',
+  bill_seal_fee_shipment: '',
+});
+
+const scheduleToDraft = (s: ShippingSchedule): ScheduleDraft => ({
+  schedule_id: s.schedule_id || '',
+  pol: s.pol || '',
+  pod: s.pod || '',
+  country: s.country || '',
+  pot: s.pot || '',
+  shipping_line: s.shipping_line || '',
+  vessel: s.vessel || '',
+  voyage: s.voyage || '',
+  etd: s.etd || '',
+  eta: s.eta || '',
+  rate_20_dc: formatEditableNumber(s.rate_20_dc),
+  rate_40_dc: formatEditableNumber(s.rate_40_dc),
+  rate_40_hc: formatEditableNumber(s.rate_40_hc),
+  rate_20_rf: formatEditableNumber(s.rate_20_rf),
+  rate_40_rf: formatEditableNumber(s.rate_40_rf),
+  rate_40_rh: formatEditableNumber(s.rate_40_rh),
+  baf_fee: formatEditableNumber(s.baf_fee),
+  lss_fee: formatEditableNumber(s.lss_fee),
+  pss_fee: formatEditableNumber(s.pss_fee),
+  b_l_fee: formatEditableNumber(s.b_l_fee),
+  seal_fee: formatEditableNumber(s.seal_fee),
+  updated_date: s.updated_date || todayIsoDate(),
+  expiry_date: s.expiry_date || '',
+  thc_20_dry: formatEditableNumber(s.thc_20_dry),
+  thc_40_dry: formatEditableNumber(s.thc_40_dry),
+  thc_20_reefer: formatEditableNumber(s.thc_20_reefer),
+  thc_40_reefer: formatEditableNumber(s.thc_40_reefer),
+  bill_seal_fee_shipment: formatEditableNumber(s.bill_seal_fee_shipment),
+});
+
+const createBlankRateDraft = (lockedCategory: string): RateDraft => ({
+  fee_category: lockedCategory,
+  fee_code: '',
+  scope_or_cont_type: '',
+  fee_name_vie: '',
+  contract_text_eng: '',
+  unit_basis: '',
+  standard_rate: '',
+  provider_or_rule: '',
+  note: '',
+  dim_cm: '',
+  net_kg: '',
+  tare_kg: '',
+  max_per_pallet: '',
+});
+
+const rateToDraft = (r: PricingRate): RateDraft => ({
+  fee_category: r.fee_category || '',
+  fee_code: r.fee_code || '',
+  scope_or_cont_type: r.scope_or_cont_type || '',
+  fee_name_vie: r.fee_name_vie || '',
+  contract_text_eng: r.contract_text_eng || '',
+  unit_basis: r.unit_basis || '',
+  standard_rate: formatEditableNumber(r.standard_rate),
+  provider_or_rule: r.provider_or_rule || '',
+  note: r.note || '',
+  dim_cm: r.dim_cm || '',
+  net_kg: formatEditableNumber(r.net_kg),
+  tare_kg: formatEditableNumber(r.tare_kg),
+  max_per_pallet: formatEditableNumber(r.max_per_pallet),
+});
 
 const ProductThumbnail: React.FC<{ url?: string; alt: string; sizeClass?: string }> = ({
   url,
@@ -120,6 +314,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
   onUpsertRate,
   onDeleteRate,
   onUpsertTemplate,
+  onDeleteTemplate,
   onRefreshData,
   onUpsertUser,
   onRequestConfirm,
@@ -127,10 +322,34 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
 }) => {
   const qLower = quickSearch.trim().toLowerCase();
 
-  const [prodModal, setProdModal] = useState<{ open: boolean; isEdit: boolean; form: ProductCatalog | null }>({ open: false, isEdit: false, form: null });
-  const [schModal, setSchModal] = useState<{ open: boolean; isEdit: boolean; form: ShippingSchedule | null }>({ open: false, isEdit: false, form: null });
+  const [prodGroup, setProdGroup] = useState<string>('ALL');
+  const [prodModal, setProdModal] = useState<{
+    open: boolean;
+    isEdit: boolean;
+    lockedGroup: string;
+    rows: ProductDraft[];
+  }>({ open: false, isEdit: false, lockedGroup: '', rows: [] });
+  const [prodSaving, setProdSaving] = useState(false);
+
+  const [schModal, setSchModal] = useState<{
+    open: boolean;
+    isEdit: boolean;
+    rows: ScheduleDraft[];
+  }>({ open: false, isEdit: false, rows: [] });
+  const [schSaving, setSchSaving] = useState(false);
+
   const [rateCat, setRateCat] = useState<string>('ALL');
-  const [rateModal, setRateModal] = useState<{ open: boolean; isEdit: boolean; form: PricingRate | null }>({ open: false, isEdit: false, form: null });
+  const [rateModal, setRateModal] = useState<{
+    open: boolean;
+    isEdit: boolean;
+    lockedCategory: string;
+    rows: RateDraft[];
+  }>({ open: false, isEdit: false, lockedCategory: '', rows: [] });
+  const [rateSaving, setRateSaving] = useState(false);
+
+  // Loading state per row for VIE -> ENG translation button
+  const [translatingKey, setTranslatingKey] = useState<string | null>(null);
+
   const [tplModal, setTplModal] = useState<{ open: boolean; isEdit: boolean; form: TemplateManager | null }>({ open: false, isEdit: false, form: null });
   const [tplFile, setTplFile] = useState<File | null>(null);
   const [tplDetectedTags, setTplDetectedTags] = useState<string[]>([]);
@@ -148,7 +367,6 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
     updatedBlockIds: string[];
   } | null>(null);
   const [tagEditorBusy, setTagEditorBusy] = useState(false);
-  const [tagEditorLoadingId, setTagEditorLoadingId] = useState<string | null>(null);
   const [tagBlockSearch, setTagBlockSearch] = useState('');
   const [tagOnlyMarked, setTagOnlyMarked] = useState(false);
   const [tagEditorTab, setTagEditorTab] = useState<'edit' | 'preview'>('edit');
@@ -185,6 +403,21 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
     return list;
   }, [data.templatePlaceholders]);
 
+  const productGroupTabs = useMemo(() => {
+    const set = new Set<string>();
+    data.products.forEach((p) => {
+      const g = (p.product_group || '').trim();
+      if (g) set.add(g);
+    });
+    return ['ALL', ...Array.from(set).sort((a, b) => a.localeCompare(b, 'vi'))];
+  }, [data.products]);
+
+  const productGroupOptions = useMemo(() => {
+    return productGroupTabs
+      .filter((g) => g !== 'ALL')
+      .map((g) => ({ value: g, label: g }));
+  }, [productGroupTabs]);
+
   const scheduleCountryOptions = useMemo(() => {
     const set = new Set<string>();
     data.schedules.forEach((s) => s.country && set.add(s.country.trim()));
@@ -198,8 +431,8 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
     return Array.from(set).sort().map((v) => ({ value: v, label: v }));
   }, [data.schedules]);
 
-  const schedulePodOptions = useMemo(() => {
-    const countryLow = (schModal.form?.country || '').trim().toLowerCase();
+  const getPodOptionsForCountry = (country: string) => {
+    const countryLow = (country || '').trim().toLowerCase();
     const matched = data.schedules.filter((s) => !countryLow || s.country.trim().toLowerCase() === countryLow);
     const pool = matched.length > 0 ? matched : data.schedules;
     const map = new Map<string, { value: string; label: string; subLabel?: string }>();
@@ -211,12 +444,12 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
       }
     });
     return Array.from(map.values());
-  }, [data.schedules, schModal.form?.country]);
+  };
 
   useEffect(() => {
     if (activeView === 'xnk-shipping' && highlightedId) {
       const target = data.schedules.find((s) => s.schedule_id === highlightedId);
-      if (target) setSchModal({ open: true, isEdit: true, form: { ...target } });
+      if (target) setSchModal({ open: true, isEdit: true, rows: [scheduleToDraft(target)] });
     }
   }, [activeView, highlightedId, data.schedules]);
 
@@ -253,29 +486,112 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
   }, [tagEditor, tagEditorTab]);
 
   if (activeView === 'master-products') {
-    const list = data.products.filter((p) => !qLower || `${p.sku_code} ${p.product_name_vie} ${p.product_name_eng} ${p.hs_code} ${p.product_group}`.toLowerCase().includes(qLower));
+    const list = data.products.filter((p) => {
+      if (prodGroup !== 'ALL' && (p.product_group || '').trim() !== prodGroup) return false;
+      if (!qLower) return true;
+      return `${p.sku_code} ${p.product_name_vie} ${p.product_name_eng} ${p.hs_code} ${p.product_group}`.toLowerCase().includes(qLower);
+    });
+
+    const handleTranslateProductRow = async (idx: number) => {
+      const row = prodModal.rows[idx];
+      if (!row || !row.product_name_vie.trim()) {
+        onToast('warning', 'Vui lòng nhập Tên Tiếng Việt trước khi dịch.');
+        return;
+      }
+      const key = `prod-${idx}`;
+      setTranslatingKey(key);
+      try {
+        const eng = await translateVIEtoENGSmart(row.product_name_vie, 'PRODUCT');
+        setProdModal((prev) => ({
+          ...prev,
+          rows: prev.rows.map((r, i) => (i === idx ? { ...r, product_name_eng: eng } : r)),
+        }));
+      } catch (err: any) {
+        onToast('error', err?.message || 'Không thể dịch tên sản phẩm.');
+      } finally {
+        setTranslatingKey(null);
+      }
+    };
+
+    const handleSaveProducts = async () => {
+      const activeRows = prodModal.rows.filter(
+        (r) => r.sku_code.trim() || r.product_name_vie.trim() || r.product_name_eng.trim()
+      );
+      if (activeRows.length === 0) {
+        onToast('warning', 'Vui lòng nhập ít nhất 1 sản phẩm (SKU & Tên Tiếng Việt).');
+        return;
+      }
+      for (let i = 0; i < activeRows.length; i++) {
+        const r = activeRows[i];
+        if (!r.sku_code.trim()) {
+          onToast('warning', `Dòng ${i + 1}: Vui lòng nhập mã SKU.`);
+          return;
+        }
+        if (!r.product_name_vie.trim()) {
+          onToast('warning', `Dòng ${i + 1} (${r.sku_code}): Vui lòng nhập Tên Tiếng Việt.`);
+          return;
+        }
+      }
+      setProdSaving(true);
+      try {
+        const isBulk = !prodModal.isEdit;
+        for (const r of activeRows) {
+          const payload: ProductCatalog = {
+            product_group: (prodModal.lockedGroup || r.product_group).trim(),
+            sku_code: r.sku_code.trim(),
+            product_name_vie: r.product_name_vie.trim(),
+            product_name_eng: r.product_name_eng.trim(),
+            unit_price: parseLocaleNumber(r.unit_price),
+            hs_code: r.hs_code.trim(),
+            container_type: r.container_type.trim(),
+            storage_temperature: r.storage_temperature.trim(),
+            image_url: r.image_url.trim(),
+          };
+          await onUpsertProduct(payload, prodModal.isEdit, isBulk);
+        }
+        if (isBulk) {
+          onToast(
+            'success',
+            activeRows.length > 1 ? `Đã thêm thành công ${activeRows.length} sản phẩm mới.` : 'Đã thêm sản phẩm mới.'
+          );
+          await onRefreshData?.();
+        }
+        setProdModal({ open: false, isEdit: false, lockedGroup: '', rows: [] });
+      } catch (err: any) {
+        onToast('error', err?.message || 'Lưu sản phẩm thất bại.');
+      } finally {
+        setProdSaving(false);
+      }
+    };
+
     return (
       <div className="space-y-4">
-        <div className="flex justify-end">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-1 bg-[#07281c] p-1 rounded-xl border border-[#186635]">
+            {productGroupTabs.map((grp) => (
+              <button
+                key={grp}
+                type="button"
+                onClick={() => setProdGroup(grp)}
+                className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer ${
+                  prodGroup === grp ? 'bg-[#f4d98a] text-[#07281c]' : 'text-[#d2ebe0]'
+                }`}
+              >
+                {grp === 'ALL' ? 'ALL' : grp}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              const locked = prodGroup === 'ALL' ? '' : prodGroup;
               setProdModal({
                 open: true,
                 isEdit: false,
-                form: {
-                  product_group: 'Nông sản khô',
-                  sku_code: `SKU-${String(data.products.length + 1).padStart(3, '0')}`,
-                  product_name_vie: '',
-                  product_name_eng: '',
-                  unit_price: 2.5,
-                  hs_code: '0810.90',
-                  container_type: "20'DC / 40'DC",
-                  storage_temperature: 'Nhiệt độ thường',
-                  image_url: '',
-                },
-              })
-            }
+                lockedGroup: locked,
+                rows: [createBlankProductDraft(locked)],
+              });
+            }}
             className="agri-btn-gold flex items-center gap-1.5"
           >
             <Plus className="w-4 h-4" /> Thêm Sản phẩm
@@ -292,23 +608,23 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             <table className="agri-table">
               <thead>
                 <tr>
-                  <th className="text-center whitespace-nowrap">STT / SKU</th>
                   <th className="text-center whitespace-nowrap w-[76px]">HÌNH ẢNH</th>
-                  <th className="text-left">Nhóm hàng</th>
-                  <th className="text-left">Tên Tiếng Việt / English</th>
-                  <th className="text-center">Giá vốn ($/kg)</th>
-                  <th className="text-center">HS Code</th>
-                  <th className="text-center">Loại Cont / Nhiệt độ</th>
-                  <th className="text-center">Thao tác</th>
+                  <th className="text-center whitespace-nowrap">SKU</th>
+                  <th className="text-left">NHÓM HÀNG</th>
+                  <th className="text-left">TÊN TIẾNG VIỆT / ENGLISH</th>
+                  <th className="text-center whitespace-nowrap">GIÁ VỐN ($/KG)</th>
+                  <th className="text-center whitespace-nowrap">HS CODE</th>
+                  <th className="text-center">LOẠI CONT / NHIỆT ĐỘ</th>
+                  <th className="text-center">THAO TÁC</th>
                 </tr>
               </thead>
               <tbody>
-                {list.map((p, idx) => (
+                {list.map((p) => (
                   <tr key={p.sku_code}>
-                    <td className="text-center font-mono font-bold whitespace-nowrap">{idx + 1}. {p.sku_code}</td>
                     <td className="text-center">
                       <ProductThumbnail url={p.image_url} alt={p.product_name_vie || p.sku_code} />
                     </td>
+                    <td className="text-center font-mono font-bold whitespace-nowrap">{p.sku_code}</td>
                     <td className="text-left">{p.product_group}</td>
                     <td className="text-left">
                       <div className="font-bold">{p.product_name_vie}</div>
@@ -319,8 +635,29 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                     <td className="text-center text-xs">{p.container_type} · {p.storage_temperature}</td>
                     <td className="text-center">
                       <div className="inline-flex flex-wrap items-center justify-center gap-1">
-                        <button type="button" onClick={() => setProdModal({ open: true, isEdit: true, form: { ...p } })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"><Edit3 className="w-3 h-3 inline" /> Sửa</button>
-                        <button type="button" onClick={() => onRequestConfirm('Xóa sản phẩm?', `Xác nhận xóa ${p.sku_code}?`, () => onDeleteProduct(p.sku_code), true)} className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer"><Trash2 className="w-3 h-3 inline" /></button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setProdModal({
+                              open: true,
+                              isEdit: true,
+                              lockedGroup: '',
+                              rows: [productToDraft(p)],
+                            })
+                          }
+                          className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
+                        >
+                          <Edit3 className="w-3 h-3 inline" /> Sửa
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onRequestConfirm('Xóa sản phẩm?', `Xác nhận xóa ${p.sku_code}?`, () => onDeleteProduct(p.sku_code), true)
+                          }
+                          className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer"
+                        >
+                          <Trash2 className="w-3 h-3 inline" />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -330,39 +667,253 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
           </div>
         </div>
 
-        {prodModal.open && prodModal.form && (
+        {prodModal.open && prodModal.rows.length > 0 && (
           <div className="fixed inset-0 z-50 bg-[#07281c]/75 flex items-center justify-center p-4">
-            <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-5 text-[#f4f8f5] space-y-3 text-xs">
-              <h4 className="text-base font-extrabold text-[#fff5d6]">{prodModal.isEdit ? 'Sửa Sản phẩm' : 'Thêm Sản phẩm Mới'}</h4>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="block font-bold mb-1">SKU Code</label><input disabled={prodModal.isEdit} value={prodModal.form.sku_code} onChange={(e) => setProdModal({ ...prodModal, form: { ...prodModal.form!, sku_code: e.target.value } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Nhóm hàng</label><input value={prodModal.form.product_group} onChange={(e) => setProdModal({ ...prodModal, form: { ...prodModal.form!, product_group: e.target.value } })} className="agri-input" /></div>
-                <div><label className="block font-bold mb-1">Tên Tiếng Việt</label><input value={prodModal.form.product_name_vie} onChange={(e) => setProdModal({ ...prodModal, form: { ...prodModal.form!, product_name_vie: e.target.value } })} className="agri-input" /></div>
-                <div><label className="block font-bold mb-1">Tên Tiếng Anh</label><input value={prodModal.form.product_name_eng} onChange={(e) => setProdModal({ ...prodModal, form: { ...prodModal.form!, product_name_eng: e.target.value } })} className="agri-input" /></div>
-                <div><label className="block font-bold mb-1">Giá vốn (USD/KG)</label><input type="number" step="0.01" value={prodModal.form.unit_price} onChange={(e) => setProdModal({ ...prodModal, form: { ...prodModal.form!, unit_price: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">HS Code</label><input value={prodModal.form.hs_code} onChange={(e) => setProdModal({ ...prodModal, form: { ...prodModal.form!, hs_code: e.target.value } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Loại Container</label><input value={prodModal.form.container_type} onChange={(e) => setProdModal({ ...prodModal, form: { ...prodModal.form!, container_type: e.target.value } })} className="agri-input" /></div>
-                <div><label className="block font-bold mb-1">Nhiệt độ bảo quản</label><input value={prodModal.form.storage_temperature} onChange={(e) => setProdModal({ ...prodModal, form: { ...prodModal.form!, storage_temperature: e.target.value } })} className="agri-input" /></div>
-                <div className="col-span-2">
-                  <label className="block font-bold mb-1">Đường dẫn Hình ảnh Sản phẩm (image_url)</label>
-                  <div className="flex items-center gap-3">
-                    <ProductThumbnail
-                      url={prodModal.form.image_url}
-                      alt={prodModal.form.product_name_vie || prodModal.form.sku_code}
-                    />
-                    <input
-                      type="url"
-                      placeholder="https://..."
-                      value={prodModal.form.image_url || ''}
-                      onChange={(e) => setProdModal({ ...prodModal, form: { ...prodModal.form!, image_url: e.target.value } })}
-                      className="agri-input flex-1"
-                    />
-                  </div>
+            <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5 text-[#f4f8f5] space-y-3.5 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-base font-extrabold text-[#fff5d6]">
+                    {prodModal.isEdit ? 'Sửa Sản phẩm' : `Thêm Sản phẩm Mới (${prodModal.rows.length} dòng)`}
+                  </h4>
+                  {!prodModal.isEdit && prodModal.lockedGroup && (
+                    <p className="text-[11px] text-[#f4d98a] flex items-center gap-1 mt-0.5">
+                      <Lock className="w-3 h-3" /> Đang thêm trực tiếp vào nhóm hàng cố định: <strong>{prodModal.lockedGroup}</strong>
+                    </p>
+                  )}
                 </div>
+                {!prodModal.isEdit && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setProdModal((prev) => ({
+                        ...prev,
+                        rows: [...prev.rows, createBlankProductDraft(prev.lockedGroup)],
+                      }))
+                    }
+                    className="px-3 py-1.5 rounded-lg bg-[#0f4a33] border border-[#f4d98a]/70 text-[#f4d98a] font-bold flex items-center gap-1 cursor-pointer hover:bg-[#135c3f]"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Thêm dòng mới
+                  </button>
+                )}
               </div>
+
+              <div className="space-y-3">
+                {prodModal.rows.map((row, idx) => (
+                  <div
+                    key={idx}
+                    className="rounded-xl bg-[#07281c]/30 border border-[#186635] p-3.5 space-y-2.5"
+                  >
+                    {!prodModal.isEdit && (
+                      <div className="flex items-center justify-between border-b border-white/15 pb-1.5">
+                        <span className="font-extrabold text-[#f4d98a]">Dòng #{idx + 1}</span>
+                        {prodModal.rows.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setProdModal((prev) => ({
+                                ...prev,
+                                rows: prev.rows.filter((_, i) => i !== idx),
+                              }))
+                            }
+                            className="px-2 py-0.5 rounded bg-[#8c3b3b] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" /> Xóa dòng
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block font-bold mb-1">SKU Code *</label>
+                        <input
+                          disabled={prodModal.isEdit}
+                          value={row.sku_code}
+                          placeholder="VD: SKU-001"
+                          onChange={(e) =>
+                            setProdModal((prev) => ({
+                              ...prev,
+                              rows: prev.rows.map((r, i) => (i === idx ? { ...r, sku_code: e.target.value } : r)),
+                            }))
+                          }
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1 flex items-center gap-1">
+                          Nhóm hàng
+                          {!prodModal.isEdit && prodModal.lockedGroup && <Lock className="w-3 h-3 text-[#f4d98a]" />}
+                        </label>
+                        {!prodModal.isEdit && prodModal.lockedGroup ? (
+                          <input
+                            disabled
+                            value={prodModal.lockedGroup}
+                            className="agri-input opacity-80 cursor-not-allowed font-semibold"
+                          />
+                        ) : (
+                          <SearchableCombo
+                            value={row.product_group}
+                            onChange={(v) =>
+                              setProdModal((prev) => ({
+                                ...prev,
+                                rows: prev.rows.map((r, i) => (i === idx ? { ...r, product_group: v } : r)),
+                              }))
+                            }
+                            options={productGroupOptions}
+                            allowCustom
+                            placeholder="VD: Nông sản khô / Trái cây tươi"
+                          />
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block font-bold mb-1">Tên Tiếng Việt *</label>
+                        <input
+                          value={row.product_name_vie}
+                          placeholder="VD: Thanh long ruột đỏ"
+                          onChange={(e) =>
+                            setProdModal((prev) => ({
+                              ...prev,
+                              rows: prev.rows.map((r, i) => (i === idx ? { ...r, product_name_vie: e.target.value } : r)),
+                            }))
+                          }
+                          className="agri-input"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="font-bold">Tên Tiếng Anh</label>
+                          <button
+                            type="button"
+                            disabled={translatingKey === `prod-${idx}` || !row.product_name_vie.trim()}
+                            onClick={() => handleTranslateProductRow(idx)}
+                            className="px-2 py-0.5 rounded bg-[#0f4a33] text-[#f4d98a] border border-[#f4d98a]/50 text-[10.5px] font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                          >
+                            {translatingKey === `prod-${idx}` ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Languages className="w-3 h-3" />
+                            )}
+                            Dịch sang Anh
+                          </button>
+                        </div>
+                        <input
+                          value={row.product_name_eng}
+                          placeholder="VD: Fresh Red Dragon Fruit"
+                          onChange={(e) =>
+                            setProdModal((prev) => ({
+                              ...prev,
+                              rows: prev.rows.map((r, i) => (i === idx ? { ...r, product_name_eng: e.target.value } : r)),
+                            }))
+                          }
+                          className="agri-input"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold mb-1">Giá vốn (USD/KG)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.unit_price}
+                          placeholder="VD: 2,50"
+                          onChange={(e) =>
+                            setProdModal((prev) => ({
+                              ...prev,
+                              rows: prev.rows.map((r, i) => (i === idx ? { ...r, unit_price: e.target.value } : r)),
+                            }))
+                          }
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">HS Code</label>
+                        <input
+                          value={row.hs_code}
+                          placeholder="VD: 0810.90"
+                          onChange={(e) =>
+                            setProdModal((prev) => ({
+                              ...prev,
+                              rows: prev.rows.map((r, i) => (i === idx ? { ...r, hs_code: e.target.value } : r)),
+                            }))
+                          }
+                          className="agri-input font-mono"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold mb-1">Loại Container</label>
+                        <input
+                          value={row.container_type}
+                          placeholder="VD: 20'RF / 40'RH hoặc 20'DC"
+                          onChange={(e) =>
+                            setProdModal((prev) => ({
+                              ...prev,
+                              rows: prev.rows.map((r, i) => (i === idx ? { ...r, container_type: e.target.value } : r)),
+                            }))
+                          }
+                          className="agri-input"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Nhiệt độ bảo quản</label>
+                        <input
+                          value={row.storage_temperature}
+                          placeholder="VD: +2°C đến +4°C / Nhiệt độ thường"
+                          onChange={(e) =>
+                            setProdModal((prev) => ({
+                              ...prev,
+                              rows: prev.rows.map((r, i) => (i === idx ? { ...r, storage_temperature: e.target.value } : r)),
+                            }))
+                          }
+                          className="agri-input"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="block font-bold mb-1">Đường dẫn Hình ảnh Sản phẩm (image_url)</label>
+                        <div className="flex items-center gap-3">
+                          <ProductThumbnail
+                            url={row.image_url}
+                            alt={row.product_name_vie || row.sku_code}
+                            sizeClass="w-10 h-10"
+                          />
+                          <input
+                            type="url"
+                            placeholder="VD: https://example.com/product.jpg"
+                            value={row.image_url}
+                            onChange={(e) =>
+                              setProdModal((prev) => ({
+                                ...prev,
+                                rows: prev.rows.map((r, i) => (i === idx ? { ...r, image_url: e.target.value } : r)),
+                              }))
+                            }
+                            className="agri-input flex-1"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setProdModal({ open: false, isEdit: false, form: null })} className="px-3 py-1.5 rounded bg-[#07281c] text-white font-bold cursor-pointer">Hủy</button>
-                <button type="button" onClick={async () => { await onUpsertProduct(prodModal.form!, prodModal.isEdit); setProdModal({ open: false, isEdit: false, form: null }); }} className="agri-btn-gold">Lưu Sản phẩm</button>
+                <button
+                  type="button"
+                  onClick={() => setProdModal({ open: false, isEdit: false, lockedGroup: '', rows: [] })}
+                  className="px-3 py-1.5 rounded bg-[#07281c] text-white font-bold cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  disabled={prodSaving}
+                  onClick={handleSaveProducts}
+                  className="agri-btn-gold inline-flex items-center gap-1.5"
+                >
+                  {prodSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {prodModal.isEdit ? 'Lưu Sản phẩm' : `Lưu ${prodModal.rows.length} Sản phẩm`}
+                </button>
               </div>
             </div>
           </div>
@@ -374,6 +925,83 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
   if (activeView === 'xnk-shipping') {
     const list = data.schedules.filter((s) => !qLower || `${s.schedule_id} ${s.pol} ${s.pod} ${s.country} ${s.shipping_line}`.toLowerCase().includes(qLower));
     const expiredSchedules = data.schedules.filter((s) => computeFreightExpiryStatus(s).state === 'EXPIRED');
+
+    const handleSaveSchedules = async () => {
+      const activeRows = schModal.rows.filter(
+        (r) => r.schedule_id.trim() || r.shipping_line.trim() || r.pod.trim() || r.country.trim()
+      );
+      if (activeRows.length === 0) {
+        onToast('warning', 'Vui lòng nhập ít nhất 1 tuyến lịch tàu.');
+        return;
+      }
+      setSchSaving(true);
+      try {
+        const isBulk = !schModal.isEdit;
+        let nextSeq = data.schedules.reduce((m, s) => {
+          const match = s.schedule_id.match(/SCH-(\d+)/i);
+          return match ? Math.max(m, parseInt(match[1], 10)) : m;
+        }, data.schedules.length);
+
+        for (const r of activeRows) {
+          let sid = r.schedule_id.trim();
+          if (!sid) {
+            nextSeq += 1;
+            sid = `SCH-${String(nextSeq).padStart(3, '0')}`;
+          }
+          const payload: ShippingSchedule = {
+            schedule_id: sid,
+            pol: r.pol.trim(),
+            pod: r.pod.trim(),
+            country: r.country.trim(),
+            pot: r.pot.trim() || '-',
+            shipping_line: r.shipping_line.trim(),
+            vessel: r.vessel.trim(),
+            voyage: r.voyage.trim(),
+            etd: r.etd || todayIsoDate(),
+            eta: r.eta || todayIsoDate(),
+            rate_20_dc: parseLocaleNumber(r.rate_20_dc),
+            rate_40_dc: parseLocaleNumber(r.rate_40_dc),
+            rate_40_hc: parseLocaleNumber(r.rate_40_hc),
+            rate_20_rf: parseLocaleNumber(r.rate_20_rf),
+            rate_40_rf: parseLocaleNumber(r.rate_40_rf),
+            rate_40_rh: parseLocaleNumber(r.rate_40_rh),
+            baf_fee: parseLocaleNumber(r.baf_fee),
+            lss_fee: parseLocaleNumber(r.lss_fee),
+            pss_fee: parseLocaleNumber(r.pss_fee),
+            b_l_fee: parseLocaleNumber(r.b_l_fee),
+            seal_fee: parseLocaleNumber(r.seal_fee),
+            updated_date: r.updated_date || todayIsoDate(),
+            expiry_date: r.expiry_date || todayIsoDate(),
+            thc_20_dry: parseLocaleNumber(r.thc_20_dry),
+            thc_40_dry: parseLocaleNumber(r.thc_40_dry),
+            thc_20_reefer: parseLocaleNumber(r.thc_20_reefer),
+            thc_40_reefer: parseLocaleNumber(r.thc_40_reefer),
+            bill_seal_fee_shipment: parseLocaleNumber(r.bill_seal_fee_shipment),
+          };
+          await onUpsertSchedule(payload, schModal.isEdit, isBulk);
+        }
+        if (isBulk) {
+          onToast(
+            'success',
+            activeRows.length > 1 ? `Đã thêm thành công ${activeRows.length} lịch tàu mới.` : 'Đã lưu lịch tàu mới.'
+          );
+          await onRefreshData?.();
+        }
+        setSchModal({ open: false, isEdit: false, rows: [] });
+      } catch (err: any) {
+        onToast('error', err?.message || 'Lưu lịch tàu thất bại.');
+      } finally {
+        setSchSaving(false);
+      }
+    };
+
+    const updateSchRow = (idx: number, patch: Partial<ScheduleDraft>) => {
+      setSchModal((prev) => ({
+        ...prev,
+        rows: prev.rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)),
+      }));
+    };
+
     return (
       <div className="space-y-4">
         <div className="flex flex-wrap justify-between gap-2">
@@ -404,23 +1032,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
               setSchModal({
                 open: true,
                 isEdit: false,
-                form: {
-                  schedule_id: `SCH-${String(data.schedules.length + 1).padStart(3, '0')}`,
-                  pol: 'Cát Lái (HCMC)',
-                  pod: '',
-                  country: '',
-                  pot: '-',
-                  shipping_line: '',
-                  vessel: '',
-                  voyage: '',
-                  etd: todayIsoDate(),
-                  eta: todayIsoDate(),
-                  rate_20_dc: 0, rate_40_dc: 0, rate_40_hc: 0, rate_20_rf: 0, rate_40_rf: 0, rate_40_rh: 0,
-                  baf_fee: 0, lss_fee: 0, pss_fee: 0, b_l_fee: 45, seal_fee: 10,
-                  updated_date: todayIsoDate(),
-                  expiry_date: todayIsoDate(),
-                  thc_20_dry: 135, thc_40_dry: 210, thc_20_reefer: 185, thc_40_reefer: 275, bill_seal_fee_shipment: 55,
-                },
+                rows: [createBlankScheduleDraft()],
               })
             }
             className="agri-btn-gold flex items-center gap-1.5 ml-auto"
@@ -464,16 +1076,34 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                         <div className="text-[11px]">{s.country} {s.pot && s.pot !== '-' ? `· POT: ${s.pot}` : ''}</div>
                       </td>
                       <td className="text-center font-mono text-xs whitespace-nowrap">{s.etd} → {s.eta}</td>
-                      <td className="text-center font-mono text-xs whitespace-nowrap">${s.rate_20_dc} / ${s.rate_40_dc} / ${s.rate_40_hc}</td>
-                      <td className="text-center font-mono text-xs whitespace-nowrap">${s.rate_20_rf} / ${s.rate_40_rf} / ${s.rate_40_rh}</td>
+                      <td className="text-center font-mono text-xs whitespace-nowrap">
+                        ${fmtNumber(s.rate_20_dc)} / ${fmtNumber(s.rate_40_dc)} / ${fmtNumber(s.rate_40_hc)}
+                      </td>
+                      <td className="text-center font-mono text-xs whitespace-nowrap">
+                        ${fmtNumber(s.rate_20_rf)} / ${fmtNumber(s.rate_40_rf)} / ${fmtNumber(s.rate_40_rh)}
+                      </td>
                       <td className="text-center font-mono text-xs whitespace-nowrap">
                         {s.expiry_date}
                         <div className="text-[10px] font-bold">{exp.state}</div>
                       </td>
                       <td className="text-center">
                         <div className="inline-flex flex-wrap items-center justify-center gap-1">
-                          <button type="button" onClick={() => setSchModal({ open: true, isEdit: true, form: { ...s } })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer">Sửa</button>
-                          <button type="button" onClick={() => onRequestConfirm('Xóa lịch tàu?', `Xác nhận xóa ${s.schedule_id}?`, () => onDeleteSchedule(s.schedule_id), true)} className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer">Xóa</button>
+                          <button
+                            type="button"
+                            onClick={() => setSchModal({ open: true, isEdit: true, rows: [scheduleToDraft(s)] })}
+                            className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
+                          >
+                            Sửa
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onRequestConfirm('Xóa lịch tàu?', `Xác nhận xóa ${s.schedule_id}?`, () => onDeleteSchedule(s.schedule_id), true)
+                            }
+                            className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer"
+                          >
+                            Xóa
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -484,69 +1114,356 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
           </div>
         </div>
 
-        {schModal.open && schModal.form && (
+        {schModal.open && schModal.rows.length > 0 && (
           <div className="fixed inset-0 z-50 bg-[#07281c]/75 flex items-center justify-center p-4">
-            <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5 text-[#f4f8f5] space-y-3 text-xs">
-              <h4 className="text-base font-extrabold text-[#fff5d6]">{schModal.isEdit ? `Sửa Lịch tàu ${schModal.form.schedule_id}` : 'Thêm Lịch tàu Mới'}</h4>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                <div><label className="block font-bold mb-1">Schedule ID</label><input disabled={schModal.isEdit} value={schModal.form.schedule_id} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, schedule_id: e.target.value } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Hãng tàu</label><input value={schModal.form.shipping_line} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, shipping_line: e.target.value } })} className="agri-input" /></div>
-                <div>
-                  <label className="block font-bold mb-1">Quốc gia đến</label>
-                  <SearchableCombo
-                    value={schModal.form.country}
-                    onChange={(v) => setSchModal({ ...schModal, form: { ...schModal.form!, country: v } })}
-                    options={scheduleCountryOptions}
-                    allowCustom
-                    placeholder="Chọn hoặc nhập Quốc gia..."
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold mb-1">POD</label>
-                  <SearchableCombo
-                    value={schModal.form.pod}
-                    onChange={(v) => setSchModal({ ...schModal, form: { ...schModal.form!, pod: v } })}
-                    options={schedulePodOptions}
-                    allowCustom
-                    placeholder="Chọn hoặc nhập POD..."
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold mb-1">POL</label>
-                  <SearchableCombo
-                    value={schModal.form.pol}
-                    onChange={(v) => setSchModal({ ...schModal, form: { ...schModal.form!, pol: v } })}
-                    options={schedulePolOptions}
-                    allowCustom
-                    placeholder="Chọn hoặc nhập POL..."
-                  />
-                </div>
-                <div><label className="block font-bold mb-1">POT (Chuyển tải)</label><input value={schModal.form.pot} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, pot: e.target.value } })} className="agri-input" /></div>
-                <div><label className="block font-bold mb-1">Tàu (Vessel)</label><input value={schModal.form.vessel} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, vessel: e.target.value } })} className="agri-input" /></div>
-                <div><label className="block font-bold mb-1">Chuyến (Voyage)</label><input value={schModal.form.voyage} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, voyage: e.target.value } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">ETD</label><input type="date" value={schModal.form.etd} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, etd: e.target.value } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">ETA</label><input type="date" value={schModal.form.eta} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, eta: e.target.value } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Hết hạn cước</label><input type="date" value={schModal.form.expiry_date} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, expiry_date: e.target.value } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Bill+Seal / Lô ($)</label><input type="number" value={schModal.form.bill_seal_fee_shipment} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, bill_seal_fee_shipment: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Rate 20'DC ($)</label><input type="number" value={schModal.form.rate_20_dc} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_20_dc: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Rate 40'DC ($)</label><input type="number" value={schModal.form.rate_40_dc} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_40_dc: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Rate 40'HC ($)</label><input type="number" value={schModal.form.rate_40_hc} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_40_hc: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Rate 20'RF ($)</label><input type="number" value={schModal.form.rate_20_rf} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_20_rf: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Rate 40'RF ($)</label><input type="number" value={schModal.form.rate_40_rf} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_40_rf: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Rate 40'RH ($)</label><input type="number" value={schModal.form.rate_40_rh} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_40_rh: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">THC 20 Dry</label><input type="number" value={schModal.form.thc_20_dry} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, thc_20_dry: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">THC 40 Dry</label><input type="number" value={schModal.form.thc_40_dry} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, thc_40_dry: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">THC 20 Reefer</label><input type="number" value={schModal.form.thc_20_reefer} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, thc_20_reefer: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">THC 40 Reefer</label><input type="number" value={schModal.form.thc_40_reefer} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, thc_40_reefer: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">B/L Fee ($)</label><input type="number" value={schModal.form.b_l_fee} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, b_l_fee: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Seal Fee ($)</label><input type="number" value={schModal.form.seal_fee} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, seal_fee: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">BAF ($/cont)</label><input type="number" value={schModal.form.baf_fee} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, baf_fee: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">LSS ($/cont)</label><input type="number" value={schModal.form.lss_fee} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, lss_fee: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">PSS ($/cont)</label><input type="number" value={schModal.form.pss_fee} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, pss_fee: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+            <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-5 text-[#f4f8f5] space-y-3.5 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-base font-extrabold text-[#fff5d6]">
+                  {schModal.isEdit
+                    ? `Sửa Lịch tàu ${schModal.rows[0].schedule_id}`
+                    : `Thêm Lịch tàu & Cước Mới (${schModal.rows.length} dòng)`}
+                </h4>
+                {!schModal.isEdit && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSchModal((prev) => ({
+                        ...prev,
+                        rows: [...prev.rows, createBlankScheduleDraft()],
+                      }))
+                    }
+                    className="px-3 py-1.5 rounded-lg bg-[#0f4a33] border border-[#f4d98a]/70 text-[#f4d98a] font-bold flex items-center gap-1 cursor-pointer hover:bg-[#135c3f]"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Thêm dòng mới
+                  </button>
+                )}
               </div>
+
+              <div className="space-y-3.5">
+                {schModal.rows.map((row, idx) => (
+                  <div key={idx} className="rounded-xl bg-[#07281c]/30 border border-[#186635] p-3.5 space-y-2.5">
+                    {!schModal.isEdit && (
+                      <div className="flex items-center justify-between border-b border-white/15 pb-1.5">
+                        <span className="font-extrabold text-[#f4d98a]">Tuyến #{idx + 1}</span>
+                        {schModal.rows.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSchModal((prev) => ({
+                                ...prev,
+                                rows: prev.rows.filter((_, i) => i !== idx),
+                              }))
+                            }
+                            className="px-2 py-0.5 rounded bg-[#8c3b3b] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" /> Xóa dòng
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      <div>
+                        <label className="block font-bold mb-1">Schedule ID</label>
+                        <input
+                          disabled={schModal.isEdit}
+                          value={row.schedule_id}
+                          placeholder="VD: SCH-001 (để trống tự cấp)"
+                          onChange={(e) => updateSchRow(idx, { schedule_id: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Hãng tàu</label>
+                        <input
+                          value={row.shipping_line}
+                          placeholder="VD: Maersk / ONE / MSC"
+                          onChange={(e) => updateSchRow(idx, { shipping_line: e.target.value })}
+                          className="agri-input"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Quốc gia đến</label>
+                        <SearchableCombo
+                          value={row.country}
+                          onChange={(v) => updateSchRow(idx, { country: v })}
+                          options={scheduleCountryOptions}
+                          allowCustom
+                          placeholder="VD: Japan / USA / Germany"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">POD</label>
+                        <SearchableCombo
+                          value={row.pod}
+                          onChange={(v) => updateSchRow(idx, { pod: v })}
+                          options={getPodOptionsForCountry(row.country)}
+                          allowCustom
+                          placeholder="VD: Tokyo / Rotterdam"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">POL</label>
+                        <SearchableCombo
+                          value={row.pol}
+                          onChange={(v) => updateSchRow(idx, { pol: v })}
+                          options={schedulePolOptions}
+                          allowCustom
+                          placeholder="VD: Cát Lái (HCMC)"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">POT (Chuyển tải)</label>
+                        <input
+                          value={row.pot}
+                          placeholder="VD: Singapore (hoặc -)"
+                          onChange={(e) => updateSchRow(idx, { pot: e.target.value })}
+                          className="agri-input"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Tàu (Vessel)</label>
+                        <input
+                          value={row.vessel}
+                          placeholder="VD: MV ONE HARMONY"
+                          onChange={(e) => updateSchRow(idx, { vessel: e.target.value })}
+                          className="agri-input"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Chuyến (Voyage)</label>
+                        <input
+                          value={row.voyage}
+                          placeholder="VD: 045E"
+                          onChange={(e) => updateSchRow(idx, { voyage: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">ETD</label>
+                        <input
+                          type="date"
+                          value={row.etd}
+                          onChange={(e) => updateSchRow(idx, { etd: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">ETA</label>
+                        <input
+                          type="date"
+                          value={row.eta}
+                          onChange={(e) => updateSchRow(idx, { eta: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Hết hạn cước</label>
+                        <input
+                          type="date"
+                          value={row.expiry_date}
+                          onChange={(e) => updateSchRow(idx, { expiry_date: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Bill+Seal / Lô ($)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.bill_seal_fee_shipment}
+                          placeholder="VD: 55,00"
+                          onChange={(e) => updateSchRow(idx, { bill_seal_fee_shipment: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Rate 20'DC ($)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.rate_20_dc}
+                          placeholder="VD: 1.200,00"
+                          onChange={(e) => updateSchRow(idx, { rate_20_dc: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Rate 40'DC ($)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.rate_40_dc}
+                          placeholder="VD: 2.100,00"
+                          onChange={(e) => updateSchRow(idx, { rate_40_dc: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Rate 40'HC ($)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.rate_40_hc}
+                          placeholder="VD: 2.250,00"
+                          onChange={(e) => updateSchRow(idx, { rate_40_hc: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Rate 20'RF ($)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.rate_20_rf}
+                          placeholder="VD: 1.850,00"
+                          onChange={(e) => updateSchRow(idx, { rate_20_rf: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Rate 40'RF ($)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.rate_40_rf}
+                          placeholder="VD: 3.100,00"
+                          onChange={(e) => updateSchRow(idx, { rate_40_rf: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Rate 40'RH ($)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.rate_40_rh}
+                          placeholder="VD: 3.300,00"
+                          onChange={(e) => updateSchRow(idx, { rate_40_rh: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">THC 20 Dry ($)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.thc_20_dry}
+                          placeholder="VD: 135,00"
+                          onChange={(e) => updateSchRow(idx, { thc_20_dry: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">THC 40 Dry ($)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.thc_40_dry}
+                          placeholder="VD: 210,00"
+                          onChange={(e) => updateSchRow(idx, { thc_40_dry: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">THC 20 Reefer ($)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.thc_20_reefer}
+                          placeholder="VD: 185,00"
+                          onChange={(e) => updateSchRow(idx, { thc_20_reefer: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">THC 40 Reefer ($)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.thc_40_reefer}
+                          placeholder="VD: 275,00"
+                          onChange={(e) => updateSchRow(idx, { thc_40_reefer: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">B/L Fee ($)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.b_l_fee}
+                          placeholder="VD: 45,00"
+                          onChange={(e) => updateSchRow(idx, { b_l_fee: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Seal Fee ($)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.seal_fee}
+                          placeholder="VD: 10,00"
+                          onChange={(e) => updateSchRow(idx, { seal_fee: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">BAF ($/cont)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.baf_fee}
+                          placeholder="VD: 150,00"
+                          onChange={(e) => updateSchRow(idx, { baf_fee: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">LSS ($/cont)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.lss_fee}
+                          placeholder="VD: 40,00"
+                          onChange={(e) => updateSchRow(idx, { lss_fee: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">PSS ($/cont)</label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={row.pss_fee}
+                          placeholder="VD: 100,00"
+                          onChange={(e) => updateSchRow(idx, { pss_fee: e.target.value })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setSchModal({ open: false, isEdit: false, form: null })} className="px-3 py-1.5 rounded bg-[#07281c] text-white font-bold cursor-pointer">Hủy</button>
-                <button type="button" onClick={async () => { await onUpsertSchedule(schModal.form!, schModal.isEdit); setSchModal({ open: false, isEdit: false, form: null }); }} className="agri-btn-gold">Lưu Lịch tàu</button>
+                <button
+                  type="button"
+                  onClick={() => setSchModal({ open: false, isEdit: false, rows: [] })}
+                  className="px-3 py-1.5 rounded bg-[#07281c] text-white font-bold cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  disabled={schSaving}
+                  onClick={handleSaveSchedules}
+                  className="agri-btn-gold inline-flex items-center gap-1.5"
+                >
+                  {schSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {schModal.isEdit ? 'Lưu Lịch tàu' : `Lưu ${schModal.rows.length} Lịch tàu`}
+                </button>
               </div>
             </div>
           </div>
@@ -556,41 +1473,188 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
   }
 
   if (activeView === 'xnk-rates') {
-    const categories = ['ALL', 'LOCAL_CHARGE', 'CUSTOMS_FEE', 'INSURANCE', 'PACKING', 'CONTAINER'];
-    const list = data.pricingRates.filter((r) => (rateCat === 'ALL' || r.fee_category.toUpperCase() === rateCat) && (!qLower || `${r.fee_code} ${r.fee_name_vie} ${r.fee_category}`.toLowerCase().includes(qLower)));
+    const categories = ['ALL', ...RATE_CATEGORY_OPTIONS];
+    const list = data.pricingRates.filter(
+      (r) =>
+        (rateCat === 'ALL' || r.fee_category.toUpperCase() === rateCat) &&
+        (!qLower || `${r.fee_code} ${r.fee_name_vie} ${r.contract_text_eng} ${r.fee_category}`.toLowerCase().includes(qLower))
+    );
+
+    const updateRateRow = (idx: number, patch: Partial<RateDraft>) => {
+      setRateModal((prev) => ({
+        ...prev,
+        rows: prev.rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)),
+      }));
+    };
+
+    const handleTranslateRateRow = async (idx: number) => {
+      const row = rateModal.rows[idx];
+      if (!row || !row.fee_name_vie.trim()) {
+        onToast('warning', 'Vui lòng nhập Tên Tiếng Việt trước khi dịch.');
+        return;
+      }
+      const catUpper = (rateModal.lockedCategory || row.fee_category || '').toUpperCase();
+      const ctx =
+        catUpper === 'INSURANCE'
+          ? 'INSURANCE'
+          : catUpper === 'PACKING'
+          ? 'PACKING'
+          : catUpper === 'CONTAINER'
+          ? 'CONTAINER'
+          : 'RATE';
+      const key = `rate-${idx}`;
+      setTranslatingKey(key);
+      try {
+        const eng = await translateVIEtoENGSmart(row.fee_name_vie, ctx);
+        updateRateRow(idx, { contract_text_eng: eng });
+      } catch (err: any) {
+        onToast('error', err?.message || 'Không thể dịch mô tả biểu phí.');
+      } finally {
+        setTranslatingKey(null);
+      }
+    };
+
+    const handleSaveRates = async () => {
+      const activeRows = rateModal.rows.filter(
+        (r) => r.fee_code.trim() || r.fee_name_vie.trim() || r.contract_text_eng.trim()
+      );
+      if (activeRows.length === 0) {
+        onToast('warning', 'Vui lòng nhập ít nhất 1 dòng biểu phí.');
+        return;
+      }
+      for (let i = 0; i < activeRows.length; i++) {
+        const r = activeRows[i];
+        const cat = (rateModal.lockedCategory || r.fee_category).trim();
+        if (!cat) {
+          onToast('warning', `Dòng ${i + 1}: Vui lòng chọn Nhóm phí (Fee_Category).`);
+          return;
+        }
+        if (!r.fee_code.trim()) {
+          onToast('warning', `Dòng ${i + 1}: Vui lòng nhập Mã phí (Fee_Code).`);
+          return;
+        }
+      }
+      setRateSaving(true);
+      try {
+        const isBulk = !rateModal.isEdit;
+        for (const r of activeRows) {
+          const payload: PricingRate = {
+            fee_category: (rateModal.lockedCategory || r.fee_category).trim().toUpperCase(),
+            fee_code: r.fee_code.trim(),
+            scope_or_cont_type: r.scope_or_cont_type.trim(),
+            fee_name_vie: r.fee_name_vie.trim(),
+            contract_text_eng: r.contract_text_eng.trim(),
+            unit_basis: r.unit_basis.trim(),
+            standard_rate: parseLocaleNumber(r.standard_rate),
+            provider_or_rule: r.provider_or_rule.trim(),
+            note: r.note.trim(),
+            dim_cm: r.dim_cm.trim(),
+            net_kg: parseLocaleNumber(r.net_kg),
+            tare_kg: parseLocaleNumber(r.tare_kg),
+            max_per_pallet: parseLocaleNumber(r.max_per_pallet),
+          };
+          await onUpsertRate(payload, rateModal.isEdit, isBulk);
+        }
+        if (isBulk) {
+          onToast(
+            'success',
+            activeRows.length > 1 ? `Đã thêm thành công ${activeRows.length} biểu phí mới.` : 'Đã lưu biểu phí mới.'
+          );
+          await onRefreshData?.();
+        }
+        setRateModal({ open: false, isEdit: false, lockedCategory: '', rows: [] });
+      } catch (err: any) {
+        onToast('error', err?.message || 'Lưu biểu phí thất bại.');
+      } finally {
+        setRateSaving(false);
+      }
+    };
+
+    const getPlaceholdersForCategory = (catRaw: string) => {
+      const cat = catRaw.toUpperCase();
+      if (cat === 'INSURANCE') {
+        return {
+          code: 'VD: INS-FROZEN-A',
+          vie: 'VD: Bảo hiểm hàng đông lạnh',
+          eng: 'VD: Institute Frozen Food Clauses (A)',
+          scope: 'VD: REEFER / ALL / ADD-ON',
+          unit: 'VD: %_CIF_110',
+          rate: 'VD: 0,35',
+          dim: 'VD: -',
+        };
+      }
+      if (cat === 'PACKING') {
+        return {
+          code: 'VD: PKG-CTN-10K',
+          vie: 'VD: Thùng Carton 10kg (5 lớp)',
+          eng: 'VD: 10kg 5-Ply Corrugated Carton',
+          scope: 'VD: ALL / REEFER',
+          unit: 'VD: Carton / Bag / Pallet',
+          rate: 'VD: 0,85',
+          dim: 'VD: 40x30x25',
+        };
+      }
+      if (cat === 'CONTAINER') {
+        return {
+          code: 'VD: CONT-20RF',
+          vie: 'VD: Container Lạnh 20 feet',
+          eng: "VD: 20' Reefer Container (20'RF)",
+          scope: "VD: 20'RF",
+          unit: 'VD: Container',
+          rate: 'VD: 0,00',
+          dim: 'VD: 545x229x227',
+        };
+      }
+      if (cat === 'CUSTOMS_FEE') {
+        return {
+          code: 'VD: CUS-PHYTO',
+          vie: 'VD: Chứng nhận Kiểm dịch Thực vật',
+          eng: 'VD: Phytosanitary Certificate',
+          scope: 'VD: ALL',
+          unit: 'VD: Shipment / Set',
+          rate: 'VD: 35,00',
+          dim: 'VD: -',
+        };
+      }
+      return {
+        code: 'VD: THC-20DC',
+        vie: 'VD: Phụ phí Xếp dỡ tại Cảng (THC)',
+        eng: 'VD: Terminal Handling Charge (THC)',
+        scope: "VD: 20'DC / ALL",
+        unit: 'VD: Container / Shipment',
+        rate: 'VD: 135,00',
+        dim: 'VD: 40x30x25',
+      };
+    };
+
     return (
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap gap-1 bg-[#07281c] p-1 rounded-xl border border-[#186635]">
             {categories.map((cat) => (
-              <button key={cat} type="button" onClick={() => setRateCat(cat)} className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer ${rateCat === cat ? 'bg-[#f4d98a] text-[#07281c]' : 'text-[#d2ebe0]'}`}>
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setRateCat(cat)}
+                className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer ${
+                  rateCat === cat ? 'bg-[#f4d98a] text-[#07281c]' : 'text-[#d2ebe0]'
+                }`}
+              >
                 {cat}
               </button>
             ))}
           </div>
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              const locked = rateCat === 'ALL' ? '' : rateCat;
               setRateModal({
                 open: true,
                 isEdit: false,
-                form: {
-                  fee_category: rateCat === 'ALL' ? 'LOCAL_CHARGE' : rateCat,
-                  fee_code: '',
-                  scope_or_cont_type: 'ALL',
-                  fee_name_vie: '',
-                  contract_text_eng: '',
-                  unit_basis: 'Container',
-                  standard_rate: 0,
-                  provider_or_rule: '',
-                  note: '',
-                  dim_cm: '',
-                  net_kg: 0,
-                  tare_kg: 0,
-                  max_per_pallet: 0,
-                },
-              })
-            }
+                lockedCategory: locked,
+                rows: [createBlankRateDraft(locked)],
+              });
+            }}
             className="agri-btn-gold flex items-center gap-1.5"
           >
             <Plus className="w-4 h-4" /> Thêm Phụ phí / Quy cách
@@ -625,11 +1689,32 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                       <div className="text-[11px] opacity-80">{r.contract_text_eng}</div>
                     </td>
                     <td className="text-center text-xs">{r.scope_or_cont_type} · {r.unit_basis}</td>
-                    <td className="text-center font-mono font-extrabold whitespace-nowrap">{toNum(r.standard_rate).toFixed(2)}</td>
+                    <td className="text-center font-mono font-extrabold whitespace-nowrap">{fmtDecimal(r.standard_rate, 2)}</td>
                     <td className="text-center">
                       <div className="inline-flex flex-wrap items-center justify-center gap-1">
-                        <button type="button" onClick={() => setRateModal({ open: true, isEdit: true, form: { ...r } })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer">Sửa</button>
-                        <button type="button" onClick={() => onRequestConfirm('Xóa phụ phí?', `Xác nhận xóa ${r.fee_code}?`, () => onDeleteRate(r.fee_code), true)} className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer">Xóa</button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setRateModal({
+                              open: true,
+                              isEdit: true,
+                              lockedCategory: '',
+                              rows: [rateToDraft(r)],
+                            })
+                          }
+                          className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
+                        >
+                          Sửa
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onRequestConfirm('Xóa phụ phí?', `Xác nhận xóa ${r.fee_code}?`, () => onDeleteRate(r.fee_code), true)
+                          }
+                          className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer"
+                        >
+                          Xóa
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -639,23 +1724,250 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
           </div>
         </div>
 
-        {rateModal.open && rateModal.form && (
+        {rateModal.open && rateModal.rows.length > 0 && (
           <div className="fixed inset-0 z-50 bg-[#07281c]/75 flex items-center justify-center p-4">
-            <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl w-full max-w-xl p-5 text-[#f4f8f5] space-y-3 text-xs">
-              <h4 className="text-base font-extrabold text-[#fff5d6]">{rateModal.isEdit ? 'Sửa Biểu phí' : 'Thêm Biểu phí Mới'}</h4>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="block font-bold mb-1">Nhóm (Fee_Category)</label><input value={rateModal.form.fee_category} onChange={(e) => setRateModal({ ...rateModal, form: { ...rateModal.form!, fee_category: e.target.value } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Mã phí (Fee_Code)</label><input disabled={rateModal.isEdit} value={rateModal.form.fee_code} onChange={(e) => setRateModal({ ...rateModal, form: { ...rateModal.form!, fee_code: e.target.value } })} className="agri-input font-mono" /></div>
-                <div className="col-span-2"><label className="block font-bold mb-1">Tên Tiếng Việt</label><input value={rateModal.form.fee_name_vie} onChange={(e) => setRateModal({ ...rateModal, form: { ...rateModal.form!, fee_name_vie: e.target.value } })} className="agri-input" /></div>
-                <div className="col-span-2"><label className="block font-bold mb-1">Mô tả Hợp đồng (ENG)</label><input value={rateModal.form.contract_text_eng} onChange={(e) => setRateModal({ ...rateModal, form: { ...rateModal.form!, contract_text_eng: e.target.value } })} className="agri-input" /></div>
-                <div><label className="block font-bold mb-1">Phạm vi / Cont</label><input value={rateModal.form.scope_or_cont_type} onChange={(e) => setRateModal({ ...rateModal, form: { ...rateModal.form!, scope_or_cont_type: e.target.value } })} className="agri-input" /></div>
-                <div><label className="block font-bold mb-1">Đơn vị tính</label><input value={rateModal.form.unit_basis} onChange={(e) => setRateModal({ ...rateModal, form: { ...rateModal.form!, unit_basis: e.target.value } })} className="agri-input" /></div>
-                <div><label className="block font-bold mb-1">Mức phí chuẩn</label><input type="number" step="0.01" value={rateModal.form.standard_rate} onChange={(e) => setRateModal({ ...rateModal, form: { ...rateModal.form!, standard_rate: toNum(e.target.value) } })} className="agri-input font-mono font-bold" /></div>
-                <div><label className="block font-bold mb-1">Kích thước (Dim CM)</label><input value={rateModal.form.dim_cm} onChange={(e) => setRateModal({ ...rateModal, form: { ...rateModal.form!, dim_cm: e.target.value } })} className="agri-input font-mono" /></div>
+            <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-5 text-[#f4f8f5] space-y-3.5 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-base font-extrabold text-[#fff5d6]">
+                    {rateModal.isEdit ? 'Sửa Biểu phí' : `Thêm Biểu phí Mới (${rateModal.rows.length} dòng)`}
+                  </h4>
+                  {!rateModal.isEdit && rateModal.lockedCategory && (
+                    <p className="text-[11px] text-[#f4d98a] flex items-center gap-1 mt-0.5">
+                      <Lock className="w-3 h-3" /> Đang thêm cố định vào nhóm: <strong>{rateModal.lockedCategory}</strong>
+                    </p>
+                  )}
+                </div>
+                {!rateModal.isEdit && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setRateModal((prev) => ({
+                        ...prev,
+                        rows: [...prev.rows, createBlankRateDraft(prev.lockedCategory)],
+                      }))
+                    }
+                    className="px-3 py-1.5 rounded-lg bg-[#0f4a33] border border-[#f4d98a]/70 text-[#f4d98a] font-bold flex items-center gap-1 cursor-pointer hover:bg-[#135c3f]"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Thêm dòng mới
+                  </button>
+                )}
               </div>
+
+              <div className="space-y-3">
+                {rateModal.rows.map((row, idx) => {
+                  const activeCat = rateModal.lockedCategory || row.fee_category;
+                  const ph = getPlaceholdersForCategory(activeCat);
+                  return (
+                    <div key={idx} className="rounded-xl bg-[#07281c]/30 border border-[#186635] p-3.5 space-y-2.5">
+                      {!rateModal.isEdit && (
+                        <div className="flex items-center justify-between border-b border-white/15 pb-1.5">
+                          <span className="font-extrabold text-[#f4d98a]">Dòng #{idx + 1}</span>
+                          {rateModal.rows.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRateModal((prev) => ({
+                                  ...prev,
+                                  rows: prev.rows.filter((_, i) => i !== idx),
+                                }))
+                              }
+                              className="px-2 py-0.5 rounded bg-[#8c3b3b] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                            >
+                              <Trash2 className="w-3 h-3" /> Xóa dòng
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block font-bold mb-1 flex items-center gap-1">
+                            Nhóm (Fee_Category) *
+                            {!rateModal.isEdit && rateModal.lockedCategory && <Lock className="w-3 h-3 text-[#f4d98a]" />}
+                          </label>
+                          <select
+                            disabled={!rateModal.isEdit && Boolean(rateModal.lockedCategory)}
+                            value={activeCat}
+                            onChange={(e) => updateRateRow(idx, { fee_category: e.target.value })}
+                            className={`agri-input font-mono ${
+                              !rateModal.isEdit && rateModal.lockedCategory ? 'opacity-80 cursor-not-allowed font-bold' : ''
+                            }`}
+                          >
+                            <option value="">-- Chọn nhóm phí --</option>
+                            {RATE_CATEGORY_OPTIONS.map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block font-bold mb-1">Mã phí (Fee_Code) *</label>
+                          <input
+                            disabled={rateModal.isEdit}
+                            value={row.fee_code}
+                            placeholder={ph.code}
+                            onChange={(e) => updateRateRow(idx, { fee_code: e.target.value })}
+                            className="agri-input font-mono"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="block font-bold mb-1">Tên Tiếng Việt</label>
+                          <input
+                            value={row.fee_name_vie}
+                            placeholder={ph.vie}
+                            onChange={(e) => updateRateRow(idx, { fee_name_vie: e.target.value })}
+                            className="agri-input"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="font-bold">Mô tả Hợp đồng (ENG)</label>
+                            <button
+                              type="button"
+                              disabled={translatingKey === `rate-${idx}` || !row.fee_name_vie.trim()}
+                              onClick={() => handleTranslateRateRow(idx)}
+                              className="px-2 py-0.5 rounded bg-[#0f4a33] text-[#f4d98a] border border-[#f4d98a]/50 text-[10.5px] font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                            >
+                              {translatingKey === `rate-${idx}` ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Languages className="w-3 h-3" />
+                              )}
+                              Dịch sang Anh
+                            </button>
+                          </div>
+                          <input
+                            value={row.contract_text_eng}
+                            placeholder={ph.eng}
+                            onChange={(e) => updateRateRow(idx, { contract_text_eng: e.target.value })}
+                            className="agri-input"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold mb-1">Phạm vi / Cont</label>
+                          <input
+                            value={row.scope_or_cont_type}
+                            placeholder={ph.scope}
+                            onChange={(e) => updateRateRow(idx, { scope_or_cont_type: e.target.value })}
+                            className="agri-input"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-bold mb-1">Đơn vị tính</label>
+                          <input
+                            value={row.unit_basis}
+                            placeholder={ph.unit}
+                            onChange={(e) => updateRateRow(idx, { unit_basis: e.target.value })}
+                            className="agri-input"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold mb-1">Mức phí chuẩn</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={row.standard_rate}
+                            placeholder={ph.rate}
+                            onChange={(e) => updateRateRow(idx, { standard_rate: e.target.value })}
+                            className="agri-input font-mono font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-bold mb-1">Kích thước (Dim CM)</label>
+                          <input
+                            value={row.dim_cm}
+                            placeholder={ph.dim}
+                            onChange={(e) => updateRateRow(idx, { dim_cm: e.target.value })}
+                            className="agri-input font-mono"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold mb-1">
+                            {activeCat.toUpperCase() === 'CONTAINER' ? 'Tải trọng tối đa (KG)' : 'Net Weight (KG)'}
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={row.net_kg}
+                            placeholder={activeCat.toUpperCase() === 'CONTAINER' ? 'VD: 27.400' : 'VD: 10,00'}
+                            onChange={(e) => updateRateRow(idx, { net_kg: e.target.value })}
+                            className="agri-input font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-bold mb-1">
+                            {activeCat.toUpperCase() === 'CONTAINER' ? 'Thể tích tối đa (CBM)' : 'Tare Weight (KG)'}
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={row.tare_kg}
+                            placeholder={activeCat.toUpperCase() === 'CONTAINER' ? 'VD: 24,00' : 'VD: 0,85'}
+                            onChange={(e) => updateRateRow(idx, { tare_kg: e.target.value })}
+                            className="agri-input font-mono"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold mb-1">Max kiện / Pallet</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={row.max_per_pallet}
+                            placeholder="VD: 50"
+                            onChange={(e) => updateRateRow(idx, { max_per_pallet: e.target.value })}
+                            className="agri-input font-mono"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-bold mb-1">Nhà cung cấp / Quy tắc</label>
+                          <input
+                            value={row.provider_or_rule}
+                            placeholder="VD: PVI / Bảo Việt / Hãng tàu"
+                            onChange={(e) => updateRateRow(idx, { provider_or_rule: e.target.value })}
+                            className="agri-input"
+                          />
+                        </div>
+
+                        <div className="sm:col-span-2">
+                          <label className="block font-bold mb-1">Ghi chú</label>
+                          <input
+                            value={row.note}
+                            placeholder="VD: Điều khoản mở rộng: Rủi ro hấp hơi, nóng ẩm..."
+                            onChange={(e) => updateRateRow(idx, { note: e.target.value })}
+                            className="agri-input"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setRateModal({ open: false, isEdit: false, form: null })} className="px-3 py-1.5 rounded bg-[#07281c] text-white font-bold cursor-pointer">Hủy</button>
-                <button type="button" onClick={async () => { await onUpsertRate(rateModal.form!, rateModal.isEdit); setRateModal({ open: false, isEdit: false, form: null }); }} className="agri-btn-gold">Lưu Biểu phí</button>
+                <button
+                  type="button"
+                  onClick={() => setRateModal({ open: false, isEdit: false, lockedCategory: '', rows: [] })}
+                  className="px-3 py-1.5 rounded bg-[#07281c] text-white font-bold cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  disabled={rateSaving}
+                  onClick={handleSaveRates}
+                  className="agri-btn-gold inline-flex items-center gap-1.5"
+                >
+                  {rateSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {rateModal.isEdit ? 'Lưu Biểu phí' : `Lưu ${rateModal.rows.length} Biểu phí`}
+                </button>
               </div>
             </div>
           </div>
@@ -697,22 +2009,6 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
         pendingNewPlaceholders: [],
         updatedBlockIds: [],
       });
-    };
-
-    const handleOpenTagEditorForExistingRow = async (tpl: TemplateManager) => {
-      if (!tpl.google_doc_file_id) {
-        onToast('warning', 'Mẫu này chưa có tệp .docx. Vui lòng chọn "Sửa / Thay phôi" để tải tệp lên trước.');
-        return;
-      }
-      setTagEditorLoadingId(tpl.template_id);
-      try {
-        const buf = await downloadTemplateDocx(tpl.google_doc_file_id);
-        await openTagReviewModal(tpl, true, buf);
-      } catch (err: any) {
-        onToast('error', err?.message || 'Không thể tải tệp phôi .docx.');
-      } finally {
-        setTagEditorLoadingId(null);
-      }
     };
 
     const handleSelectDocxFile = async (file: File | null) => {
@@ -1167,7 +2463,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                   <th className="text-left w-[205px]">STORAGE PATH</th>
                   <th className="text-left w-[240px]">BIẾN HỖ TRỢ</th>
                   <th className="text-center w-[95px] whitespace-nowrap">TRẠNG THÁI</th>
-                  <th className="text-center w-[225px] whitespace-nowrap">THAO TÁC</th>
+                  <th className="text-center w-[155px] whitespace-nowrap">THAO TÁC</th>
                 </tr>
               </thead>
               <tbody>
@@ -1184,7 +2480,6 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                   );
                   const previewLabels = vieLabels.slice(0, 3);
                   const extraCount = Math.max(0, vieLabels.length - previewLabels.length);
-                  const isRowLoading = tagEditorLoadingId === t.template_id;
 
                   return (
                     <tr key={t.template_id}>
@@ -1241,7 +2536,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                         </span>
                       </td>
                       <td className="text-center whitespace-nowrap">
-                        <div className="inline-flex items-center justify-center gap-1">
+                        <div className="inline-flex items-center justify-center gap-1.5">
                           {t.google_doc_file_id && (
                             <button
                               type="button"
@@ -1250,46 +2545,24 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                                   onToast('error', err?.message || 'Không thể tải phôi.')
                                 )
                               }
-                              className="keep-btn-style px-2 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                              className="keep-btn-style px-2.5 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
                             >
                               <FileDown className="w-3 h-3" /> Tải
                             </button>
                           )}
                           <button
                             type="button"
-                            disabled={isRowLoading}
-                            onClick={() => void handleOpenTagEditorForExistingRow(t)}
-                            className="keep-btn-style px-2 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer disabled:opacity-60"
+                            onClick={() =>
+                              onRequestConfirm(
+                                'Xác nhận xóa phôi mẫu?',
+                                'Bạn có chắc chắn muốn xóa phôi mẫu này? Thao tác này sẽ xóa cả tệp .docx trên hệ thống.',
+                                () => onDeleteTemplate(t),
+                                true
+                              )
+                            }
+                            className="keep-btn-style px-2.5 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
                           >
-                            {isRowLoading ? (
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <Sparkles className="w-3 h-3" />
-                            )}
-                            <span>Tự thêm biến</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setTplFile(null);
-                              setTplDetectedTags([]);
-                              setTplFieldSearch('');
-                              setTplModal({
-                                open: true,
-                                isEdit: true,
-                                form: {
-                                  ...t,
-                                  target_department: normalizeTemplateDepartment(
-                                    t.target_department,
-                                    t.template_id,
-                                    t.document_name
-                                  ),
-                                },
-                              });
-                            }}
-                            className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
-                          >
-                            Sửa
+                            <Trash2 className="w-3 h-3" /> Xóa
                           </button>
                         </div>
                       </td>

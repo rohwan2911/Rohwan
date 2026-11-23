@@ -28,6 +28,7 @@ import {
   computeFloorPriceScaled,
   computeSellingPriceScaled,
   computeSilentFobUnitPrices,
+  fmtDecimal,
   fmtNumber,
   fmtUSD,
   formatCurrency,
@@ -166,7 +167,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       const inc = ctx.prop?.recommended_incoterm || ctx.inq.desired_incoterm || 'CIF';
       const price = toNum(ctx.prop?.final_selling_price);
       setAdjIncoterm(inc);
-      setAdjPrice(price > 0 ? price.toFixed(2) : '');
+      setAdjPrice(price > 0 ? fmtDecimal(price, 2) : '');
       setEmailTo(ctx.cus?.email || ctx.inq.email || '');
       setEmailSubject(buildQuotationEmailSubject(ctx.inq, ctx.prop, ctx.extraMeta, data.products));
       setEmailBodyHtml(buildQuotationEmailHtml(ctx.inq, ctx.cus, ctx.prop, ctx.extraMeta, ctx.sch, data.products, inc, price));
@@ -548,7 +549,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     const usdFmt = fmtUSD(sellingVal);
     const words = numberToEnglishWordsUsd(sellingVal);
     const totalNw = toNum(ctx.order?.nw_confirmed_kgs) || toNum(ctx.inq?.net_weight_kgs) || 0;
-    const avgUnit = totalNw > 0 ? `$${(subtotalAmt / totalNw).toFixed(3)}` : fieldValues.UNIT_PRICE || '$0.000';
+    const avgUnit = totalNw > 0 ? `$${fmtDecimal(subtotalAmt / totalNw, 3)}` : fieldValues.UNIT_PRICE || '$0,000';
 
     const itemTarget = target.kind === 'QUOTATION' ? subtotalAmt : sellingVal;
     const allocated = computeSilentFobUnitPrices(ctx.items, itemTarget, data.products, data.pricingRates);
@@ -780,7 +781,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                   const nextInc = e.target.value;
                   const nextPrice = computeSellingPriceScaled(ctx.prop, ctx.extraMeta, nextInc);
                   setAdjIncoterm(nextInc);
-                  setAdjPrice(nextPrice > 0 ? nextPrice.toFixed(2) : '');
+                  setAdjPrice(nextPrice > 0 ? fmtDecimal(nextPrice, 2) : '');
                   if (ctx.inq && ctx.prop) {
                     setEmailBodyHtml(buildQuotationEmailHtml(ctx.inq, ctx.cus, ctx.prop, ctx.extraMeta, ctx.sch, data.products, nextInc, nextPrice));
                   }
@@ -796,8 +797,9 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               <div className="flex items-center gap-1.5">
                 <span className="text-[#9bccb8]">Giá chào (USD):</span>
                 <input
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="VD: 2.160,00"
                   value={adjPrice}
                   onChange={(e) => {
                     setAdjPrice(e.target.value);

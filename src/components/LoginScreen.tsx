@@ -180,7 +180,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                       }
                     }}
                     placeholder="Nguyễn Văn A"
-                    className="agri-input pl-9"
+                    className="agri-input pl-10"
                     required
                   />
                 </div>
@@ -195,7 +195,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                   <select
                     value={department}
                     onChange={(e) => setDepartment(e.target.value === 'XNK' ? 'XNK' : 'SALES')}
-                    className="agri-input pl-9 font-bold"
+                    className="agri-input pl-10 font-bold"
                   >
                     <option value="SALES">Phòng Kinh doanh (SALES)</option>
                     <option value="XNK">Phòng Xuất Nhập Khẩu (XNK)</option>
@@ -216,7 +216,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder={mode === 'login' ? 'Nhập email, họ tên hoặc mã nhân viên...' : 'name@greenagri-vn.com'}
-                className="agri-input pl-9"
+                className="agri-input pl-10"
                 autoComplete={mode === 'login' ? 'username' : 'email'}
                 required
               />
@@ -234,7 +234,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="agri-input pl-9"
+                className="agri-input pl-10"
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                 required
               />
@@ -253,7 +253,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="agri-input pl-9"
+                  className="agri-input pl-10"
                   autoComplete="new-password"
                   required
                 />

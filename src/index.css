@@ -284,32 +284,48 @@ html, body, #root {
   color: #f4f8f5;
 }
 
-.agri-input {
-  width: 100%;
-  padding: 7px 10px;
-  border-radius: 9px;
-  border: 1.5px solid #186635;
-  background-color: #d7eee4;
-  color: #0b2418;
-  font-size: 13px;
-  font-weight: 500;
-  outline: none;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
-}
+@layer components {
+  .agri-input {
+    width: 100%;
+    padding: 7px 10px;
+    border-radius: 9px;
+    border: 1.5px solid #186635;
+    background-color: #d7eee4;
+    color: #0b2418;
+    font-size: 13px;
+    font-weight: 500;
+    outline: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
 
-.agri-input:focus {
-  background-color: #ffffff;
-  border-color: #0f4a33;
-  box-shadow: 0 0 0 2px rgba(244, 217, 138, 0.55);
+  .agri-input::placeholder {
+    color: rgba(11, 36, 24, 0.44);
+    font-style: italic;
+    font-weight: 400;
+  }
+
+  .agri-input:focus {
+    background-color: #ffffff;
+    border-color: #0f4a33;
+    box-shadow: 0 0 0 2px rgba(244, 217, 138, 0.55);
+  }
 }
 
 .login-input-group .agri-input {
-  background-color: #d7eee4;
+  padding-left: 40px;
+  background-color: #e6efea;
   color: #0b2418;
+}
+
+.login-input-group .agri-input::placeholder {
+  color: #5b7367;
+  font-style: normal;
+  opacity: 1;
 }
 
 .login-input-group .login-input-icon {
   color: #0f4a33;
+  z-index: 2;
   transition: color 0.15s ease;
 }
 
@@ -321,7 +337,9 @@ html, body, #root {
 }
 
 .login-input-group:focus-within .agri-input::placeholder {
-  color: rgba(255, 255, 255, 0.65);
+  color: #8da095;
+  font-style: normal;
+  opacity: 1;
 }
 
 .login-input-group:focus-within .login-input-icon {

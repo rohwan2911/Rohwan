@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { adminProvisionAuthCredential, restoreSupabaseUserSession, signOutSupabase } from './lib/supabase';
+import {
+  adminProvisionAuthCredential,
+  deleteTemplateWithStorage,
+  restoreSupabaseUserSession,
+  signOutSupabase,
+} from './lib/supabase';
 import {
   advanceContractMilestone,
   confirmBuyerSignedContract,
@@ -36,7 +41,7 @@ import type {
   ToastMessage,
   ViewId,
 } from './types';
-import { isQuickCaptureStatus, isWaitingPricingStatus, normalizeRole, WORKFLOW_STATUS } from './utils/calculations';
+import { fmtUSD, isQuickCaptureStatus, isWaitingPricingStatus, normalizeRole, WORKFLOW_STATUS } from './utils/calculations';
 import { LoginScreen } from './components/LoginScreen';
 import { NAV_GROUPS, Sidebar, TopHeader } from './components/SidebarHeader';
 import { DashboardView } from './components/DashboardView';
@@ -378,30 +383,36 @@ export const App: React.FC = () => {
               data={data}
               quickSearch={quickSearch}
               highlightedId={highlightedId}
-              onUpsertProduct={async (row, isEdit) => {
+              onUpsertProduct={async (row, isEdit, silent) => {
                 await upsertProductDirect(row, isEdit);
-                pushToast('success', 'Đã lưu sản phẩm.');
-                await syncData({ silent: true });
+                if (!silent) {
+                  pushToast('success', 'Đã lưu sản phẩm.');
+                  await syncData({ silent: true });
+                }
               }}
               onDeleteProduct={async (sku) => {
                 await deleteProductDirect(sku);
                 pushToast('success', `Đã xóa ${sku}.`);
                 await syncData({ silent: true });
               }}
-              onUpsertSchedule={async (row, isEdit) => {
+              onUpsertSchedule={async (row, isEdit, silent) => {
                 await upsertScheduleDirect(row, isEdit);
-                pushToast('success', 'Đã lưu lịch tàu.');
-                await syncData({ silent: true });
+                if (!silent) {
+                  pushToast('success', 'Đã lưu lịch tàu.');
+                  await syncData({ silent: true });
+                }
               }}
               onDeleteSchedule={async (sid) => {
                 await deleteScheduleDirect(sid);
                 pushToast('success', `Đã xóa ${sid}.`);
                 await syncData({ silent: true });
               }}
-              onUpsertRate={async (row, isEdit) => {
+              onUpsertRate={async (row, isEdit, silent) => {
                 await upsertPricingRateDirect(row, isEdit);
-                pushToast('success', 'Đã lưu biểu phí.');
-                await syncData({ silent: true });
+                if (!silent) {
+                  pushToast('success', 'Đã lưu biểu phí.');
+                  await syncData({ silent: true });
+                }
               }}
               onDeleteRate={async (code) => {
                 await deletePricingRateDirect(code);
@@ -411,6 +422,11 @@ export const App: React.FC = () => {
               onUpsertTemplate={async (row, isEdit) => {
                 await upsertTemplateDirect(row, isEdit);
                 pushToast('success', 'Đã lưu phôi mẫu.');
+                await syncData({ silent: true });
+              }}
+              onDeleteTemplate={async (tpl) => {
+                await deleteTemplateWithStorage(tpl.template_id, tpl.google_doc_file_id);
+                pushToast('success', `Đã xóa phôi mẫu ${tpl.template_id} và tệp .docx thành công.`);
                 await syncData({ silent: true });
               }}
               onRefreshData={async () => {
@@ -453,7 +469,7 @@ export const App: React.FC = () => {
             { quotation_mode: tplMode === 'COMPARISON' ? 'COMPARISON' : 'SINGLE' },
             { recommended_incoterm: newInc, final_selling_price: newPrice }
           );
-          pushToast('success', `Đã lưu điều chỉnh ${newInc} · $${newPrice.toFixed(2)}.`);
+          pushToast('success', `Đã lưu điều chỉnh ${newInc} · ${fmtUSD(newPrice)}.`);
           await syncData({ silent: true });
         }}
         onMarkQuotationSent={async (orderId, linkOrSubject) => {

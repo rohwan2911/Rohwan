@@ -11,6 +11,8 @@ import {
   Edit3,
   UserPlus,
   Calendar,
+  Languages,
+  Loader2,
 } from 'lucide-react';
 import type {
   AppDataState,
@@ -26,8 +28,10 @@ import {
   classifyCustomerByCount,
   cleanQuoteNoForCustomer,
   computeOrderPalletSummary,
+  fmtDecimal,
   fmtNumber,
   fmtUSD,
+  formatEditableNumber,
   getPackingOptionsForProduct,
   INCOTERMS_2020_MATRIX,
   isConfirmedStatus,
@@ -36,10 +40,12 @@ import {
   isQuickCaptureStatus,
   isSentWaitingCustomerStatus,
   normalizePlainText,
+  parseLocaleNumber,
   parseOrderItems,
   stripItemsTag,
   todayIsoDate,
   toNum,
+  translateVIEtoENGSmart,
   WORKFLOW_STATUS,
 } from '../utils/calculations';
 import { SearchableCombo } from './SearchableCombo';
@@ -95,7 +101,7 @@ interface DraftLine {
   sku: string;
   name: string;
   name_eng: string;
-  weight: number;
+  weightStr: string;
   packingCode: string;
 }
 
@@ -142,13 +148,14 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
   const [cusEmail, setCusEmail] = useState('');
   const [cusFax, setCusFax] = useState('');
   const [desiredDate, setDesiredDate] = useState('');
-  const [desiredIncoterm, setDesiredIncoterm] = useState('CIF');
-  const [paymentTerm, setPaymentTerm] = useState('T/T 30% Deposit / 70% against B/L copy');
+  const [desiredIncoterm, setDesiredIncoterm] = useState('');
+  const [paymentTerm, setPaymentTerm] = useState('');
   const [quoteMode, setQuoteMode] = useState<'SINGLE' | 'COMPARISON'>('SINGLE');
   const [usePallet, setUsePallet] = useState(false);
   const [rfqNote, setRfqNote] = useState('');
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [rfqSaving, setRfqSaving] = useState(false);
+  const [translatingLineIdx, setTranslatingLineIdx] = useState<number | null>(null);
 
   // Contracts Pending Signature filter
   const [contractFilter, setContractFilter] = useState<'ALL' | 'PENDING' | 'SIGNED'>('ALL');
@@ -160,6 +167,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
   // Customer edit modal
   const [cusModalOpen, setCusModalOpen] = useState(false);
   const [cusForm, setCusForm] = useState<ConsigneeDirectory | null>(null);
+  const [cusOrderCountStr, setCusOrderCountStr] = useState('');
   const [cusIsEdit, setCusIsEdit] = useState(false);
   const dateInputRef = useRef<HTMLInputElement>(null);
 
@@ -185,7 +193,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     return data.products.map((p) => ({
       value: p.sku_code,
       label: `${p.sku_code} – ${p.product_name_vie}`,
-      subLabel: `${p.product_name_eng} · $${toNum(p.unit_price).toFixed(2)}/kg`,
+      subLabel: `${p.product_name_eng} · $${fmtDecimal(p.unit_price, 2)}/kg`,
     }));
   }, [data.products]);
 
@@ -231,8 +239,8 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
       setCusEmail(fromInquiry.email || cus?.email || '');
       setCusFax(cus?.fax || '');
       setDesiredDate(fromInquiry.desired_delivery_date || '');
-      setDesiredIncoterm(fromInquiry.desired_incoterm || 'CIF');
-      setPaymentTerm(fromInquiry.proposed_payment_term || cus?.default_payment_term || 'T/T 30% Deposit / 70% against B/L copy');
+      setDesiredIncoterm(fromInquiry.desired_incoterm || '');
+      setPaymentTerm(fromInquiry.proposed_payment_term || cus?.default_payment_term || '');
       setQuoteMode(String(fromInquiry.quotation_mode || '').toUpperCase().includes('COMP') ? 'COMPARISON' : 'SINGLE');
       const parsed = parseOrderItems(fromInquiry, data.products, data.pricingRates);
       setUsePallet(parsed.some((it) => it.palletCode === 'PKG-PLT-YES'));
@@ -243,10 +251,10 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
               sku: p.sku,
               name: p.name,
               name_eng: p.name_eng || p.name,
-              weight: p.weight,
-              packingCode: p.packingCode || 'PKG-CTN-10K',
+              weightStr: p.weight > 0 ? formatEditableNumber(p.weight) : '',
+              packingCode: p.packingCode || '',
             }))
-          : [{ sku: data.products[0]?.sku_code || '', name: data.products[0]?.product_name_vie || '', name_eng: data.products[0]?.product_name_eng || '', weight: 10000, packingCode: 'PKG-CTN-10K' }]
+          : [{ sku: '', name: '', name_eng: '', weightStr: '', packingCode: '' }]
       );
     } else {
       setEditingOrderId(undefined);
@@ -260,19 +268,18 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
       setCusEmail('');
       setCusFax('');
       setDesiredDate('');
-      setDesiredIncoterm('CIF');
-      setPaymentTerm('T/T 30% Deposit / 70% against B/L copy');
+      setDesiredIncoterm('');
+      setPaymentTerm('');
       setQuoteMode('SINGLE');
       setUsePallet(false);
       setRfqNote('');
-      const first = data.products[0];
       setLines([
         {
-          sku: first?.sku_code || '',
-          name: first?.product_name_vie || '',
-          name_eng: first?.product_name_eng || '',
-          weight: 10000,
-          packingCode: 'PKG-CTN-10K',
+          sku: '',
+          name: '',
+          name_eng: '',
+          weightStr: '',
+          packingCode: '',
         },
       ]);
     }
@@ -370,7 +377,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
       onToast('warning', 'Vui lòng chọn hoặc nhập tên khách hàng.');
       return;
     }
-    const validLines = lines.filter((l) => l.sku && toNum(l.weight) > 0);
+    const validLines = lines.filter((l) => l.sku && parseLocaleNumber(l.weightStr) > 0);
     if (validLines.length === 0) {
       onToast('warning', 'Vui lòng chọn ít nhất 1 sản phẩm với khối lượng > 0 KG.');
       return;
@@ -379,14 +386,15 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     const orderItems: OrderItem[] = validLines.map((l) => {
       const prod = data.products.find((p) => p.sku_code === l.sku);
       const packOpts = getPackingOptionsForProduct(prod, data.pricingRates, data.lookups);
-      const pk = packOpts.find((o) => o.code === l.packingCode);
+      const resolvedPackCode = l.packingCode || packOpts[0]?.code || 'PKG-CTN-10K';
+      const pk = packOpts.find((o) => o.code === resolvedPackCode);
       return {
         sku: l.sku,
         name: l.name || prod?.product_name_vie || l.sku,
         name_eng: l.name_eng || prod?.product_name_eng || l.name,
-        weight: toNum(l.weight),
-        packingCode: l.packingCode,
-        packingName: pk?.name || l.packingCode,
+        weight: parseLocaleNumber(l.weightStr),
+        packingCode: resolvedPackCode,
+        packingName: pk?.name || resolvedPackCode,
         packingExtra: pk?.rate || 0,
         palletCode: usePallet ? 'PKG-PLT-YES' : 'PKG-PLT-NO',
         cartons: 0,
@@ -407,6 +415,8 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
           (cleanEmailLow && c.email.trim().toLowerCase() === cleanEmailLow) ||
           (cleanTaxLow && normalizePlainText(c.tax).toLowerCase() === cleanTaxLow)
       );
+    const resolvedIncoterm = desiredIncoterm.trim().toUpperCase() || 'CIF';
+    const resolvedPayment = paymentTerm.trim() || 'T/T 30% Deposit / 70% against B/L copy';
     setRfqSaving(true);
     try {
       await onSaveInquiry({
@@ -422,14 +432,14 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
           phone: cusPhone.trim(),
           email: cusEmail.trim(),
           fax: cusFax.trim(),
-          default_payment_term: paymentTerm,
+          default_payment_term: resolvedPayment,
         },
         sku_code: orderItems.map((i) => i.sku).join(', '),
         product_name_vie: orderItems.map((i) => i.name).join(', '),
         net_weight_kgs: totalWeight,
         desired_delivery_date: desiredDate,
-        desired_incoterm: desiredIncoterm,
-        proposed_payment_term: paymentTerm,
+        desired_incoterm: resolvedIncoterm,
+        proposed_payment_term: resolvedPayment,
         inquiry_status: WORKFLOW_STATUS.WAITING_PRICING,
         note: rfqNote.trim(),
         order_items: JSON.stringify(orderItems),
@@ -819,23 +829,23 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   </div>
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Người liên hệ</label>
-                    <input value={cusContact} onChange={(e) => setCusContact(e.target.value)} className="agri-input" />
+                    <input value={cusContact} placeholder="VD: Mr. Kenji Tanaka" onChange={(e) => setCusContact(e.target.value)} className="agri-input" />
                   </div>
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Email</label>
-                    <input value={cusEmail} onChange={(e) => setCusEmail(e.target.value)} className="agri-input" />
+                    <input value={cusEmail} placeholder="VD: buyer@company.com" onChange={(e) => setCusEmail(e.target.value)} className="agri-input" />
                   </div>
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Điện thoại (Plain Text)</label>
-                    <input value={cusPhone} onChange={(e) => setCusPhone(e.target.value)} className="agri-input" />
+                    <input value={cusPhone} placeholder="VD: +81 3-1234-5678" onChange={(e) => setCusPhone(e.target.value)} className="agri-input" />
                   </div>
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Tax ID / Mã số thuế</label>
-                    <input value={cusTax} onChange={(e) => setCusTax(e.target.value)} className="agri-input" />
+                    <input value={cusTax} placeholder="VD: JP-987654321" onChange={(e) => setCusTax(e.target.value)} className="agri-input" />
                   </div>
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Địa chỉ</label>
-                    <input value={cusAddress} onChange={(e) => setCusAddress(e.target.value)} className="agri-input" />
+                    <input value={cusAddress} placeholder="VD: 1-2-3 Minato-ku, Tokyo, Japan" onChange={(e) => setCusAddress(e.target.value)} className="agri-input" />
                   </div>
                 </div>
 
@@ -846,8 +856,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        const first = data.products[0];
-                        setLines((prev) => [...prev, { sku: first?.sku_code || '', name: first?.product_name_vie || '', name_eng: first?.product_name_eng || '', weight: 5000, packingCode: 'PKG-CTN-10K' }]);
+                        setLines((prev) => [...prev, { sku: '', name: '', name_eng: '', weightStr: '', packingCode: '' }]);
                       }}
                       className="px-2.5 py-1 rounded bg-[#0f4a33] text-[#f4d98a] font-bold text-[11px] cursor-pointer"
                     >
@@ -867,6 +876,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                               value={ln.sku}
                               allowCustom={false}
                               options={productOptions}
+                              placeholder="Chọn sản phẩm (SKU)..."
                               onChange={(sku) => {
                                 const p = data.products.find((x) => x.sku_code === sku);
                                 setLines((prev) =>
@@ -880,9 +890,37 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                             />
                           </div>
                           <div>
-                            <label className="block text-[10.5px] font-bold text-[#07281c] mb-1">Tên tiếng Anh (In Báo giá)</label>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-[10.5px] font-bold text-[#07281c]">Tên tiếng Anh (In Báo giá)</label>
+                              <button
+                                type="button"
+                                disabled={translatingLineIdx === idx || !(ln.name || prod?.product_name_vie)}
+                                onClick={async () => {
+                                  const srcName = ln.name || prod?.product_name_vie || '';
+                                  if (!srcName.trim()) return;
+                                  setTranslatingLineIdx(idx);
+                                  try {
+                                    const eng = await translateVIEtoENGSmart(srcName, 'PRODUCT');
+                                    setLines((prev) => prev.map((r, i) => (i === idx ? { ...r, name_eng: eng } : r)));
+                                  } catch (err: any) {
+                                    onToast('error', err?.message || 'Không thể dịch tên sản phẩm.');
+                                  } finally {
+                                    setTranslatingLineIdx(null);
+                                  }
+                                }}
+                                className="px-2 py-0.5 rounded bg-[#0f4a33] text-[#f4d98a] text-[10px] font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                              >
+                                {translatingLineIdx === idx ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <Languages className="w-3 h-3" />
+                                )}
+                                Dịch sang Anh
+                              </button>
+                            </div>
                             <input
                               value={ln.name_eng}
+                              placeholder="VD: Fresh Red Dragon Fruit"
                               onChange={(e) => setLines((prev) => prev.map((r, i) => (i === idx ? { ...r, name_eng: e.target.value } : r)))}
                               className="agri-input text-xs"
                             />
@@ -898,9 +936,9 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                               options={packOpts.map((pk) => ({
                                 value: pk.code,
                                 label: `${pk.code} – ${pk.name}`,
-                                subLabel: `+$${pk.perKgRate.toFixed(2)}/kg`,
+                                subLabel: `+$${fmtDecimal(pk.perKgRate, 2)}/kg`,
                               }))}
-                              placeholder="Chọn quy cách đóng gói..."
+                              placeholder="Chọn quy cách đóng gói (VD: PKG-CTN-10K)..."
                               onChange={(code) => setLines((prev) => prev.map((r, i) => (i === idx ? { ...r, packingCode: code } : r)))}
                             />
                           </div>
@@ -908,9 +946,11 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                             <div className="flex-1 min-w-0">
                               <label className="block text-[10.5px] font-bold text-[#07281c] mb-1">KL (KG)</label>
                               <input
-                                type="number"
-                                value={ln.weight}
-                                onChange={(e) => setLines((prev) => prev.map((r, i) => (i === idx ? { ...r, weight: toNum(e.target.value) } : r)))}
+                                type="text"
+                                inputMode="decimal"
+                                value={ln.weightStr}
+                                placeholder="VD: 10.000"
+                                onChange={(e) => setLines((prev) => prev.map((r, i) => (i === idx ? { ...r, weightStr: e.target.value } : r)))}
                                 className="agri-input text-xs font-mono font-bold"
                               />
                             </div>
@@ -932,7 +972,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
 
                   <label className="inline-flex items-center gap-2 font-bold text-[#07281c] cursor-pointer pt-1">
                     <input type="checkbox" checked={usePallet} onChange={(e) => setUsePallet(e.target.checked)} className="accent-[#0f4a33]" />
-                    <span>Đóng Pallet gỗ ISPM-15 (18 kg · 0.17 CBM/pallet · +5% hao hụt hàng hỗn hợp)</span>
+                    <span>Đóng Pallet gỗ ISPM-15 (18 kg · 0,17 CBM/pallet · +5% hao hụt hàng hỗn hợp)</span>
                   </label>
                 </div>
 
@@ -944,7 +984,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                       onChange={(v) => setDesiredIncoterm(v.toUpperCase())}
                       options={incotermOptions}
                       allowCustom={false}
-                      placeholder="Chọn Incoterm..."
+                      placeholder="VD: CIF / FOB / CFR..."
                     />
                   </div>
                   <div>
@@ -999,13 +1039,24 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   </div>
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Thanh toán đề xuất</label>
-                    <SearchableCombo value={paymentTerm} onChange={setPaymentTerm} options={paymentOptions} />
+                    <SearchableCombo
+                      value={paymentTerm}
+                      onChange={setPaymentTerm}
+                      options={paymentOptions}
+                      placeholder="VD: T/T 30% Deposit / 70% against B/L copy"
+                    />
                   </div>
                 </div>
 
                 <div>
                   <label className="block font-bold text-[#fff5d6] mb-1">Ghi chú gửi Phòng XNK</label>
-                  <textarea rows={2} value={rfqNote} onChange={(e) => setRfqNote(e.target.value)} className="agri-input" />
+                  <textarea
+                    rows={2}
+                    value={rfqNote}
+                    placeholder="VD: Yêu cầu chứng nhận kiểm dịch thực vật, đóng thùng 10kg, gửi bảng so sánh FOB & CIF..."
+                    onChange={(e) => setRfqNote(e.target.value)}
+                    className="agri-input"
+                  />
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">
@@ -1351,12 +1402,8 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
         <button
           type="button"
           onClick={() => {
-            const maxIdx = data.consignees.reduce((m, c) => {
-              const match = c.consignee_id.match(/CON-(\d+)/i);
-              return match ? Math.max(m, parseInt(match[1], 10)) : m;
-            }, 0);
             setCusForm({
-              consignee_id: `CON-${String(maxIdx + 1).padStart(3, '0')}`,
+              consignee_id: '',
               consignee_name: '',
               country: '',
               address: '',
@@ -1365,11 +1412,12 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
               phone: '',
               email: '',
               fax: '',
-              default_payment_term: 'T/T 30/70',
+              default_payment_term: '',
               customer_type: 'Khách hàng tiềm năng',
               order_count: 0,
               created_date: todayIsoDate(),
             });
+            setCusOrderCountStr('');
             setCusIsEdit(false);
             setCusModalOpen(true);
           }}
@@ -1411,7 +1459,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                     <div className="font-mono text-[11px]">Tel: {normalizePlainText(c.phone)} {c.fax ? `· Fax: ${normalizePlainText(c.fax)}` : ''}</div>
                   </td>
                   <td className="text-center font-mono text-xs">{normalizePlainText(c.tax) || '-'}</td>
-                  <td className="text-center font-mono font-extrabold">{toNum(c.order_count)}</td>
+                  <td className="text-center font-mono font-extrabold">{fmtNumber(c.order_count)}</td>
                   <td className="text-center">
                     <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
                       {c.customer_type || classifyCustomerByCount(c.order_count)}
@@ -1423,6 +1471,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                         type="button"
                         onClick={() => {
                           setCusForm({ ...c });
+                          setCusOrderCountStr(formatEditableNumber(c.order_count));
                           setCusIsEdit(true);
                           setCusModalOpen(true);
                         }}
@@ -1467,11 +1516,22 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block font-bold mb-1">Mã KH</label>
-                <input value={cusForm.consignee_id} disabled={cusIsEdit} onChange={(e) => setCusForm({ ...cusForm, consignee_id: e.target.value })} className="agri-input font-mono" />
+                <input
+                  value={cusForm.consignee_id}
+                  disabled={cusIsEdit}
+                  placeholder="VD: CON-001 (để trống tự cấp)"
+                  onChange={(e) => setCusForm({ ...cusForm, consignee_id: e.target.value })}
+                  className="agri-input font-mono"
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1">Tên công ty *</label>
-                <input value={cusForm.consignee_name} onChange={(e) => setCusForm({ ...cusForm, consignee_name: e.target.value })} className="agri-input" />
+                <input
+                  value={cusForm.consignee_name}
+                  placeholder="VD: Fresh Asia Trading Co., Ltd"
+                  onChange={(e) => setCusForm({ ...cusForm, consignee_name: e.target.value })}
+                  className="agri-input"
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1">Quốc gia</label>
@@ -1480,32 +1540,62 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   onChange={(v) => setCusForm({ ...cusForm, country: v })}
                   options={countryOptions}
                   allowCustom
-                  placeholder="Chọn hoặc nhập Quốc gia..."
+                  placeholder="VD: Japan / USA / Germany..."
                 />
               </div>
               <div>
                 <label className="block font-bold mb-1">Tax ID</label>
-                <input value={cusForm.tax} onChange={(e) => setCusForm({ ...cusForm, tax: e.target.value })} className="agri-input font-mono" />
+                <input
+                  value={cusForm.tax}
+                  placeholder="VD: JP-987654321"
+                  onChange={(e) => setCusForm({ ...cusForm, tax: e.target.value })}
+                  className="agri-input font-mono"
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1">Người liên hệ</label>
-                <input value={cusForm.contact_person} onChange={(e) => setCusForm({ ...cusForm, contact_person: e.target.value })} className="agri-input" />
+                <input
+                  value={cusForm.contact_person}
+                  placeholder="VD: Mr. Kenji Tanaka"
+                  onChange={(e) => setCusForm({ ...cusForm, contact_person: e.target.value })}
+                  className="agri-input"
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1">Email</label>
-                <input value={cusForm.email} onChange={(e) => setCusForm({ ...cusForm, email: e.target.value })} className="agri-input" />
+                <input
+                  value={cusForm.email}
+                  placeholder="VD: kenji@freshasia.jp"
+                  onChange={(e) => setCusForm({ ...cusForm, email: e.target.value })}
+                  className="agri-input"
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1">SĐT (Plain Text)</label>
-                <input value={cusForm.phone} onChange={(e) => setCusForm({ ...cusForm, phone: e.target.value })} className="agri-input font-mono" />
+                <input
+                  value={cusForm.phone}
+                  placeholder="VD: +81 3-5555-0199"
+                  onChange={(e) => setCusForm({ ...cusForm, phone: e.target.value })}
+                  className="agri-input font-mono"
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1">Fax (Plain Text)</label>
-                <input value={cusForm.fax} onChange={(e) => setCusForm({ ...cusForm, fax: e.target.value })} className="agri-input font-mono" />
+                <input
+                  value={cusForm.fax}
+                  placeholder="VD: +81 3-5555-0198"
+                  onChange={(e) => setCusForm({ ...cusForm, fax: e.target.value })}
+                  className="agri-input font-mono"
+                />
               </div>
               <div className="sm:col-span-2">
                 <label className="block font-bold mb-1">Địa chỉ</label>
-                <input value={cusForm.address} onChange={(e) => setCusForm({ ...cusForm, address: e.target.value })} className="agri-input" />
+                <input
+                  value={cusForm.address}
+                  placeholder="VD: 1-2-3 Minato-ku, Tokyo, Japan"
+                  onChange={(e) => setCusForm({ ...cusForm, address: e.target.value })}
+                  className="agri-input"
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1">Thanh toán mặc định</label>
@@ -1514,12 +1604,19 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   onChange={(v) => setCusForm({ ...cusForm, default_payment_term: v })}
                   options={paymentOptions}
                   allowCustom
-                  placeholder="Chọn điều khoản thanh toán..."
+                  placeholder="VD: T/T 30% Deposit / 70% against B/L copy"
                 />
               </div>
               <div>
                 <label className="block font-bold mb-1">Số đơn baseline</label>
-                <input type="number" value={cusForm.order_count} onChange={(e) => setCusForm({ ...cusForm, order_count: toNum(e.target.value) })} className="agri-input font-mono" />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={cusOrderCountStr}
+                  placeholder="VD: 0"
+                  onChange={(e) => setCusOrderCountStr(e.target.value)}
+                  className="agri-input font-mono"
+                />
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -1531,7 +1628,25 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                     onToast('warning', 'Vui lòng nhập Tên công ty.');
                     return;
                   }
-                  await onUpsertConsignee(cusForm, cusIsEdit);
+                  let resolvedId = cusForm.consignee_id.trim();
+                  if (!resolvedId) {
+                    const maxIdx = data.consignees.reduce((m, c) => {
+                      const match = c.consignee_id.match(/CON-(\d+)/i);
+                      return match ? Math.max(m, parseInt(match[1], 10)) : m;
+                    }, 0);
+                    resolvedId = `CON-${String(maxIdx + 1).padStart(3, '0')}`;
+                  }
+                  const parsedCount = Math.max(0, Math.round(parseLocaleNumber(cusOrderCountStr)));
+                  await onUpsertConsignee(
+                    {
+                      ...cusForm,
+                      consignee_id: resolvedId,
+                      consignee_name: cusForm.consignee_name.trim(),
+                      default_payment_term: cusForm.default_payment_term.trim() || 'T/T 30/70',
+                      order_count: parsedCount,
+                    },
+                    cusIsEdit
+                  );
                   setCusModalOpen(false);
                 }}
                 className="agri-btn-gold"

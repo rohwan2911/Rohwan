@@ -19,6 +19,7 @@ import {
   COMPLETED_ORDER_STATUS,
   isQuickCaptureStatus,
   normalizePlainText,
+  parseLocaleNumber,
   suggestCoFormCode,
   todayIsoDate,
   toNum,
@@ -149,24 +150,84 @@ export async function fetchAllAppData(): Promise<AppDataState> {
     throw new Error(errors[0]?.message || 'Lỗi tải dữ liệu từ Supabase.');
   }
 
+  const normalizedConsignees = (consigneesRes.data || []).map((c: any) => ({
+    ...c,
+    order_count: Math.max(0, Math.floor(parseLocaleNumber(c.order_count))),
+  })) as ConsigneeDirectory[];
+
+  const normalizedProducts = (productsRes.data || []).map((p: any) => ({
+    ...p,
+    unit_price: parseLocaleNumber(p.unit_price),
+  })) as ProductCatalog[];
+
   const normalizedRates = (ratesRes.data || []).map((r: any) => ({
     ...r,
     scope_or_cont_type: r.scope_or_cont_type ?? r.scope_or_conttype ?? '',
+    standard_rate: parseLocaleNumber(r.standard_rate),
+    net_kg: parseLocaleNumber(r.net_kg),
+    tare_kg: parseLocaleNumber(r.tare_kg),
+    max_per_pallet: parseLocaleNumber(r.max_per_pallet),
   })) as PricingRate[];
+
+  const normalizedSchedules = (schedulesRes.data || []).map((s: any) => ({
+    ...s,
+    rate_20_dc: parseLocaleNumber(s.rate_20_dc),
+    rate_40_dc: parseLocaleNumber(s.rate_40_dc),
+    rate_40_hc: parseLocaleNumber(s.rate_40_hc),
+    rate_20_rf: parseLocaleNumber(s.rate_20_rf),
+    rate_40_rf: parseLocaleNumber(s.rate_40_rf),
+    rate_40_rh: parseLocaleNumber(s.rate_40_rh),
+    baf_fee: parseLocaleNumber(s.baf_fee),
+    lss_fee: parseLocaleNumber(s.lss_fee),
+    pss_fee: parseLocaleNumber(s.pss_fee),
+    b_l_fee: parseLocaleNumber(s.b_l_fee),
+    seal_fee: parseLocaleNumber(s.seal_fee),
+    thc_20_dry: parseLocaleNumber(s.thc_20_dry),
+    thc_40_dry: parseLocaleNumber(s.thc_40_dry),
+    thc_20_reefer: parseLocaleNumber(s.thc_20_reefer),
+    thc_40_reefer: parseLocaleNumber(s.thc_40_reefer),
+    bill_seal_fee_shipment: parseLocaleNumber(s.bill_seal_fee_shipment),
+  })) as ShippingSchedule[];
+
+  const normalizedInquiries = (inquiriesRes.data || []).map((i: any) => ({
+    ...i,
+    net_weight_kgs: parseLocaleNumber(i.net_weight_kgs),
+  })) as InquiryQuotation[];
+
+  const normalizedProposals = (proposalsRes.data || []).map((p: any) => ({
+    ...p,
+    container_qty: parseLocaleNumber(p.container_qty),
+    total_freight_local: parseLocaleNumber(p.total_freight_local),
+    insurance_cost: parseLocaleNumber(p.insurance_cost),
+    goods_cost: parseLocaleNumber(p.goods_cost),
+    final_selling_price: parseLocaleNumber(p.final_selling_price),
+    packing_pallet_cost: parseLocaleNumber(p.packing_pallet_cost),
+    total_cartons: parseLocaleNumber(p.total_cartons),
+    total_pallets: parseLocaleNumber(p.total_pallets),
+    pallet_fee: parseLocaleNumber(p.pallet_fee),
+    total_gross_weight: parseLocaleNumber(p.total_gross_weight),
+    total_cbm: parseLocaleNumber(p.total_cbm),
+  })) as PricingProposal[];
+
+  const normalizedOrders = (ordersRes.data || []).map((o: any) => ({
+    ...o,
+    nw_confirmed_kgs: parseLocaleNumber(o.nw_confirmed_kgs),
+    contract_value: parseLocaleNumber(o.contract_value),
+  })) as OrderMaster[];
 
   return {
     users: (usersRes.data || []) as SysUser[],
-    consignees: (consigneesRes.data || []) as ConsigneeDirectory[],
-    products: (productsRes.data || []) as ProductCatalog[],
+    consignees: normalizedConsignees,
+    products: normalizedProducts,
     pricingRates: normalizedRates,
-    schedules: (schedulesRes.data || []) as ShippingSchedule[],
+    schedules: normalizedSchedules,
     incoterms: (incotermsRes.data || []) as AppDataState['incoterms'],
     lookups: (lookupsRes.data || []) as AppDataState['lookups'],
     templates: (templatesRes.data || []) as TemplateManager[],
     templatePlaceholders: templatePlaceholdersList,
-    inquiries: (inquiriesRes.data || []) as InquiryQuotation[],
-    proposals: (proposalsRes.data || []) as PricingProposal[],
-    orders: (ordersRes.data || []) as OrderMaster[],
+    inquiries: normalizedInquiries,
+    proposals: normalizedProposals,
+    orders: normalizedOrders,
   };
 }
 
