@@ -17,6 +17,7 @@ import type {
 import {
   classifyCustomerByCount,
   COMPLETED_ORDER_STATUS,
+  isQuickCaptureStatus,
   normalizePlainText,
   suggestCoFormCode,
   todayIsoDate,
@@ -110,12 +111,12 @@ export async function fetchAllAppData(): Promise<AppDataState> {
     proposalsRes,
     ordersRes,
   ] = await Promise.all([
-    supabase.from('sys_users').select('employee_id, full_name, department, role, email, status'),
+    supabase.from('sys_users').select('id, employee_id, full_name, department, role, email, status'),
     supabase.from('consignee_directory').select('consignee_id, consignee_name, country, address, tax, contact_person, phone, email, fax, default_payment_term, customer_type, order_count, created_date'),
-    supabase.from('product_catalog').select('stt, product_group, sku_code, product_name_vie, product_name_eng, unit_price, hs_code, container_type, storage_temperature, image_url').order('stt', { ascending: true }),
-    supabase.from('pricing_rates').select('fee_category, fee_code, scope_or_cont_type, fee_name_vie, contract_text_eng, unit_basis, standard_rate, provider_or_rule, note, dim_cm, net_kg, tare_kg, max_per_pallet'),
-    supabase.from('shipping_schedule').select('schedule_id, pol, pod, country, pot, shipping_line, vessel, voyage, etd, eta, rate_20dc, rate_40dc, rate_40hc, rate_20rf, rate_40rf, rate_40rh, baf_fee, lss_fee, pss_fee, bl_fee, seal_fee, updated_date, expiry_date, thc_20_dry, thc_40_dry, thc_20_reefer, thc_40_reefer, bill_seal_fee_shipment'),
-    supabase.from('incoterms_handbook').select('stt, incoterms_code, incoterm_group, full_name, transport_mode, contract_text_eng, freight_term, freight_payer, insurance_payer, export_customs, import_customs, risk_transfer_point, activation_condition, risk_benefit_seller, note, practical_notes_vie, seller_cost_scope').order('stt', { ascending: true }),
+    supabase.from('product_catalog').select('product_group, sku_code, product_name_vie, product_name_eng, unit_price, hs_code, container_type, storage_temperature, image_url').order('sku_code', { ascending: true }),
+    supabase.from('pricing_rates').select('*'),
+    supabase.from('shipping_schedule').select('schedule_id, pol, pod, country, pot, shipping_line, vessel, voyage, etd, eta, rate_20_dc, rate_40_dc, rate_40_hc, rate_20_rf, rate_40_rf, rate_40_rh, baf_fee, lss_fee, pss_fee, b_l_fee, seal_fee, updated_date, expiry_date, thc_20_dry, thc_40_dry, thc_20_reefer, thc_40_reefer, bill_seal_fee_shipment'),
+    supabase.from('incoterms_handbook').select('incoterms_code, incoterm_group, full_name, transport_mode, contract_text_eng, freight_term, freight_payer, insurance_payer, export_customs, import_customs, risk_transfer_point, activation_condition, risk_benefit_seller, note, practical_notes_vie, seller_cost_scope').order('incoterms_code', { ascending: true }),
     supabase.from('system_lookups').select('category, code, scope, display_name_vie, contract_text_eng, extra_value'),
     supabase.from('template_manager').select('template_id, document_name, google_doc_file_id, target_department, status, supported_placeholders'),
     fetchTemplatePlaceholdersSafe(),
@@ -142,11 +143,16 @@ export async function fetchAllAppData(): Promise<AppDataState> {
     throw new Error(errors[0]?.message || 'Lỗi tải dữ liệu từ Supabase.');
   }
 
+  const normalizedRates = (ratesRes.data || []).map((r: any) => ({
+    ...r,
+    scope_or_cont_type: r.scope_or_cont_type ?? r.scope_or_conttype ?? '',
+  })) as PricingRate[];
+
   return {
     users: (usersRes.data || []) as SysUser[],
     consignees: (consigneesRes.data || []) as ConsigneeDirectory[],
     products: (productsRes.data || []) as ProductCatalog[],
-    pricingRates: (ratesRes.data || []) as PricingRate[],
+    pricingRates: normalizedRates,
     schedules: (schedulesRes.data || []) as ShippingSchedule[],
     incoterms: (incotermsRes.data || []) as AppDataState['incoterms'],
     lookups: (lookupsRes.data || []) as AppDataState['lookups'],
@@ -441,8 +447,17 @@ export async function saveInquiryRecord(
   }
 ): Promise<InquiryQuotation> {
   assertConfigured();
-  const isUpdate = Boolean(params.existingOrderId);
-  const consignee = await resolveOrUpsertConsigneeForInquiry(state.consignees, params.customerInput, !isUpdate);
+  const existingInq = params.existingOrderId
+    ? state.inquiries.find((i) => i.order_id === params.existingOrderId)
+    : undefined;
+  const isQuickCapture = isQuickCaptureStatus(params.inquiry_status);
+  const wasQuickCapture = existingInq ? isQuickCaptureStatus(existingInq.inquiry_status) : false;
+  const shouldIncrementOrderCount = !isQuickCapture && (!existingInq || wasQuickCapture);
+  const consignee = await resolveOrUpsertConsigneeForInquiry(
+    state.consignees,
+    params.customerInput,
+    shouldIncrementOrderCount
+  );
 
   const now = new Date();
   const yyMmDd = `${String(now.getFullYear()).slice(-2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
@@ -454,8 +469,6 @@ export async function saveInquiryRecord(
       orderId = `ORD-${yyMmDd}-${String(Math.floor(Math.random() * 900) + 100)}`;
     }
   }
-
-  const existingInq = state.inquiries.find((i) => i.order_id === orderId);
   const row: InquiryQuotation = {
     order_id: orderId,
     timestamp: existingInq?.timestamp || now.toISOString().replace('T', ' ').slice(0, 19),
@@ -505,7 +518,8 @@ export async function deletePreContractOrder(state: AppDataState, orderId: strin
   const { error } = await supabase.from('inquiry_quotation').delete().eq('order_id', orderId);
   if (error) throw new Error(`Lỗi xóa yêu cầu báo giá: ${error.message}`);
 
-  if (inq?.consignee_id) {
+  const wasQuickCapture = inq ? isQuickCaptureStatus(inq.inquiry_status) : false;
+  if (inq?.consignee_id && !wasQuickCapture) {
     const cus = state.consignees.find((c) => c.consignee_id === inq.consignee_id);
     if (cus) {
       const nextCount = Math.max(0, Math.floor(toNum(cus.order_count)) - 1);
@@ -729,7 +743,6 @@ export async function deleteConsigneeDirect(consigneeId: string): Promise<void> 
 export async function upsertProductDirect(row: ProductCatalog, isEdit: boolean): Promise<void> {
   assertConfigured();
   const clean: ProductCatalog = {
-    stt: toNum(row.stt) || 1,
     product_group: row.product_group,
     sku_code: row.sku_code,
     product_name_vie: row.product_name_vie,
@@ -765,16 +778,16 @@ export async function upsertScheduleDirect(row: ShippingSchedule, isEdit: boolea
     voyage: row.voyage,
     etd: row.etd,
     eta: row.eta,
-    rate_20dc: toNum(row.rate_20dc),
-    rate_40dc: toNum(row.rate_40dc),
-    rate_40hc: toNum(row.rate_40hc),
-    rate_20rf: toNum(row.rate_20rf),
-    rate_40rf: toNum(row.rate_40rf),
-    rate_40rh: toNum(row.rate_40rh),
+    rate_20_dc: toNum(row.rate_20_dc),
+    rate_40_dc: toNum(row.rate_40_dc),
+    rate_40_hc: toNum(row.rate_40_hc),
+    rate_20_rf: toNum(row.rate_20_rf),
+    rate_40_rf: toNum(row.rate_40_rf),
+    rate_40_rh: toNum(row.rate_40_rh),
     baf_fee: toNum(row.baf_fee),
     lss_fee: toNum(row.lss_fee),
     pss_fee: toNum(row.pss_fee),
-    bl_fee: toNum(row.bl_fee),
+    b_l_fee: toNum(row.b_l_fee),
     seal_fee: toNum(row.seal_fee),
     updated_date: todayIsoDate(),
     expiry_date: row.expiry_date,
@@ -813,10 +826,21 @@ export async function upsertPricingRateDirect(row: PricingRate, isEdit: boolean)
     tare_kg: toNum(row.tare_kg),
     max_per_pallet: toNum(row.max_per_pallet),
   };
-  const { error } = isEdit
+  const primary = isEdit
     ? await supabase.from('pricing_rates').update(clean).eq('fee_code', clean.fee_code)
     : await supabase.from('pricing_rates').insert(clean);
-  if (error) throw new Error(`Lỗi lưu phụ phí: ${error.message}`);
+
+  if (primary.error && /scope_or_cont_type/i.test(primary.error.message)) {
+    const { scope_or_cont_type, ...rest } = clean;
+    const altPayload = { ...rest, scope_or_conttype: scope_or_cont_type };
+    const fb = isEdit
+      ? await supabase.from('pricing_rates').update(altPayload).eq('fee_code', clean.fee_code)
+      : await supabase.from('pricing_rates').insert(altPayload);
+    if (fb.error) throw new Error(`Lỗi lưu phụ phí: ${fb.error.message}`);
+    return;
+  }
+
+  if (primary.error) throw new Error(`Lỗi lưu phụ phí: ${primary.error.message}`);
 }
 
 export async function deletePricingRateDirect(feeCode: string): Promise<void> {
@@ -843,16 +867,16 @@ export async function upsertTemplateDirect(row: TemplateManager, isEdit: boolean
 
 export async function upsertSysUserDirect(row: SysUser, isEdit: boolean): Promise<void> {
   assertConfigured();
-  const clean: SysUser = {
-    employee_id: row.employee_id,
-    full_name: row.full_name,
-    department: row.department,
-    role: row.role,
+  const clean = {
+    employee_id: row.employee_id.trim(),
+    full_name: row.full_name.trim(),
+    department: row.department.trim(),
+    role: row.role.trim(),
     email: row.email.trim().toLowerCase(),
-    status: row.status,
+    status: row.status.trim(),
   };
   const { error } = isEdit
     ? await supabase.from('sys_users').update(clean).eq('employee_id', clean.employee_id)
-    : await supabase.from('sys_users').insert(clean);
+    : await supabase.from('sys_users').upsert(clean, { onConflict: 'employee_id' });
   if (error) throw new Error(`Lỗi lưu tài khoản: ${error.message}`);
 }

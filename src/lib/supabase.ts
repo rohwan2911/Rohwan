@@ -18,6 +18,16 @@ export const supabase: SupabaseClient = createClient(
   }
 );
 
+function assertActiveUserStatus(userProfile: SysUser): void {
+  const st = String(userProfile.status || '').trim().toLowerCase();
+  if (st === 'pending' || st.includes('chờ duyệt') || st.includes('chờ phê duyệt')) {
+    throw new Error('Tài khoản đang ở trạng thái PENDING chờ Quản trị viên phê duyệt.');
+  }
+  if (st.includes('khóa') || st.includes('inactive') || st.includes('disabled') || st.includes('ngưng')) {
+    throw new Error('Tài khoản đang bị tạm khóa trong bảng sys_users.');
+  }
+}
+
 export async function signInWithSupabaseEmail(email: string, password: string): Promise<SysUser> {
   if (!isSupabaseConfigured) {
     throw new Error('Chưa cấu hình VITE_SUPABASE_URL hoặc VITE_SUPABASE_ANON_KEY trong biến môi trường.');
@@ -36,12 +46,102 @@ export async function signInWithSupabaseEmail(email: string, password: string): 
     await supabase.auth.signOut();
     throw new Error(`Tài khoản "${cleanEmail}" chưa được khai báo trong bảng sys_users.`);
   }
-  const st = String(userProfile.status || '').trim().toLowerCase();
-  if (st.includes('khóa') || st.includes('inactive') || st.includes('disabled') || st.includes('ngưng')) {
+  try {
+    assertActiveUserStatus(userProfile);
+  } catch (err) {
     await supabase.auth.signOut();
-    throw new Error('Tài khoản đang bị tạm khóa trong bảng sys_users.');
+    throw err;
   }
   return userProfile;
+}
+
+export async function registerWithSupabaseEmail(params: {
+  fullName: string;
+  email: string;
+  password: string;
+  department: 'SALES' | 'XNK';
+}): Promise<void> {
+  if (!isSupabaseConfigured) {
+    throw new Error('Chưa cấu hình VITE_SUPABASE_URL hoặc VITE_SUPABASE_ANON_KEY trong biến môi trường.');
+  }
+  const cleanEmail = params.email.trim().toLowerCase();
+  const cleanName = params.fullName.trim();
+  // Strictly lock Admin role creation from client-side registration
+  const safeDept: 'SALES' | 'XNK' = params.department === 'XNK' ? 'XNK' : 'SALES';
+
+  const existing = await fetchSysUserByEmail(cleanEmail);
+  if (existing) {
+    throw new Error(`Email "${cleanEmail}" đã được đăng ký trong hệ thống (${existing.status}).`);
+  }
+
+  const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+    email: cleanEmail,
+    password: params.password,
+    options: {
+      data: {
+        full_name: cleanName,
+        department: safeDept,
+        role: 'Staff',
+      },
+    },
+  });
+
+  if (signUpErr) {
+    throw new Error(signUpErr.message || 'Không thể đăng ký tài khoản Supabase Auth.');
+  }
+
+  const suffix = String(Date.now()).slice(-4);
+  const empId = `EMP-${suffix}`;
+  const newUserRow: Omit<SysUser, 'id'> = {
+    employee_id: empId,
+    full_name: cleanName,
+    department: safeDept,
+    role: 'Staff',
+    email: cleanEmail,
+    status: 'PENDING',
+  };
+
+  const { error: insertErr } = await supabase.from('sys_users').insert(newUserRow);
+  if (signUpData.session) {
+    await supabase.auth.signOut();
+  }
+  if (insertErr) {
+    throw new Error(`Tài khoản Auth đã tạo nhưng lỗi lưu sys_users: ${insertErr.message}`);
+  }
+}
+
+export async function adminProvisionAuthCredential(params: {
+  email: string;
+  password: string;
+  fullName: string;
+  department: string;
+}): Promise<void> {
+  if (!isSupabaseConfigured) return;
+  const cleanEmail = params.email.trim().toLowerCase();
+  if (!cleanEmail || !params.password) return;
+
+  // Ephemeral client without session persistence so Admin stays logged in
+  const ephemeralClient = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+
+  const { error } = await ephemeralClient.auth.signUp({
+    email: cleanEmail,
+    password: params.password,
+    options: {
+      data: {
+        full_name: params.fullName,
+        department: params.department,
+      },
+    },
+  });
+  if (error && !String(error.message || '').toLowerCase().includes('already registered')) {
+    throw new Error(`Lỗi tạo Supabase Auth cho nhân sự: ${error.message}`);
+  }
 }
 
 export async function fetchSysUserByEmail(email: string): Promise<SysUser | null> {
@@ -49,7 +149,7 @@ export async function fetchSysUserByEmail(email: string): Promise<SysUser | null
   const cleanEmail = email.trim().toLowerCase();
   const { data, error } = await supabase
     .from('sys_users')
-    .select('employee_id, full_name, department, role, email, status')
+    .select('id, employee_id, full_name, department, role, email, status')
     .ilike('email', cleanEmail)
     .limit(1);
 
@@ -66,8 +166,12 @@ export async function restoreSupabaseUserSession(): Promise<SysUser | null> {
   const email = data?.session?.user?.email;
   if (!email) return null;
   try {
-    return await fetchSysUserByEmail(email);
+    const profile = await fetchSysUserByEmail(email);
+    if (!profile) return null;
+    assertActiveUserStatus(profile);
+    return profile;
   } catch {
+    await supabase.auth.signOut();
     return null;
   }
 }

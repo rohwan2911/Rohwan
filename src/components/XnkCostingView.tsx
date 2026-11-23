@@ -333,7 +333,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
     const exwSell = (goodsCost + effectivePackingCost) * (1 + marginPct / 100);
     const fobSell = (goodsCost + effectivePackingCost + fullLocalTotal + customsSplit.customsTotal) * (1 + marginPct / 100);
     const cfrSell = (goodsCost + effectivePackingCost + fullLocalTotal + customsSplit.customsTotal + schOceanRes.ocean + schOceanRes.surcharge) * (1 + marginPct / 100);
-    const cifInsExact = computeInsurancePremiumExact(cfrSell, selectedInsRatePct || 0.12);
+    const cifInsExact = computeInsurancePremiumExact(cfrSell, recIncoterm === 'CIF' ? (selectedInsRatePct || 0.08) : 0.08);
     const cifSell = cfrSell + cifInsExact;
 
     const cPlusF = goodsCost + effectivePackingCost + totalFreightLocal;
@@ -609,12 +609,12 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
               <table className="w-full text-left border border-[#186635]/40 rounded-lg overflow-hidden">
                 <thead className="bg-[#547d59] text-[#fff5d6] text-[11px]">
                   <tr>
-                    <th className="p-2">SKU</th>
-                    <th className="p-2">Sản phẩm</th>
-                    <th className="p-2">Quy cách đóng gói</th>
-                    <th className="p-2 text-right">KL / Số thùng</th>
-                    <th className="p-2 text-right">Giá vốn / Bao bì</th>
-                    <th className="p-2 text-right">Thành tiền hàng</th>
+                    <th className="p-2 text-center">SKU</th>
+                    <th className="p-2 text-left">Sản phẩm</th>
+                    <th className="p-2 text-left">Quy cách đóng gói</th>
+                    <th className="p-2 text-center">KL / Số thùng</th>
+                    <th className="p-2 text-center">Giá vốn / Bao bì</th>
+                    <th className="p-2 text-center">Thành tiền hàng</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -625,9 +625,9 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                     const calc = computeItemPackingAndPallet(it.weight, it.packingCode, it.packingExtra, data.pricingRates);
                     return (
                       <tr key={idx} className="border-t border-[#186635]/30 bg-white/60">
-                        <td className="p-2 font-mono font-bold">{it.sku}</td>
-                        <td className="p-2 font-semibold">{it.name}</td>
-                        <td className="p-2">
+                        <td className="p-2 text-center font-mono font-bold">{it.sku}</td>
+                        <td className="p-2 text-left font-semibold">{it.name}</td>
+                        <td className="p-2 text-left">
                           <select
                             value={it.packingCode}
                             onChange={(e) => {
@@ -645,9 +645,9 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                             ))}
                           </select>
                         </td>
-                        <td className="p-2 text-right font-mono">{fmtNumber(it.weight)} KG · {fmtNumber(calc.cartons)} th</td>
-                        <td className="p-2 text-right font-mono">{fmtUSD(unitCost)} · BB: {fmtUSD(calc.packingCost)}</td>
-                        <td className="p-2 text-right font-mono font-bold">{fmtUSD(it.weight * unitCost)}</td>
+                        <td className="p-2 text-center font-mono">{fmtNumber(it.weight)} KG · {fmtNumber(calc.cartons)} th</td>
+                        <td className="p-2 text-center font-mono">{fmtUSD(unitCost)} · BB: {fmtUSD(calc.packingCost)}</td>
+                        <td className="p-2 text-center font-mono font-bold">{fmtUSD(it.weight * unitCost)}</td>
                       </tr>
                     );
                   })}
@@ -757,13 +757,13 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
             <table className="agri-table">
               <thead>
                 <tr>
-                  <th>Chọn</th>
-                  <th>Mã lịch</th>
-                  <th>Hãng tàu</th>
-                  <th>Tuyến (POL → POD)</th>
-                  <th>ETD / ETA</th>
-                  <th className="text-right">Cước biển</th>
-                  <th className="text-right">Phụ phí tàu</th>
+                  <th className="text-center">Chọn</th>
+                  <th className="text-center">Mã lịch</th>
+                  <th className="text-left">Hãng tàu</th>
+                  <th className="text-left">Tuyến (POL → POD)</th>
+                  <th className="text-center">ETD / ETA</th>
+                  <th className="text-center">Cước biển</th>
+                  <th className="text-center">Phụ phí tàu</th>
                 </tr>
               </thead>
               <tbody>
@@ -776,9 +776,9 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                       onClick={() => setSelectedScheduleId(active ? '' : sid)}
                       className={`cursor-pointer ${active ? '!bg-[#2d583f] !text-white' : ''}`}
                     >
-                      <td><input type="radio" checked={active} readOnly className="accent-[#0f4a33]" /></td>
-                      <td className="font-mono font-bold">{sid}</td>
-                      <td>
+                      <td className="text-center"><input type="radio" checked={active} readOnly className="accent-[#0f4a33]" /></td>
+                      <td className="text-center font-mono font-bold">{sid}</td>
+                      <td className="text-left">
                         <div className="font-bold">{ev.s.shipping_line}</div>
                         <div className="flex flex-wrap gap-1 mt-0.5">
                           {ev.isTooTight && <span className="keep-badge-color px-1.5 py-0.5 rounded bg-[#8c3b3b] text-white text-[10px]">Sát ngày (&lt;{ev.leadDays}d)</span>}
@@ -788,10 +788,10 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                           {ev.hasMissing && <span className="keep-badge-color px-1.5 py-0.5 rounded bg-[#8c3b3b] text-white text-[10px]">Thiếu giá: {ev.res.missing.join(', ')}</span>}
                         </div>
                       </td>
-                      <td>{ev.s.pol} → {ev.s.pod}</td>
-                      <td className="font-mono text-xs">{ev.s.etd} / {ev.s.eta}</td>
-                      <td className="text-right font-mono font-bold">{fmtUSD(ev.res.ocean)}</td>
-                      <td className="text-right font-mono">{fmtUSD(ev.res.surcharge)}</td>
+                      <td className="text-left">{ev.s.pol} → {ev.s.pod}</td>
+                      <td className="text-center font-mono text-xs">{ev.s.etd} / {ev.s.eta}</td>
+                      <td className="text-center font-mono font-bold">{fmtUSD(ev.res.ocean)}</td>
+                      <td className="text-center font-mono">{fmtUSD(ev.res.surcharge)}</td>
                     </tr>
                   );
                 })}
@@ -926,14 +926,14 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
               <table className="agri-table">
                 <thead>
                   <tr>
-                    <th>ĐK</th>
-                    <th>Cước chính</th>
-                    <th>Bảo hiểm</th>
-                    <th>Điểm chuyển rủi ro</th>
-                    <th className="text-right">Giá EXW</th>
-                    <th className="text-right">Phí áp dụng</th>
-                    <th className="text-right">Bảo hiểm</th>
-                    <th className="text-right">Giá chào dự kiến</th>
+                    <th className="text-center">ĐK</th>
+                    <th className="text-left">Cước chính</th>
+                    <th className="text-left">Bảo hiểm</th>
+                    <th className="text-left">Điểm chuyển rủi ro</th>
+                    <th className="text-center">Giá EXW</th>
+                    <th className="text-center">Phí áp dụng</th>
+                    <th className="text-center">Bảo hiểm</th>
+                    <th className="text-center">Giá chào dự kiến</th>
                     <th className="text-center">Áp dụng K4</th>
                   </tr>
                 </thead>
@@ -943,14 +943,14 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                     const isCur = item.row.code === recIncoterm;
                     return (
                       <tr key={item.row.code} className={isOpt ? '!bg-[#f4d98a]/40' : ''}>
-                        <td className="font-mono font-bold">{item.row.code} {isOpt && '★'}</td>
-                        <td>{item.row.freightLabel}</td>
-                        <td>{item.row.insLabel}</td>
-                        <td>{item.row.riskLabel}</td>
-                        <td className="text-right font-mono">{fmtUSD(item.exwVal)}</td>
-                        <td className="text-right font-mono">{fmtUSD(item.appliedFees)}</td>
-                        <td className="text-right font-mono">{fmtUSD(item.ins)} {item.insLabel && <div className="text-[10px]">{item.insLabel}</div>}</td>
-                        <td className="text-right font-mono font-extrabold">{fmtUSD(item.total)}</td>
+                        <td className="text-center font-mono font-bold">{item.row.code} {isOpt && '★'}</td>
+                        <td className="text-left">{item.row.freightLabel}</td>
+                        <td className="text-left">{item.row.insLabel}</td>
+                        <td className="text-left">{item.row.riskLabel}</td>
+                        <td className="text-center font-mono">{fmtUSD(item.exwVal)}</td>
+                        <td className="text-center font-mono">{fmtUSD(item.appliedFees)}</td>
+                        <td className="text-center font-mono">{fmtUSD(item.ins)} {item.insLabel && <div className="text-[10px]">{item.insLabel}</div>}</td>
+                        <td className="text-center font-mono font-extrabold">{fmtUSD(item.total)}</td>
                         <td className="text-center">
                           <button
                             type="button"
@@ -1099,13 +1099,13 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                       <tr>
                         <th className="p-1.5 text-left">Hạng mục</th>
                         <th className="p-1.5 text-center">Công ty Tự làm</th>
-                        <th className="p-1.5 text-right">Phí Tự làm ($)</th>
-                        <th className="p-1.5 text-right">Báo giá FWD ($)</th>
+                        <th className="p-1.5 text-center">Phí Tự làm ($)</th>
+                        <th className="p-1.5 text-center">Báo giá FWD ($)</th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr className="border-t border-[#186635]/30">
-                        <td className="p-1.5 font-semibold">1. Ocean &amp; Local/CFS</td>
+                        <td className="p-1.5 text-left font-semibold">1. Ocean &amp; Local/CFS</td>
                         <td className="p-1.5 text-center">
                           <input
                             type="checkbox"
@@ -1117,8 +1117,8 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                             }}
                           />
                         </td>
-                        <td className="p-1.5 text-right font-mono">{mix.hasLcl ? 'LCL→FWD' : fmtUSD(costing.effOcean + costing.effSurcharge + costing.localTotal)}</td>
-                        <td className="p-1.5 text-right">
+                        <td className="p-1.5 text-center font-mono">{mix.hasLcl ? 'LCL→FWD' : fmtUSD(costing.effOcean + costing.effSurcharge + costing.localTotal)}</td>
+                        <td className="p-1.5 text-center">
                           <input
                             type="number"
                             disabled={selfOceanChecked && !mix.hasLcl}
@@ -1128,12 +1128,12 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                               setFwdOcean(v);
                               if (v > 0) setSelfOceanChecked(false);
                             }}
-                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-right font-mono disabled:opacity-45"
+                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
                           />
                         </td>
                       </tr>
                       <tr className="border-t border-[#186635]/30">
-                        <td className="p-1.5 font-semibold">2. Trucking nội địa</td>
+                        <td className="p-1.5 text-left font-semibold">2. Trucking nội địa</td>
                         <td className="p-1.5 text-center">
                           <input
                             type="checkbox"
@@ -1148,16 +1148,16 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                             }}
                           />
                         </td>
-                        <td className="p-1.5 text-right">
+                        <td className="p-1.5 text-center">
                           <input
                             type="number"
                             disabled={!selfTruckChecked}
                             value={selfTruckRate}
                             onChange={(e) => setSelfTruckRate(toNum(e.target.value))}
-                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-right font-mono disabled:opacity-45"
+                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
                           />
                         </td>
-                        <td className="p-1.5 text-right">
+                        <td className="p-1.5 text-center">
                           <input
                             type="number"
                             disabled={selfTruckChecked}
@@ -1167,12 +1167,12 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                               setFwdTruck(v);
                               if (v > 0) setSelfTruckChecked(false);
                             }}
-                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-right font-mono disabled:opacity-45"
+                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
                           />
                         </td>
                       </tr>
                       <tr className="border-t border-[#186635]/30">
-                        <td className="p-1.5 font-semibold">3. Hải quan Xuất khẩu</td>
+                        <td className="p-1.5 text-left font-semibold">3. Hải quan Xuất khẩu</td>
                         <td className="p-1.5 text-center">
                           <input
                             type="checkbox"
@@ -1184,8 +1184,8 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                             }}
                           />
                         </td>
-                        <td className="p-1.5 text-right font-mono">{fmtUSD(customsSplit.customsExportUsd)}</td>
-                        <td className="p-1.5 text-right">
+                        <td className="p-1.5 text-center font-mono">{fmtUSD(customsSplit.customsExportUsd)}</td>
+                        <td className="p-1.5 text-center">
                           <input
                             type="number"
                             disabled={selfCustomsChecked}
@@ -1195,12 +1195,12 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                               setFwdCustoms(v);
                               if (v > 0) setSelfCustomsChecked(false);
                             }}
-                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-right font-mono disabled:opacity-45"
+                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
                           />
                         </td>
                       </tr>
                       <tr className="border-t border-[#186635]/30">
-                        <td className="p-1.5 font-semibold">4. Giấy phép (Kiểm dịch/C/O/Hun trùng)</td>
+                        <td className="p-1.5 text-left font-semibold">4. Giấy phép (Kiểm dịch/C/O/Hun trùng)</td>
                         <td className="p-1.5 text-center">
                           <input
                             type="checkbox"
@@ -1212,8 +1212,8 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                             }}
                           />
                         </td>
-                        <td className="p-1.5 text-right font-mono">{fmtUSD(customsSplit.permitsUsd)}</td>
-                        <td className="p-1.5 text-right">
+                        <td className="p-1.5 text-center font-mono">{fmtUSD(customsSplit.permitsUsd)}</td>
+                        <td className="p-1.5 text-center">
                           <input
                             type="number"
                             disabled={selfPermitsChecked}
@@ -1223,7 +1223,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                               setFwdPermits(v);
                               if (v > 0) setSelfPermitsChecked(false);
                             }}
-                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-right font-mono disabled:opacity-45"
+                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
                           />
                         </td>
                       </tr>
@@ -1309,14 +1309,14 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
           <table className="agri-table">
             <thead>
               <tr>
-                <th>Số Báo giá / Đơn</th>
-                <th>NV XNK</th>
-                <th>Tuyến / Container</th>
-                <th className="text-right">Giá vốn</th>
-                <th className="text-right">Cước + BB + BH</th>
-                <th>Incoterm</th>
-                <th className="text-right">Giá chào chốt</th>
-                <th>Trạng thái</th>
+                <th className="text-center">Số Báo giá / Đơn</th>
+                <th className="text-left">NV XNK</th>
+                <th className="text-left">Tuyến / Container</th>
+                <th className="text-center">Giá vốn</th>
+                <th className="text-center">Cước + BB + BH</th>
+                <th className="text-center">Incoterm</th>
+                <th className="text-center">Giá chào chốt</th>
+                <th className="text-center">Trạng thái</th>
               </tr>
             </thead>
             <tbody>
@@ -1324,28 +1324,28 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                 const extra = proposalMetaMap[p.order_id];
                 return (
                   <tr key={p.order_id}>
-                    <td>
+                    <td className="text-center">
                       <div className="font-mono font-bold">{extra?.quotation_no || `QT-${p.order_id}`}</div>
                       <button type="button" onClick={() => onOpenTimeline(p.order_id)} className="font-mono text-[11px] hover:underline cursor-pointer">
                         {p.order_id}
                       </button>
                     </td>
-                    <td>
+                    <td className="text-left">
                       <div className="font-semibold">{p.xnk_rep}</div>
                       <div className="font-mono text-[11px] opacity-80">{p.booking_date}</div>
                     </td>
-                    <td>
+                    <td className="text-left">
                       <div className="font-mono font-bold">{p.schedule_id || '-'}</div>
                       <div className="text-[11px]">{p.container_type}</div>
                     </td>
-                    <td className="text-right font-mono font-bold">{fmtUSD(p.goods_cost)}</td>
-                    <td className="text-right font-mono text-[11px]">
+                    <td className="text-center font-mono font-bold">{fmtUSD(p.goods_cost)}</td>
+                    <td className="text-center font-mono text-[11px]">
                       Cước: {fmtUSD(p.total_freight_local)}
                       <div>BB: {fmtUSD(p.packing_pallet_cost)} · BH: {fmtUSD(p.insurance_cost)}</div>
                     </td>
-                    <td className="font-mono font-bold">{p.recommended_incoterm}</td>
-                    <td className="text-right font-mono font-extrabold">{fmtUSD(p.final_selling_price)}</td>
-                    <td>
+                    <td className="text-center font-mono font-bold">{p.recommended_incoterm}</td>
+                    <td className="text-center font-mono font-extrabold">{fmtUSD(p.final_selling_price)}</td>
+                    <td className="text-center">
                       <span className="keep-badge-color inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
                         <Check className="w-3 h-3" /> {p.booking_status}
                       </span>

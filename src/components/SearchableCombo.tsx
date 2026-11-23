@@ -46,13 +46,21 @@ export const SearchableCombo: React.FC<SearchableComboProps> = ({
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        if (allowCustom && open) {
+          const trimmed = query.trim();
+          const matchedOpt = options.find((o) => o.label.toLowerCase() === trimmed.toLowerCase());
+          const committed = matchedOpt ? matchedOpt.value : trimmed;
+          if (committed !== value) onChange(committed);
+        }
         setOpen(false);
-        setQuery(selectedLabel);
+        if (!allowCustom) {
+          setQuery(selectedLabel);
+        }
       }
     };
     document.addEventListener('mousedown', handleOutside);
     return () => document.removeEventListener('mousedown', handleOutside);
-  }, [selectedLabel]);
+  }, [selectedLabel, allowCustom, open, query, options, value, onChange]);
 
   const filtered = useMemo(() => {
     const q = open && query !== selectedLabel ? query.trim().toLowerCase() : '';
@@ -76,10 +84,14 @@ export const SearchableCombo: React.FC<SearchableComboProps> = ({
           onFocus={() => {
             if (disabled) return;
             setOpen(true);
-            setQuery('');
+            setQuery(allowCustom ? selectedLabel : '');
           }}
           onChange={(e) => {
-            setQuery(e.target.value);
+            const nextVal = e.target.value;
+            setQuery(nextVal);
+            if (allowCustom) {
+              onChange(nextVal);
+            }
             if (!open) setOpen(true);
           }}
           className={`w-full pr-12 pl-3 py-1.5 text-xs sm:text-[13px] font-semibold rounded-lg border-[1.5px] outline-none transition-colors ${

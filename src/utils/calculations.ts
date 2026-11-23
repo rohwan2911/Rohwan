@@ -55,21 +55,38 @@ export function todayIsoDate(): string {
   return `${y}-${m}-${day}`;
 }
 
-export function normalizeRole(dept?: string): RoleType {
-  const raw = String(dept || '')
+function cleanUpperAscii(val?: string): string {
+  return String(val || '')
     .trim()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/đ/g, 'd')
     .replace(/Đ/g, 'D')
     .toUpperCase();
-  if (!raw) return 'SALES';
-  if (raw.includes('ADMIN') || raw.includes('QUAN TRI') || raw.includes('QUAN LY') || raw.includes('GIAM DOC') || raw.includes('MANAGER')) {
-    return 'ADMIN';
+}
+
+export function normalizeRole(roleOrDept?: string, deptFallback?: string): RoleType {
+  const first = cleanUpperAscii(roleOrDept);
+  const second = cleanUpperAscii(deptFallback);
+  const hasAdminKeyword = (s: string) =>
+    s.includes('ADMIN') || s.includes('QUAN TRI') || s.includes('QUAN LY') || s.includes('GIAM DOC');
+  const hasXnkKeyword = (s: string) =>
+    s.includes('XNK') || s.includes('LOGISTIC') || s.includes('XUAT NHAP KHAU') || s.includes('CHUNG TU') || s.includes('CUOC');
+  const hasSalesKeyword = (s: string) =>
+    s.includes('SALES') || s.includes('KINH DOANH');
+
+  if (deptFallback !== undefined) {
+    if (hasAdminKeyword(first) || hasAdminKeyword(second)) return 'ADMIN';
+    if (hasXnkKeyword(second)) return 'XNK';
+    if (hasSalesKeyword(second)) return 'SALES';
+    if (first.includes('MANAGER')) return 'ADMIN';
+    if (hasXnkKeyword(first)) return 'XNK';
+    return 'SALES';
   }
-  if (raw.includes('XNK') || raw.includes('LOGISTIC') || raw.includes('XUAT NHAP KHAU') || raw.includes('CHUNG TU') || raw.includes('CUOC')) {
-    return 'XNK';
-  }
+
+  if (!first) return 'SALES';
+  if (hasAdminKeyword(first) || first.includes('MANAGER')) return 'ADMIN';
+  if (hasXnkKeyword(first)) return 'XNK';
   return 'SALES';
 }
 
@@ -109,11 +126,11 @@ export function normalizeWorkflowStatus(status?: string): string {
   const low = s.toLowerCase();
   if (low.includes('tiếp nhận') || low.includes('tư vấn') || low.includes('quick')) return WORKFLOW_STATUS.QUICK_CAPTURE;
   if (low.includes('tính giá lại') || low.includes('reprice')) return WORKFLOW_STATUS.REPRICE_REQUESTED;
-  if (low.includes('chờ xnk') || low.includes('waiting') || low === 'new') return WORKFLOW_STATUS.WAITING_PRICING;
-  if (low.includes('đã có giá') || low.includes('priced')) return WORKFLOW_STATUS.PRICED_READY;
-  if (low.includes('đã gửi báo giá') || low.includes('chờ phản hồi') || low.includes('sent')) return WORKFLOW_STATUS.SENT_WAITING_CUST;
-  if (low.includes('chốt đơn') || low.includes('confirmed')) return WORKFLOW_STATUS.CONFIRMED_ORDER;
+  if (low.includes('mới tạo') || low.includes('chờ tính giá') || low.includes('chờ xnk') || low.includes('waiting') || low === 'new') return WORKFLOW_STATUS.WAITING_PRICING;
+  if (low.includes('đã có giá') || low.includes('chờ báo khách') || low.includes('priced')) return WORKFLOW_STATUS.PRICED_READY;
   if (low.includes('chờ sales đưa ký') || low.includes('pending signature')) return WORKFLOW_STATUS.CONTRACT_PENDING_SALES;
+  if ((low.includes('đã gửi') && !low.includes('sales')) || low.includes('chờ phản hồi') || low.includes('sent')) return WORKFLOW_STATUS.SENT_WAITING_CUST;
+  if (low.includes('chốt đơn') || low.includes('đã chốt') || low.includes('chờ ký') || low.includes('confirmed')) return WORKFLOW_STATUS.CONFIRMED_ORDER;
   if (low.includes('đã lập hợp đồng') || low.includes('hợp đồng')) return WORKFLOW_STATUS.CONTRACT_CREATED;
   return s;
 }
@@ -222,7 +239,7 @@ export interface InsuranceCatalogItem {
 
 export const DEFAULT_INSURANCE_CATALOG: InsuranceCatalogItem[] = [
   { fee_code: 'INS-NONE', scope_or_cont_type: 'ALL', unit_basis: '%_CIF_110', fee_name_vie: 'Không mua bảo hiểm (Người mua tự chịu)', contract_text_eng: 'Insurance excluded (to be covered by Buyer)', standard_rate: 0, provider_or_rule: 'Không phát sinh phí bảo hiểm', isAddon: false },
-  { fee_code: 'INS-ICC-C', scope_or_cont_type: 'DC', unit_basis: '%_CIF_110', fee_name_vie: 'Bảo hiểm điều kiện C (ICC C - Tối thiểu)', contract_text_eng: 'Institute Cargo Clauses (C) 110% CIF', standard_rate: 0.12, provider_or_rule: 'Mức tối thiểu CIF (Hàng khô)', isAddon: false },
+  { fee_code: 'INS-ICC-C', scope_or_cont_type: 'DC', unit_basis: '%_CIF_110', fee_name_vie: 'Bảo hiểm điều kiện C (ICC C - Tối thiểu)', contract_text_eng: 'Institute Cargo Clauses (C) 110% CIF', standard_rate: 0.08, provider_or_rule: 'Mức tối thiểu CIF (Hàng khô)', isAddon: false },
   { fee_code: 'INS-ICC-B', scope_or_cont_type: 'DC', unit_basis: '%_CIF_110', fee_name_vie: 'Bảo hiểm điều kiện B (ICC B - Trung bình)', contract_text_eng: 'Institute Cargo Clauses (B) 110% CIF', standard_rate: 0.18, provider_or_rule: 'Mức mở rộng trung bình (Hàng khô)', isAddon: false },
   { fee_code: 'INS-ICC-A', scope_or_cont_type: 'DC', unit_basis: '%_CIF_110', fee_name_vie: 'Bảo hiểm mọi rủi ro (ICC A - All Risks)', contract_text_eng: 'Institute Cargo Clauses (A) 110% CIF', standard_rate: 0.25, provider_or_rule: 'Bắt buộc cho CIP / Hàng giá trị cao', isAddon: false },
   { fee_code: 'INS-FRZ-A', scope_or_cont_type: 'RF', unit_basis: '%_CIF_110', fee_name_vie: 'Bảo hiểm hàng đông lạnh (Frozen Food Clauses A)', contract_text_eng: 'Institute Frozen Food Clauses (A) 110% CIF', standard_rate: 0.35, provider_or_rule: 'Khuyến nghị bắt buộc cho Container Lạnh (RF)', isAddon: false },
@@ -612,12 +629,12 @@ export function computeScheduleOceanAndMissing(sch: ShippingSchedule | null | un
     const fallbackLcl = Math.round(toNum(mix.lclFreight) * 100) / 100;
     return { ocean: fallbackLcl, fclOcean: 0, lclOcean: fallbackLcl, surcharge: 0, missing: [] as string[] };
   }
-  const r20dc = toNum(sch.rate_20dc);
-  const r40dc = toNum(sch.rate_40dc);
-  const r40hc = toNum(sch.rate_40hc) || (r40dc > 0 ? Math.round(r40dc * 1.05) : 0);
-  const r20rf = toNum(sch.rate_20rf);
-  const r40rf = toNum(sch.rate_40rf);
-  const r40rh = toNum(sch.rate_40rh) || (r40rf > 0 ? Math.round(r40rf * 1.05) : 0);
+  const r20dc = toNum(sch.rate_20_dc);
+  const r40dc = toNum(sch.rate_40_dc);
+  const r40hc = toNum(sch.rate_40_hc) || (r40dc > 0 ? Math.round(r40dc * 1.05) : 0);
+  const r20rf = toNum(sch.rate_20_rf);
+  const r40rf = toNum(sch.rate_40_rf);
+  const r40rh = toNum(sch.rate_40_rh) || (r40rf > 0 ? Math.round(r40rf * 1.05) : 0);
 
   const missing: string[] = [];
   if (mix.q20dc > 0 && r20dc <= 0) missing.push("20'DC");
@@ -632,7 +649,7 @@ export function computeScheduleOceanAndMissing(sch: ShippingSchedule | null | un
   const thc20r = toNum(sch.thc_20_reefer);
   const thc40r = toNum(sch.thc_40_reefer);
   const billSealShipment = toNum(sch.bill_seal_fee_shipment);
-  const blFee = toNum(sch.bl_fee);
+  const blFee = toNum(sch.b_l_fee);
   const sealFee = toNum(sch.seal_fee);
   const perContFuelPeak = toNum(sch.baf_fee) + toNum(sch.lss_fee) + toNum(sch.pss_fee);
 
@@ -937,7 +954,7 @@ export function computeFreightExpiryStatus(sch: ShippingSchedule) {
   else baseThreshold = 14;
 
   const hasPot = Boolean(String(sch.pot || '').trim() && String(sch.pot).trim() !== '-');
-  const hasReefer = toNum(sch.rate_20rf) > 0 || toNum(sch.rate_40rf) > 0 || toNum(sch.rate_40rh) > 0;
+  const hasReefer = toNum(sch.rate_20_rf) > 0 || toNum(sch.rate_40_rf) > 0 || toNum(sch.rate_40_rh) > 0;
   const threshold = baseThreshold + (hasPot || hasReefer ? 2 : 0);
 
   const now = new Date();
@@ -1009,6 +1026,39 @@ export function computeSilentFobUnitPrices(
   return allocated;
 }
 
+export function computeSellingPriceScaled(
+  prop: PricingProposal | undefined,
+  extraMeta: ProposalExtraMeta | undefined,
+  targetIncoterm: string
+): number {
+  if (!prop) return 0;
+  const baseSelling = toNum(prop.final_selling_price) || 0;
+  const inc = targetIncoterm.toUpperCase();
+  if (inc === String(prop.recommended_incoterm || '').toUpperCase() && baseSelling > 0) {
+    return Math.round(baseSelling * 100) / 100;
+  }
+  const exw = toNum(extraMeta?.exw_price);
+  const fob = toNum(extraMeta?.fob_price);
+  const cfr = toNum(extraMeta?.cfr_price);
+  const cif = toNum(extraMeta?.cif_price);
+  const dest = toNum(extraMeta?.dest_extra);
+  if (inc === 'EXW' && exw > 0) return Math.round(exw * 100) / 100;
+  if ((inc === 'FOB' || inc === 'FCA' || inc === 'FAS') && fob > 0) return Math.round(fob * 100) / 100;
+  if ((inc === 'CFR' || inc === 'CPT') && cfr > 0) return Math.round(cfr * 100) / 100;
+  if (inc === 'CIF' && cif > 0) return Math.round(cif * 100) / 100;
+  if (inc === 'CIP') {
+    const baseCfr = cfr > 0 ? cfr : baseSelling;
+    if (baseCfr > 0) {
+      return Math.round((baseCfr + computeInsurancePremiumExact(baseCfr, 0.25)) * 100) / 100;
+    }
+  }
+  if (inc === 'DAP' || inc === 'DPU' || inc === 'DDP') {
+    const baseD = cfr > 0 ? cfr : (cif > 0 ? cif : baseSelling);
+    if (baseD > 0) return Math.round((baseD + dest) * 100) / 100;
+  }
+  return Math.round(baseSelling * 100) / 100;
+}
+
 export function computeFloorPriceScaled(
   prop: PricingProposal | undefined,
   extraMeta: ProposalExtraMeta | undefined,
@@ -1019,17 +1069,7 @@ export function computeFloorPriceScaled(
   const baseFloor = extraMeta?.floor_price_usd && extraMeta.floor_price_usd > 0 ? extraMeta.floor_price_usd : baseSelling * 0.95;
   const inc = targetIncoterm.toUpperCase();
   if (inc === String(prop.recommended_incoterm || '').toUpperCase()) return Math.round(baseFloor * 100) / 100;
-  const refMap: Record<string, number> = {
-    EXW: extraMeta?.exw_price || 0,
-    FOB: extraMeta?.fob_price || 0,
-    FCA: extraMeta?.fob_price || 0,
-    FAS: extraMeta?.fob_price || 0,
-    CFR: extraMeta?.cfr_price || 0,
-    CPT: extraMeta?.cfr_price || 0,
-    CIF: extraMeta?.cif_price || 0,
-    CIP: extraMeta?.cif_price || 0,
-  };
-  const targetRef = refMap[inc] || baseSelling;
+  const targetSell = computeSellingPriceScaled(prop, extraMeta, inc) || baseSelling;
   const ratio = baseFloor / baseSelling;
-  return Math.round(targetRef * ratio * 100) / 100;
+  return Math.round(targetSell * ratio * 100) / 100;
 }

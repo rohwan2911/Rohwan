@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Lock, Mail, Sprout, AlertTriangle, LogIn } from 'lucide-react';
-import { isSupabaseConfigured, signInWithSupabaseEmail } from '../lib/supabase';
+import { Lock, Mail, Sprout, AlertTriangle, LogIn, UserPlus, User, Building2, CheckCircle2 } from 'lucide-react';
+import { isSupabaseConfigured, registerWithSupabaseEmail, signInWithSupabaseEmail } from '../lib/supabase';
 import type { SysUser } from '../types';
 
 export const COMPANY_LOGO_URL =
@@ -11,25 +11,73 @@ interface LoginScreenProps {
 }
 
 export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [department, setDepartment] = useState<'SALES' | 'XNK'>('SALES');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [logoError, setLogoError] = useState(false);
+
+  const switchMode = (nextMode: 'login' | 'register') => {
+    setMode(nextMode);
+    setError('');
+    setSuccessMsg('');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!email.trim() || !password) {
-      setError('Vui lòng nhập đầy đủ Email và Mật khẩu.');
+    setSuccessMsg('');
+
+    if (mode === 'login') {
+      if (!email.trim() || !password) {
+        setError('Vui lòng nhập đầy đủ Email và Mật khẩu.');
+        return;
+      }
+      setLoading(true);
+      try {
+        const user = await signInWithSupabaseEmail(email, password);
+        onLoginSuccess(user);
+      } catch (err: any) {
+        setError(err?.message || 'Đăng nhập thất bại.');
+      } finally {
+        setLoading(false);
+      }
       return;
     }
+
+    if (!fullName.trim() || !email.trim() || !password) {
+      setError('Vui lòng điền đầy đủ Họ tên, Email và Mật khẩu.');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Mật khẩu phải có ít nhất 6 ký tự.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Mật khẩu xác nhận không khớp.');
+      return;
+    }
+
     setLoading(true);
     try {
-      const user = await signInWithSupabaseEmail(email, password);
-      onLoginSuccess(user);
+      await registerWithSupabaseEmail({
+        fullName: fullName.trim(),
+        email: email.trim(),
+        password,
+        department,
+      });
+      setPassword('');
+      setConfirmPassword('');
+      setFullName('');
+      setMode('login');
+      setSuccessMsg('Đăng ký thành công! Tài khoản đang ở trạng thái PENDING chờ Quản trị viên phê duyệt trước khi đăng nhập.');
     } catch (err: any) {
-      setError(err?.message || 'Đăng nhập thất bại.');
+      setError(err?.message || 'Đăng ký tài khoản thất bại.');
     } finally {
       setLoading(false);
     }
@@ -38,7 +86,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   return (
     <div className="login-emerald-bg flex items-center justify-center p-4">
       <div className="login-glass-card w-full max-w-md rounded-2xl p-7 text-[#f4f8f5]">
-        <div className="flex flex-col items-center text-center mb-6">
+        <div className="flex flex-col items-center text-center mb-5">
           <div className="w-24 h-24 rounded-full bg-[#f6f3e3] border-2 border-[#fde68a] p-1 flex items-center justify-center shadow-lg mb-3 overflow-hidden">
             {!logoError ? (
               <img
@@ -59,6 +107,29 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           </p>
         </div>
 
+        <div className="grid grid-cols-2 gap-1 bg-[#07281c] p-1 rounded-xl border border-[#186635] mb-4">
+          <button
+            type="button"
+            onClick={() => switchMode('login')}
+            className={`py-1.5 rounded-lg text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+              mode === 'login' ? 'bg-[#f4d98a] text-[#07281c]' : 'text-[#d2ebe0] hover:text-white'
+            }`}
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            <span>Đăng nhập</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => switchMode('register')}
+            className={`py-1.5 rounded-lg text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+              mode === 'register' ? 'bg-[#f4d98a] text-[#07281c]' : 'text-[#d2ebe0] hover:text-white'
+            }`}
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>Đăng ký tài khoản</span>
+          </button>
+        </div>
+
         {!isSupabaseConfigured && (
           <div className="mb-4 p-3 rounded-xl bg-[#8c3b3b]/90 border border-[#f4d98a] text-xs text-white flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-[#f4d98a]" />
@@ -74,10 +145,55 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        {successMsg && (
+          <div className="mb-4 p-3 rounded-xl bg-[#0f4a33] border border-[#f4d98a] text-xs font-semibold text-[#fff5d6] flex items-start gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-[#f4d98a]" />
+            <span>{successMsg}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-3.5">
+          {mode === 'register' && (
+            <>
+              <div>
+                <label className="block text-xs font-bold text-[#fff5d6] mb-1">
+                  Họ và tên nhân sự *
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-[#0f4a33] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="Nguyễn Văn A"
+                    className="agri-input pl-9"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#fff5d6] mb-1">
+                  Phòng ban đăng ký *
+                </label>
+                <div className="relative">
+                  <Building2 className="w-4 h-4 text-[#0f4a33] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <select
+                    value={department}
+                    onChange={(e) => setDepartment(e.target.value === 'XNK' ? 'XNK' : 'SALES')}
+                    className="agri-input pl-9 font-bold"
+                  >
+                    <option value="SALES">Phòng Kinh doanh (SALES)</option>
+                    <option value="XNK">Phòng Xuất Nhập Khẩu (XNK)</option>
+                  </select>
+                </div>
+              </div>
+            </>
+          )}
+
           <div>
-            <label className="block text-xs font-bold text-[#fff5d6] mb-1.5">
-              Email nhân sự
+            <label className="block text-xs font-bold text-[#fff5d6] mb-1">
+              Email nhân sự *
             </label>
             <div className="relative">
               <Mail className="w-4 h-4 text-[#0f4a33] absolute left-3 top-1/2 -translate-y-1/2" />
@@ -94,8 +210,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-[#fff5d6] mb-1.5">
-              Mật khẩu
+            <label className="block text-xs font-bold text-[#fff5d6] mb-1">
+              Mật khẩu *
             </label>
             <div className="relative">
               <Lock className="w-4 h-4 text-[#0f4a33] absolute left-3 top-1/2 -translate-y-1/2" />
@@ -105,19 +221,47 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 className="agri-input pl-9"
-                autoComplete="current-password"
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                 required
               />
             </div>
           </div>
 
+          {mode === 'register' && (
+            <div>
+              <label className="block text-xs font-bold text-[#fff5d6] mb-1">
+                Xác nhận mật khẩu *
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-[#0f4a33] absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="agri-input pl-9"
+                  autoComplete="new-password"
+                  required
+                />
+              </div>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={loading}
-            className="w-full agri-btn-gold py-2.5 flex items-center justify-center gap-2 text-sm disabled:opacity-60"
+            className="w-full agri-btn-gold py-2.5 flex items-center justify-center gap-2 text-sm disabled:opacity-60 mt-1"
           >
-            <LogIn className="w-4 h-4" />
-            <span>{loading ? 'Đang xác thực Supabase...' : 'Đăng nhập Hệ thống'}</span>
+            {mode === 'login' ? <LogIn className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+            <span>
+              {loading
+                ? mode === 'login'
+                  ? 'Đang xác thực Supabase...'
+                  : 'Đang tạo tài khoản...'
+                : mode === 'login'
+                ? 'Đăng nhập Hệ thống'
+                : 'Gửi Yêu cầu Đăng ký'}
+            </span>
           </button>
         </form>
       </div>

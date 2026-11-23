@@ -9,7 +9,6 @@ export interface SysUser {
 }
 
 export interface ConsigneeDirectory {
-  id?: string | number;
   consignee_id: string;
   consignee_name: string;
   country: string;
@@ -26,8 +25,6 @@ export interface ConsigneeDirectory {
 }
 
 export interface ProductCatalog {
-  id?: string | number;
-  stt: number;
   product_group: string;
   sku_code: string;
   product_name_vie: string;
@@ -40,7 +37,6 @@ export interface ProductCatalog {
 }
 
 export interface PricingRate {
-  id?: string | number;
   fee_category: string;
   fee_code: string;
   scope_or_cont_type: string;
@@ -57,7 +53,6 @@ export interface PricingRate {
 }
 
 export interface ShippingSchedule {
-  id?: string | number;
   schedule_id: string;
   pol: string;
   pod: string;
@@ -68,16 +63,16 @@ export interface ShippingSchedule {
   voyage: string;
   etd: string;
   eta: string;
-  rate_20dc: number;
-  rate_40dc: number;
-  rate_40hc: number;
-  rate_20rf: number;
-  rate_40rf: number;
-  rate_40rh: number;
+  rate_20_dc: number;
+  rate_40_dc: number;
+  rate_40_hc: number;
+  rate_20_rf: number;
+  rate_40_rf: number;
+  rate_40_rh: number;
   baf_fee: number;
   lss_fee: number;
   pss_fee: number;
-  bl_fee: number;
+  b_l_fee: number;
   seal_fee: number;
   updated_date: string;
   expiry_date: string;
@@ -89,8 +84,6 @@ export interface ShippingSchedule {
 }
 
 export interface IncotermsHandbook {
-  id?: string | number;
-  stt: number;
   incoterms_code: string;
   incoterm_group: string;
   full_name: string;
@@ -110,7 +103,6 @@ export interface IncotermsHandbook {
 }
 
 export interface SystemLookup {
-  id?: string | number;
   category: string;
   code: string;
   scope: string;
@@ -120,7 +112,6 @@ export interface SystemLookup {
 }
 
 export interface TemplateManager {
-  id?: string | number;
   template_id: string;
   document_name: string;
   google_doc_file_id: string;
@@ -130,7 +121,6 @@ export interface TemplateManager {
 }
 
 export interface TemplatePlaceholder {
-  id?: string | number;
   placeholder_key: string;
   scope: string;
   source_table: string;
@@ -140,7 +130,6 @@ export interface TemplatePlaceholder {
 }
 
 export interface InquiryQuotation {
-  id?: string | number;
   order_id: string;
   timestamp: string;
   sale_rep: string;
@@ -164,7 +153,6 @@ export interface InquiryQuotation {
 }
 
 export interface PricingProposal {
-  id?: string | number;
   order_id: string;
   xnk_rep: string;
   schedule_id: string;
@@ -188,7 +176,6 @@ export interface PricingProposal {
 }
 
 export interface OrderMaster {
-  id?: string | number;
   order_id: string;
   contract_no: string;
   contract_date: string;

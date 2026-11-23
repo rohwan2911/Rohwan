@@ -35,7 +35,7 @@ interface MasterDataViewProps {
   onDeleteRate: (feeCode: string) => Promise<void>;
   onUpsertTemplate: (row: TemplateManager, isEdit: boolean) => Promise<void>;
   onRefreshData?: () => Promise<void>;
-  onUpsertUser: (row: SysUser, isEdit: boolean) => Promise<void>;
+  onUpsertUser: (row: SysUser, isEdit: boolean, initialPassword?: string) => Promise<void>;
   onRequestConfirm: (title: string, message: string, onConfirm: () => Promise<void>, danger?: boolean) => void;
   onToast: (type: 'success' | 'error' | 'info' | 'warning', title: string) => void;
 }
@@ -67,7 +67,12 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
   const [tplFile, setTplFile] = useState<File | null>(null);
   const [tplDetectedTags, setTplDetectedTags] = useState<string[]>([]);
   const [tplBusy, setTplBusy] = useState(false);
-  const [usrModal, setUsrModal] = useState<{ open: boolean; isEdit: boolean; form: SysUser | null }>({ open: false, isEdit: false, form: null });
+  const [usrModal, setUsrModal] = useState<{ open: boolean; isEdit: boolean; form: SysUser | null; initialPassword: string }>({
+    open: false,
+    isEdit: false,
+    form: null,
+    initialPassword: '',
+  });
 
   useEffect(() => {
     if (activeView === 'xnk-shipping' && highlightedId) {
@@ -88,7 +93,6 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                 open: true,
                 isEdit: false,
                 form: {
-                  stt: data.products.length + 1,
                   product_group: 'Nông sản khô',
                   sku_code: `SKU-${String(data.products.length + 1).padStart(3, '0')}`,
                   product_name_vie: '',
@@ -117,30 +121,32 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             <table className="agri-table">
               <thead>
                 <tr>
-                  <th>STT / SKU</th>
-                  <th>Nhóm hàng</th>
-                  <th>Tên Tiếng Việt / English</th>
-                  <th className="text-right">Giá vốn ($/kg)</th>
-                  <th>HS Code</th>
-                  <th>Loại Cont / Nhiệt độ</th>
-                  <th className="text-right">Thao tác</th>
+                  <th className="text-center">STT / SKU</th>
+                  <th className="text-left">Nhóm hàng</th>
+                  <th className="text-left">Tên Tiếng Việt / English</th>
+                  <th className="text-center">Giá vốn ($/kg)</th>
+                  <th className="text-center">HS Code</th>
+                  <th className="text-center">Loại Cont / Nhiệt độ</th>
+                  <th className="text-center">Thao tác</th>
                 </tr>
               </thead>
               <tbody>
-                {list.map((p) => (
+                {list.map((p, idx) => (
                   <tr key={p.sku_code}>
-                    <td className="font-mono font-bold">{p.stt}. {p.sku_code}</td>
-                    <td>{p.product_group}</td>
-                    <td>
+                    <td className="text-center font-mono font-bold whitespace-nowrap">{idx + 1}. {p.sku_code}</td>
+                    <td className="text-left">{p.product_group}</td>
+                    <td className="text-left">
                       <div className="font-bold">{p.product_name_vie}</div>
                       <div className="text-[11px] opacity-80">{p.product_name_eng}</div>
                     </td>
-                    <td className="text-right font-mono font-bold">{fmtUSD(p.unit_price)}</td>
-                    <td className="font-mono">{normalizePlainText(p.hs_code)}</td>
-                    <td className="text-xs">{p.container_type} · {p.storage_temperature}</td>
-                    <td className="text-right space-x-1 whitespace-nowrap">
-                      <button type="button" onClick={() => setProdModal({ open: true, isEdit: true, form: { ...p } })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"><Edit3 className="w-3 h-3 inline" /> Sửa</button>
-                      <button type="button" onClick={() => onRequestConfirm('Xóa sản phẩm?', `Xác nhận xóa ${p.sku_code}?`, () => onDeleteProduct(p.sku_code), true)} className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer"><Trash2 className="w-3 h-3 inline" /></button>
+                    <td className="text-center font-mono font-bold whitespace-nowrap">{fmtUSD(p.unit_price)}</td>
+                    <td className="text-center font-mono whitespace-nowrap">{normalizePlainText(p.hs_code)}</td>
+                    <td className="text-center text-xs">{p.container_type} · {p.storage_temperature}</td>
+                    <td className="text-center">
+                      <div className="inline-flex flex-wrap items-center justify-center gap-1">
+                        <button type="button" onClick={() => setProdModal({ open: true, isEdit: true, form: { ...p } })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"><Edit3 className="w-3 h-3 inline" /> Sửa</button>
+                        <button type="button" onClick={() => onRequestConfirm('Xóa sản phẩm?', `Xác nhận xóa ${p.sku_code}?`, () => onDeleteProduct(p.sku_code), true)} className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer"><Trash2 className="w-3 h-3 inline" /></button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -218,8 +224,8 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                   voyage: '',
                   etd: todayIsoDate(),
                   eta: todayIsoDate(),
-                  rate_20dc: 0, rate_40dc: 0, rate_40hc: 0, rate_20rf: 0, rate_40rf: 0, rate_40rh: 0,
-                  baf_fee: 0, lss_fee: 0, pss_fee: 0, bl_fee: 45, seal_fee: 10,
+                  rate_20_dc: 0, rate_40_dc: 0, rate_40_hc: 0, rate_20_rf: 0, rate_40_rf: 0, rate_40_rh: 0,
+                  baf_fee: 0, lss_fee: 0, pss_fee: 0, b_l_fee: 45, seal_fee: 10,
                   updated_date: todayIsoDate(),
                   expiry_date: todayIsoDate(),
                   thc_20_dry: 135, thc_40_dry: 210, thc_20_reefer: 185, thc_40_reefer: 275, bill_seal_fee_shipment: 55,
@@ -242,14 +248,14 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             <table className="agri-table">
               <thead>
                 <tr>
-                  <th>Mã lịch</th>
-                  <th>Hãng tàu / Tàu</th>
-                  <th>Tuyến (POL → POD · Quốc gia)</th>
-                  <th>ETD / ETA</th>
-                  <th className="text-right">20'DC / 40'DC / 40'HC</th>
-                  <th className="text-right">20'RF / 40'RF / 40'RH</th>
-                  <th>Hết hạn</th>
-                  <th className="text-right">Thao tác</th>
+                  <th className="text-center">Mã lịch</th>
+                  <th className="text-left">Hãng tàu / Tàu</th>
+                  <th className="text-left">Tuyến (POL → POD · Quốc gia)</th>
+                  <th className="text-center">ETD / ETA</th>
+                  <th className="text-center">20'DC / 40'DC / 40'HC</th>
+                  <th className="text-center">20'RF / 40'RF / 40'RH</th>
+                  <th className="text-center">Hết hạn</th>
+                  <th className="text-center">Thao tác</th>
                 </tr>
               </thead>
               <tbody>
@@ -257,25 +263,27 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                   const exp = computeFreightExpiryStatus(s);
                   return (
                     <tr key={s.schedule_id}>
-                      <td className="font-mono font-bold">{s.schedule_id}</td>
-                      <td>
+                      <td className="text-center font-mono font-bold whitespace-nowrap">{s.schedule_id}</td>
+                      <td className="text-left">
                         <div className="font-bold">{s.shipping_line}</div>
                         <div className="text-[11px] opacity-80">{s.vessel} / {s.voyage}</div>
                       </td>
-                      <td>
+                      <td className="text-left">
                         <div className="font-semibold">{s.pol} → {s.pod}</div>
                         <div className="text-[11px]">{s.country} {s.pot && s.pot !== '-' ? `· POT: ${s.pot}` : ''}</div>
                       </td>
-                      <td className="font-mono text-xs">{s.etd} → {s.eta}</td>
-                      <td className="text-right font-mono text-xs">${s.rate_20dc} / ${s.rate_40dc} / ${s.rate_40hc}</td>
-                      <td className="text-right font-mono text-xs">${s.rate_20rf} / ${s.rate_40rf} / ${s.rate_40rh}</td>
-                      <td className="font-mono text-xs">
+                      <td className="text-center font-mono text-xs whitespace-nowrap">{s.etd} → {s.eta}</td>
+                      <td className="text-center font-mono text-xs whitespace-nowrap">${s.rate_20_dc} / ${s.rate_40_dc} / ${s.rate_40_hc}</td>
+                      <td className="text-center font-mono text-xs whitespace-nowrap">${s.rate_20_rf} / ${s.rate_40_rf} / ${s.rate_40_rh}</td>
+                      <td className="text-center font-mono text-xs whitespace-nowrap">
                         {s.expiry_date}
                         <div className="text-[10px] font-bold">{exp.state}</div>
                       </td>
-                      <td className="text-right space-x-1 whitespace-nowrap">
-                        <button type="button" onClick={() => setSchModal({ open: true, isEdit: true, form: { ...s } })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer">Sửa</button>
-                        <button type="button" onClick={() => onRequestConfirm('Xóa lịch tàu?', `Xác nhận xóa ${s.schedule_id}?`, () => onDeleteSchedule(s.schedule_id), true)} className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer">Xóa</button>
+                      <td className="text-center">
+                        <div className="inline-flex flex-wrap items-center justify-center gap-1">
+                          <button type="button" onClick={() => setSchModal({ open: true, isEdit: true, form: { ...s } })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer">Sửa</button>
+                          <button type="button" onClick={() => onRequestConfirm('Xóa lịch tàu?', `Xác nhận xóa ${s.schedule_id}?`, () => onDeleteSchedule(s.schedule_id), true)} className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer">Xóa</button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -295,17 +303,28 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                 <div><label className="block font-bold mb-1">Quốc gia đến</label><input value={schModal.form.country} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, country: e.target.value } })} className="agri-input" /></div>
                 <div><label className="block font-bold mb-1">POD</label><input value={schModal.form.pod} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, pod: e.target.value } })} className="agri-input" /></div>
                 <div><label className="block font-bold mb-1">POL</label><input value={schModal.form.pol} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, pol: e.target.value } })} className="agri-input" /></div>
+                <div><label className="block font-bold mb-1">POT (Chuyển tải)</label><input value={schModal.form.pot} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, pot: e.target.value } })} className="agri-input" /></div>
+                <div><label className="block font-bold mb-1">Tàu (Vessel)</label><input value={schModal.form.vessel} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, vessel: e.target.value } })} className="agri-input" /></div>
+                <div><label className="block font-bold mb-1">Chuyến (Voyage)</label><input value={schModal.form.voyage} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, voyage: e.target.value } })} className="agri-input font-mono" /></div>
                 <div><label className="block font-bold mb-1">ETD</label><input type="date" value={schModal.form.etd} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, etd: e.target.value } })} className="agri-input font-mono" /></div>
                 <div><label className="block font-bold mb-1">ETA</label><input type="date" value={schModal.form.eta} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, eta: e.target.value } })} className="agri-input font-mono" /></div>
                 <div><label className="block font-bold mb-1">Hết hạn cước</label><input type="date" value={schModal.form.expiry_date} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, expiry_date: e.target.value } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Rate 20'DC ($)</label><input type="number" value={schModal.form.rate_20dc} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_20dc: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Rate 40'DC ($)</label><input type="number" value={schModal.form.rate_40dc} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_40dc: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Rate 40'HC ($)</label><input type="number" value={schModal.form.rate_40hc} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_40hc: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Rate 20'RF ($)</label><input type="number" value={schModal.form.rate_20rf} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_20rf: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Rate 40'RF ($)</label><input type="number" value={schModal.form.rate_40rf} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_40rf: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
-                <div><label className="block font-bold mb-1">Rate 40'RH ($)</label><input type="number" value={schModal.form.rate_40rh} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_40rh: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+                <div><label className="block font-bold mb-1">Bill+Seal / Lô ($)</label><input type="number" value={schModal.form.bill_seal_fee_shipment} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, bill_seal_fee_shipment: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+                <div><label className="block font-bold mb-1">Rate 20'DC ($)</label><input type="number" value={schModal.form.rate_20_dc} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_20_dc: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+                <div><label className="block font-bold mb-1">Rate 40'DC ($)</label><input type="number" value={schModal.form.rate_40_dc} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_40_dc: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+                <div><label className="block font-bold mb-1">Rate 40'HC ($)</label><input type="number" value={schModal.form.rate_40_hc} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_40_hc: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+                <div><label className="block font-bold mb-1">Rate 20'RF ($)</label><input type="number" value={schModal.form.rate_20_rf} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_20_rf: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+                <div><label className="block font-bold mb-1">Rate 40'RF ($)</label><input type="number" value={schModal.form.rate_40_rf} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_40_rf: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+                <div><label className="block font-bold mb-1">Rate 40'RH ($)</label><input type="number" value={schModal.form.rate_40_rh} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, rate_40_rh: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
                 <div><label className="block font-bold mb-1">THC 20 Dry</label><input type="number" value={schModal.form.thc_20_dry} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, thc_20_dry: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
                 <div><label className="block font-bold mb-1">THC 40 Dry</label><input type="number" value={schModal.form.thc_40_dry} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, thc_40_dry: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+                <div><label className="block font-bold mb-1">THC 20 Reefer</label><input type="number" value={schModal.form.thc_20_reefer} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, thc_20_reefer: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+                <div><label className="block font-bold mb-1">THC 40 Reefer</label><input type="number" value={schModal.form.thc_40_reefer} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, thc_40_reefer: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+                <div><label className="block font-bold mb-1">B/L Fee ($)</label><input type="number" value={schModal.form.b_l_fee} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, b_l_fee: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+                <div><label className="block font-bold mb-1">Seal Fee ($)</label><input type="number" value={schModal.form.seal_fee} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, seal_fee: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+                <div><label className="block font-bold mb-1">BAF ($/cont)</label><input type="number" value={schModal.form.baf_fee} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, baf_fee: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+                <div><label className="block font-bold mb-1">LSS ($/cont)</label><input type="number" value={schModal.form.lss_fee} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, lss_fee: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
+                <div><label className="block font-bold mb-1">PSS ($/cont)</label><input type="number" value={schModal.form.pss_fee} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, pss_fee: toNum(e.target.value) } })} className="agri-input font-mono" /></div>
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setSchModal({ open: false, isEdit: false, form: null })} className="px-3 py-1.5 rounded bg-[#07281c] text-white font-bold cursor-pointer">Hủy</button>
@@ -370,28 +389,30 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             <table className="agri-table">
               <thead>
                 <tr>
-                  <th>Nhóm</th>
-                  <th>Mã phí</th>
-                  <th>Tên Tiếng Việt / ENG</th>
-                  <th>Phạm vi / ĐVT</th>
-                  <th className="text-right">Đơn giá chuẩn</th>
-                  <th className="text-right">Thao tác</th>
+                  <th className="text-center">Nhóm</th>
+                  <th className="text-center">Mã phí</th>
+                  <th className="text-left">Tên Tiếng Việt / ENG</th>
+                  <th className="text-center">Phạm vi / ĐVT</th>
+                  <th className="text-center">Đơn giá chuẩn</th>
+                  <th className="text-center">Thao tác</th>
                 </tr>
               </thead>
               <tbody>
                 {list.map((r) => (
                   <tr key={r.fee_code}>
-                    <td className="font-mono text-xs font-bold">{r.fee_category}</td>
-                    <td className="font-mono font-bold">{r.fee_code}</td>
-                    <td>
+                    <td className="text-center font-mono text-xs font-bold whitespace-nowrap">{r.fee_category}</td>
+                    <td className="text-center font-mono font-bold whitespace-nowrap">{r.fee_code}</td>
+                    <td className="text-left">
                       <div className="font-bold">{r.fee_name_vie}</div>
                       <div className="text-[11px] opacity-80">{r.contract_text_eng}</div>
                     </td>
-                    <td className="text-xs">{r.scope_or_cont_type} · {r.unit_basis}</td>
-                    <td className="text-right font-mono font-extrabold">{toNum(r.standard_rate).toFixed(2)}</td>
-                    <td className="text-right space-x-1 whitespace-nowrap">
-                      <button type="button" onClick={() => setRateModal({ open: true, isEdit: true, form: { ...r } })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer">Sửa</button>
-                      <button type="button" onClick={() => onRequestConfirm('Xóa phụ phí?', `Xác nhận xóa ${r.fee_code}?`, () => onDeleteRate(r.fee_code), true)} className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer">Xóa</button>
+                    <td className="text-center text-xs">{r.scope_or_cont_type} · {r.unit_basis}</td>
+                    <td className="text-center font-mono font-extrabold whitespace-nowrap">{toNum(r.standard_rate).toFixed(2)}</td>
+                    <td className="text-center">
+                      <div className="inline-flex flex-wrap items-center justify-center gap-1">
+                        <button type="button" onClick={() => setRateModal({ open: true, isEdit: true, form: { ...r } })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer">Sửa</button>
+                        <button type="button" onClick={() => onRequestConfirm('Xóa phụ phí?', `Xác nhận xóa ${r.fee_code}?`, () => onDeleteRate(r.fee_code), true)} className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer">Xóa</button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -591,51 +612,57 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             <table className="agri-table">
               <thead>
                 <tr>
-                  <th>Template ID</th>
-                  <th>Tên chứng từ</th>
-                  <th>Phòng ban</th>
-                  <th>Storage Path (.docx)</th>
-                  <th>Biến hỗ trợ</th>
-                  <th>Trạng thái</th>
-                  <th className="text-right">Thao tác</th>
+                  <th className="text-center">Template ID</th>
+                  <th className="text-left">Tên chứng từ</th>
+                  <th className="text-center">Phòng ban</th>
+                  <th className="text-left">Storage Path (.docx)</th>
+                  <th className="text-left">Biến hỗ trợ</th>
+                  <th className="text-center">Trạng thái</th>
+                  <th className="text-center">Thao tác</th>
                 </tr>
               </thead>
               <tbody>
                 {data.templates.map((t) => (
                   <tr key={t.template_id}>
-                    <td className="font-mono font-bold">{t.template_id}</td>
-                    <td className="font-bold">{t.document_name}</td>
-                    <td>{t.target_department}</td>
-                    <td className="font-mono text-xs">{t.google_doc_file_id || '-'}</td>
-                    <td className="font-mono text-[10.5px] max-w-xs truncate" title={t.supported_placeholders}>
+                    <td className="text-center font-mono font-bold whitespace-nowrap">{t.template_id}</td>
+                    <td className="text-left font-bold">{t.document_name}</td>
+                    <td className="text-center font-bold">{t.target_department}</td>
+                    <td className="text-left font-mono text-xs">{t.google_doc_file_id || '-'}</td>
+                    <td className="text-left font-mono text-[10.5px] max-w-xs truncate" title={t.supported_placeholders}>
                       {t.supported_placeholders || '-'}
                     </td>
-                    <td>{t.status}</td>
-                    <td className="text-right space-x-1 whitespace-nowrap">
-                      {t.google_doc_file_id && (
+                    <td className="text-center">
+                      <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
+                        {t.status}
+                      </span>
+                    </td>
+                    <td className="text-center">
+                      <div className="inline-flex flex-wrap items-center justify-center gap-1">
+                        {t.google_doc_file_id && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openDocumentWithSignedUrl(t.google_doc_file_id).catch((err: any) =>
+                                onToast('error', err?.message || 'Không thể tải phôi.')
+                              )
+                            }
+                            className="keep-btn-style px-2 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <FileDown className="w-3 h-3" /> Tải
+                          </button>
+                        )}
                         <button
                           type="button"
-                          onClick={() =>
-                            openDocumentWithSignedUrl(t.google_doc_file_id).catch((err: any) =>
-                              onToast('error', err?.message || 'Không thể tải phôi.')
-                            )
-                          }
-                          className="keep-btn-style px-2 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                          onClick={() => {
+                            setTplFile(null);
+                            setTplDetectedTags([]);
+                            setTplModal({ open: true, isEdit: true, form: { ...t } });
+                          }}
+                          className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
                         >
-                          <FileDown className="w-3 h-3" /> Tải
+                          Sửa / Thay phôi
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTplFile(null);
-                          setTplDetectedTags([]);
-                          setTplModal({ open: true, isEdit: true, form: { ...t } });
-                        }}
-                        className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
-                      >
-                        Sửa / Thay phôi
-                      </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -824,27 +851,109 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
   return (
     <div className="space-y-4">
       <div className="agri-table-wrap">
-        <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex items-center justify-between">
+        <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex items-center justify-between gap-2">
           <h3 className="text-sm font-extrabold text-[#fff5d6] flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-[#f4d98a]" /> Tài khoản &amp; Phân quyền Nhân sự (sys_users)
           </h3>
-          <button type="button" onClick={() => setUsrModal({ open: true, isEdit: false, form: { employee_id: `EMP-${String(data.users.length + 1).padStart(3, '0')}`, full_name: '', department: 'SALES', role: 'Staff', email: '', status: 'Active' } })} className="agri-btn-gold text-xs">+ Thêm Nhân sự</button>
+          <button
+            type="button"
+            onClick={() =>
+              setUsrModal({
+                open: true,
+                isEdit: false,
+                initialPassword: '',
+                form: {
+                  employee_id: `EMP-${String(data.users.length + 1).padStart(3, '0')}`,
+                  full_name: '',
+                  department: 'SALES',
+                  role: 'Staff',
+                  email: '',
+                  status: 'Active',
+                },
+              })
+            }
+            className="agri-btn-gold text-xs"
+          >
+            + Thêm Nhân sự
+          </button>
         </div>
         <div className="agri-table-scroll">
           <table className="agri-table">
-            <thead><tr><th>Mã NV</th><th>Họ tên</th><th>Phòng ban</th><th>Vai trò</th><th>Email (Supabase Auth)</th><th>Trạng thái</th><th className="text-right">Thao tác</th></tr></thead>
+            <thead>
+              <tr>
+                <th className="text-center">Mã NV</th>
+                <th className="text-left">Họ tên</th>
+                <th className="text-center">Phòng ban</th>
+                <th className="text-center">Vai trò</th>
+                <th className="text-left">Email (Supabase Auth)</th>
+                <th className="text-center">Trạng thái</th>
+                <th className="text-center">Thao tác</th>
+              </tr>
+            </thead>
             <tbody>
-              {data.users.map((u) => (
-                <tr key={u.employee_id}>
-                  <td className="font-mono font-bold">{u.employee_id}</td>
-                  <td className="font-bold">{u.full_name}</td>
-                  <td className="font-bold">{u.department}</td>
-                  <td>{u.role}</td>
-                  <td className="font-mono text-xs">{u.email}</td>
-                  <td>{u.status}</td>
-                  <td className="text-right"><button type="button" onClick={() => setUsrModal({ open: true, isEdit: true, form: { ...u } })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer">Sửa</button></td>
-                </tr>
-              ))}
+              {data.users.map((u) => {
+                const stLow = String(u.status || '').trim().toLowerCase();
+                const isPending = stLow === 'pending' || stLow.includes('chờ');
+                const isInactive = stLow.includes('inactive') || stLow.includes('khóa') || stLow.includes('disabled');
+                return (
+                  <tr key={u.employee_id}>
+                    <td className="text-center font-mono font-bold whitespace-nowrap">{u.employee_id}</td>
+                    <td className="text-left font-bold">{u.full_name}</td>
+                    <td className="text-center font-bold whitespace-nowrap">{u.department}</td>
+                    <td className="text-center whitespace-nowrap">{u.role}</td>
+                    <td className="text-left font-mono text-xs">{u.email}</td>
+                    <td className="text-center whitespace-nowrap">
+                      <span
+                        className={`keep-badge-color inline-block px-2 py-0.5 rounded text-[11px] font-extrabold ${
+                          isPending
+                            ? 'bg-[#f4d98a] text-[#07281c]'
+                            : isInactive
+                            ? 'bg-[#8c3b3b] text-white'
+                            : 'bg-[#0f4a33] text-[#fff5d6]'
+                        }`}
+                      >
+                        {u.status}
+                      </span>
+                    </td>
+                    <td className="text-center">
+                      <div className="inline-flex flex-wrap items-center justify-center gap-1">
+                        {(isPending || isInactive) && (
+                          <button
+                            type="button"
+                            onClick={() => void onUpsertUser({ ...u, status: 'Active' }, true)}
+                            className="keep-btn-style px-2 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold cursor-pointer"
+                          >
+                            Duyệt
+                          </button>
+                        )}
+                        {!isInactive && !isPending && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onRequestConfirm(
+                                'Khóa tài khoản?',
+                                `Xác nhận tạm khóa quyền truy cập của ${u.full_name} (${u.email})?`,
+                                () => onUpsertUser({ ...u, status: 'Inactive' }, true),
+                                true
+                              )
+                            }
+                            className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer"
+                          >
+                            Khóa
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setUsrModal({ open: true, isEdit: true, form: { ...u }, initialPassword: '' })}
+                          className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
+                        >
+                          Sửa
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -852,25 +961,75 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
       {usrModal.open && usrModal.form && (
         <div className="fixed inset-0 z-50 bg-[#07281c]/75 flex items-center justify-center p-4">
           <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl w-full max-w-lg p-5 text-[#f4f8f5] space-y-3 text-xs">
-            <h4 className="text-base font-extrabold text-[#fff5d6]">Thông tin Nhân sự (sys_users)</h4>
-            <input disabled={usrModal.isEdit} placeholder="Mã NV" value={usrModal.form.employee_id} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, employee_id: e.target.value } })} className="agri-input font-mono" />
-            <input placeholder="Họ tên" value={usrModal.form.full_name} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, full_name: e.target.value } })} className="agri-input" />
-            <input placeholder="Email Supabase Auth" value={usrModal.form.email} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, email: e.target.value } })} className="agri-input" />
-            <div className="grid grid-cols-3 gap-2">
-              <select value={usrModal.form.department} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, department: e.target.value } })} className="agri-input">
-                <option value="SALES">SALES</option>
-                <option value="XNK">XNK</option>
-                <option value="ADMIN">ADMIN</option>
-              </select>
-              <input placeholder="Role" value={usrModal.form.role} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, role: e.target.value } })} className="agri-input" />
-              <select value={usrModal.form.status} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, status: e.target.value } })} className="agri-input">
-                <option value="Active">Active</option>
-                <option value="Inactive">Inactive</option>
-              </select>
+            <h4 className="text-base font-extrabold text-[#fff5d6]">
+              {usrModal.isEdit ? `Cập nhật Nhân sự (${usrModal.form.employee_id})` : 'Thêm Nhân sự Mới (sys_users)'}
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label className="block font-bold mb-1">Mã NV</label>
+                <input disabled={usrModal.isEdit} placeholder="Mã NV" value={usrModal.form.employee_id} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, employee_id: e.target.value } })} className="agri-input font-mono" />
+              </div>
+              <div>
+                <label className="block font-bold mb-1">Họ tên *</label>
+                <input placeholder="Họ tên" value={usrModal.form.full_name} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, full_name: e.target.value } })} className="agri-input" />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block font-bold mb-1">Email Supabase Auth *</label>
+                <input type="email" placeholder="name@greenagri-vn.com" value={usrModal.form.email} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, email: e.target.value } })} className="agri-input" />
+              </div>
+              {!usrModal.isEdit && (
+                <div className="sm:col-span-2">
+                  <label className="block font-bold mb-1">Mật khẩu khởi tạo Supabase Auth (tùy chọn, ≥ 6 ký tự)</label>
+                  <input
+                    type="password"
+                    placeholder="Bỏ trống nếu nhân sự đã có tài khoản Auth"
+                    value={usrModal.initialPassword}
+                    onChange={(e) => setUsrModal({ ...usrModal, initialPassword: e.target.value })}
+                    className="agri-input"
+                  />
+                </div>
+              )}
+              <div>
+                <label className="block font-bold mb-1">Phòng ban</label>
+                <select value={usrModal.form.department} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, department: e.target.value } })} className="agri-input">
+                  <option value="SALES">SALES</option>
+                  <option value="XNK">XNK</option>
+                  <option value="ADMIN">ADMIN</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-bold mb-1">Vai trò</label>
+                <input placeholder="Staff / Manager / Admin" value={usrModal.form.role} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, role: e.target.value } })} className="agri-input" />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block font-bold mb-1">Trạng thái</label>
+                <select value={usrModal.form.status} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, status: e.target.value } })} className="agri-input">
+                  <option value="Active">Active (Đang hoạt động)</option>
+                  <option value="PENDING">PENDING (Chờ duyệt)</option>
+                  <option value="Inactive">Inactive (Tạm khóa)</option>
+                </select>
+              </div>
             </div>
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setUsrModal({ open: false, isEdit: false, form: null })} className="px-3 py-1.5 rounded bg-[#07281c] text-white font-bold cursor-pointer">Hủy</button>
-              <button type="button" onClick={async () => { await onUpsertUser(usrModal.form!, usrModal.isEdit); setUsrModal({ open: false, isEdit: false, form: null }); }} className="agri-btn-gold">Lưu</button>
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setUsrModal({ open: false, isEdit: false, form: null, initialPassword: '' })} className="px-3 py-1.5 rounded bg-[#07281c] text-white font-bold cursor-pointer">Hủy</button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!usrModal.form!.full_name.trim() || !usrModal.form!.email.trim()) {
+                    onToast('warning', 'Vui lòng nhập đầy đủ Họ tên và Email.');
+                    return;
+                  }
+                  if (!usrModal.isEdit && usrModal.initialPassword && usrModal.initialPassword.length < 6) {
+                    onToast('warning', 'Mật khẩu khởi tạo phải có ít nhất 6 ký tự.');
+                    return;
+                  }
+                  await onUpsertUser(usrModal.form!, usrModal.isEdit, usrModal.initialPassword || undefined);
+                  setUsrModal({ open: false, isEdit: false, form: null, initialPassword: '' });
+                }}
+                className="agri-btn-gold"
+              >
+                Lưu Nhân sự
+              </button>
             </div>
           </div>
         </div>

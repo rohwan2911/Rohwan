@@ -21,12 +21,18 @@ import type {
   ProposalExtraMeta,
 } from '../types';
 import {
+  buildCombinedInsuranceClauseEng,
   cleanQuoteNoForCustomer,
   computeFloorPriceScaled,
+  computeSellingPriceScaled,
+  computeSilentFobUnitPrices,
   fmtNumber,
   fmtUSD,
+  formatCurrency,
   INCOTERMS_2020_MATRIX,
+  parseInsuranceCodeString,
   parseOrderItems,
+  stripInternalCodesForCustomer,
   toNum,
   WORKFLOW_6_STAGES,
   getOrderStage6Number,
@@ -42,6 +48,7 @@ import {
 import {
   buildTemplateFieldContext,
   extractPlaceholdersFromDocx,
+  numberToEnglishWordsUsd,
   renderDocxAndPreviewHtml,
   selectMatchingTemplates,
   TemplateFieldDescriptor,
@@ -158,7 +165,8 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       setEmailBodyHtml(buildQuotationEmailHtml(ctx.inq, ctx.cus, ctx.prop, ctx.extraMeta, ctx.sch, data.products, inc, price));
     } else if (ctx.order) {
       setEmailTo(ctx.cus?.email || ctx.inq?.email || '');
-      const label = target.kind === 'CONTRACT' ? `Sales Contract ${ctx.order.contract_no}` : `${target.kind} – ${ctx.order.contract_no}`;
+      const rawLabel = target.kind === 'CONTRACT' ? `Sales Contract ${ctx.order.contract_no}` : `${target.kind} – ${ctx.order.contract_no}`;
+      const label = stripInternalCodesForCustomer(rawLabel) || rawLabel;
       setEmailSubject(`[GREEN AGRI-EXPORTS] ${label}`);
       setEmailBodyHtml(buildExportEmailHtml(label, ctx.order, ctx.cus));
     }
@@ -171,10 +179,25 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     setRenderedDocxBytes(null);
     setTemplateBuffer(null);
 
-    const bestTpl =
-      ctx.meta?.template_id && matchingTemplates.some((t) => t.template_id === ctx.meta?.template_id)
-        ? ctx.meta.template_id
-        : matchingTemplates[0]?.template_id || '';
+    let bestTpl = '';
+    if (ctx.meta?.template_id && matchingTemplates.some((t) => t.template_id === ctx.meta?.template_id)) {
+      bestTpl = ctx.meta.template_id;
+    } else if (target.kind === 'QUOTATION' && matchingTemplates.length > 0) {
+      const wantComp =
+        String(ctx.inq?.quotation_mode || '').toUpperCase().includes('COMP') ||
+        (ctx.prop?.proposed_incoterms || '').split(',').filter(Boolean).length >= 2;
+      const compTpl = matchingTemplates.find((t) =>
+        /tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
+      );
+      const stdTpl = matchingTemplates.find(
+        (t) =>
+          !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`) &&
+          /01|standard|chuan/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
+      ) || matchingTemplates.find((t) => !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`));
+      bestTpl = (wantComp ? compTpl : stdTpl)?.template_id || matchingTemplates[0]?.template_id || '';
+    } else {
+      bestTpl = matchingTemplates[0]?.template_id || '';
+    }
     setSelectedTemplateId(bestTpl);
   }, [target?.orderId, target?.kind]);
 
@@ -330,21 +353,30 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     return m ? m[1] : (docxPreviewHtml || fallbackHtml);
   }, [customBodyHtml, docxPreviewHtml, fallbackHtml]);
 
-  // Re-render .docx live when user edits fieldValues
-  const handleFieldValueChange = async (key: string, nextVal: string) => {
-    const updated = { ...fieldValues, [key]: nextVal };
+  const applyBatchFieldsAndRerender = async (
+    patch: Record<string, string>,
+    overrideItemsRows?: Array<Record<string, string>>
+  ) => {
+    const updated = { ...fieldValues, ...patch };
+    const nextRows = overrideItemsRows || itemsRows;
     setFieldValues(updated);
-    setDescriptors((prev) => prev.map((d) => (d.key === key ? { ...d, value: nextVal } : d)));
+    if (overrideItemsRows) setItemsRows(overrideItemsRows);
+    setDescriptors((prev) => prev.map((d) => (patch[d.key] !== undefined ? { ...d, value: patch[d.key] } : d)));
     if (templateBuffer) {
       try {
-        const rendered = await renderDocxAndPreviewHtml(templateBuffer, updated, itemsRows);
+        const rendered = await renderDocxAndPreviewHtml(templateBuffer, updated, nextRows);
         setRenderedDocxBytes(rendered.docxBytes);
         setDocxPreviewHtml(rendered.previewHtml);
         setCustomBodyHtml('');
       } catch {
-        // Ignore transient render error while typing
+        // Ignore transient render error while editing
       }
     }
+  };
+
+  // Re-render .docx live when user edits fieldValues
+  const handleFieldValueChange = async (key: string, nextVal: string) => {
+    await applyBatchFieldsAndRerender({ [key]: nextVal });
   };
 
   if (!target || !ctx) return null;
@@ -356,19 +388,28 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
   const safeDocFileName = `${cleanQuoteTitle.replace(/[^a-zA-Z0-9_-]+/g, '_')}.docx`;
 
-  const handlePrint = () => {
+  const flushDirectEditHtml = (): string | null => {
     if (directEditMode && editableRef.current) {
       const edited = editableRef.current.innerHTML;
       setCustomBodyHtml(edited);
       setDirectEditMode(false);
-      window.setTimeout(() => iframeRef.current?.contentWindow?.print(), 120);
+      return edited;
+    }
+    return null;
+  };
+
+  const handlePrint = () => {
+    const flushed = flushDirectEditHtml();
+    if (flushed !== null) {
+      window.setTimeout(() => iframeRef.current?.contentWindow?.print(), 140);
       return;
     }
     iframeRef.current?.contentWindow?.print();
   };
 
   const handleDownloadDocxOrHtml = () => {
-    if (renderedDocxBytes) {
+    const flushed = flushDirectEditHtml();
+    if (renderedDocxBytes && flushed === null && !customBodyHtml) {
       const blob = new Blob([renderedDocxBytes.slice().buffer], {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
@@ -381,7 +422,8 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       onToast('success', `Đã tải xuống file Word (${safeDocFileName}).`);
       return;
     }
-    const blob = new Blob([activeDocHtml], { type: 'text/html;charset=utf-8' });
+    const htmlToDownload = flushed !== null ? wrapMammothPreviewHtml(flushed) : activeDocHtml;
+    const blob = new Blob([htmlToDownload], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -392,6 +434,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   };
 
   const handleSaveGeneratedToStorage = async (markSent = false): Promise<string | null> => {
+    flushDirectEditHtml();
     if (!renderedDocxBytes) {
       onToast('info', 'Chưa có phôi .docx được gắn cho loại chứng từ này. Bạn có thể thêm phôi .docx tại mục Quản lý Phôi mẫu.');
       return null;
@@ -400,6 +443,68 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     await saveGeneratedDocumentRecord(target.orderId, target.kind, storagePath, markSent);
     if (onDocumentSaved) await onDocumentSaved();
     return storagePath;
+  };
+
+  const buildRecalculatedFieldsForIncoterm = (nextInc: string, sellingVal: number) => {
+    const pol = ctx.order?.pol || ctx.sch?.pol || 'Cat Lai Port, Ho Chi Minh City, Vietnam';
+    const pod = ctx.order?.pod || ctx.sch?.pod || 'Destination Port';
+    const originCodes = ['EXW', 'FCA', 'FAS', 'FOB'];
+    const incUpper = nextInc.toUpperCase();
+    const incPlace = originCodes.includes(incUpper) ? pol : pod;
+    const insParsed = parseInsuranceCodeString(ctx.prop?.insurance_code || 'INS-NONE', data.pricingRates);
+    const insTerm =
+      incUpper === 'CIF' || incUpper === 'CIP'
+        ? buildCombinedInsuranceClauseEng(
+            insParsed.baseCode === 'INS-NONE' ? (incUpper === 'CIP' ? 'INS-ICC-A' : 'INS-ICC-C') : insParsed.baseCode,
+            insParsed.addonCodes,
+            incUpper,
+            data.pricingRates
+          )
+        : 'To be covered by Buyer';
+    const freightValue = toNum(ctx.prop?.total_freight_local);
+    const freightStr = originCodes.includes(incUpper)
+      ? 'Freight Collect'
+      : freightValue > 0
+      ? `Freight Prepaid (${fmtUSD(freightValue)})`
+      : 'Freight Prepaid';
+    const valFmt = formatCurrency(sellingVal);
+    const usdFmt = fmtUSD(sellingVal);
+    const words = numberToEnglishWordsUsd(sellingVal);
+    const totalNw = toNum(ctx.order?.nw_confirmed_kgs) || toNum(ctx.inq?.net_weight_kgs) || 0;
+    const avgUnit = totalNw > 0 ? (sellingVal / totalNw).toFixed(3) : fieldValues.UNIT_PRICE || '0.000';
+
+    const allocated = computeSilentFobUnitPrices(ctx.items, sellingVal, data.products, data.pricingRates);
+    const nextItemsRows = allocated.map((row, idx) => ({
+      NO: String(idx + 1),
+      SKU: row.item.sku,
+      PROD_NAME_ENG: row.item.name_eng || row.item.name,
+      PROD_NAME_VIE: row.item.name,
+      PACKING: row.item.packingName || row.item.packingCode,
+      QTY_KGS: fmtNumber(row.item.weight),
+      CARTONS: fmtNumber(row.item.cartons),
+      UNIT_PRICE: fmtUSD(row.unitPricePerKg),
+      AMOUNT: fmtUSD(row.lineTotalUsd),
+    }));
+
+    return {
+      patch: {
+        INCOTERM: incUpper,
+        APPLIED_INCOTERM: incUpper,
+        INCOTERM_PLACE: incPlace,
+        CTR_VAL: valFmt,
+        CONTRACT_VALUE: valFmt,
+        TOT_AMT: usdFmt,
+        TOTAL_AMOUNT: usdFmt,
+        TOT_AMT_WORDS: words,
+        AMOUNT_IN_WORDS: words,
+        INS_TERM: insTerm,
+        INSURANCE_TERM: insTerm,
+        FREIGHT: freightStr,
+        FREIGHT_TERM: freightStr,
+        UNIT_PRICE: avgUnit,
+      },
+      nextItemsRows,
+    };
   };
 
   return (
@@ -417,7 +522,17 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             {matchingTemplates.length > 0 && (
               <select
                 value={selectedTemplateId}
-                onChange={(e) => setSelectedTemplateId(e.target.value)}
+                onChange={(e) => {
+                  const nextId = e.target.value;
+                  setSelectedTemplateId(nextId);
+                  if (target.kind === 'QUOTATION' && nextId) {
+                    const tpl = matchingTemplates.find((t) => t.template_id === nextId);
+                    if (tpl) {
+                      const txt = `${tpl.template_id} ${tpl.document_name} ${tpl.google_doc_file_id}`;
+                      setTemplateMode(/tuvan|comp|so_sanh/i.test(txt) ? 'COMPARISON' : 'STANDARD');
+                    }
+                  }
+                }}
                 className="px-2.5 py-1.5 rounded-lg bg-[#07281c] border border-[#f4d98a]/60 text-[#fff5d6] text-xs font-bold max-w-[220px]"
               >
                 {matchingTemplates.map((t) => (
@@ -429,18 +544,38 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               </select>
             )}
 
-            {target.kind === 'QUOTATION' && !selectedTemplateId && (
+            {target.kind === 'QUOTATION' && (
               <div className="flex items-center bg-[#07281c] rounded-lg p-0.5 border border-[#186635]">
                 <button
                   type="button"
-                  onClick={() => setTemplateMode('STANDARD')}
+                  onClick={() => {
+                    setTemplateMode('STANDARD');
+                    if (matchingTemplates.length > 0 && selectedTemplateId !== '') {
+                      const stdTpl =
+                        matchingTemplates.find(
+                          (t) =>
+                            !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`) &&
+                            /01|standard|chuan/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
+                        ) ||
+                        matchingTemplates.find((t) => !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`));
+                      if (stdTpl) setSelectedTemplateId(stdTpl.template_id);
+                    }
+                  }}
                   className={`px-2.5 py-1 rounded-md text-[11px] font-bold cursor-pointer ${templateMode === 'STANDARD' ? 'bg-[#f4d98a] text-[#07281c]' : 'text-[#d2ebe0]'}`}
                 >
                   Mẫu Chuẩn
                 </button>
                 <button
                   type="button"
-                  onClick={() => setTemplateMode('COMPARISON')}
+                  onClick={() => {
+                    setTemplateMode('COMPARISON');
+                    if (matchingTemplates.length > 0 && selectedTemplateId !== '') {
+                      const compTpl = matchingTemplates.find((t) =>
+                        /tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
+                      );
+                      if (compTpl) setSelectedTemplateId(compTpl.template_id);
+                    }
+                  }}
                   className={`px-2.5 py-1 rounded-md text-[11px] font-bold cursor-pointer ${templateMode === 'COMPARISON' ? 'bg-[#f4d98a] text-[#07281c]' : 'text-[#d2ebe0]'}`}
                 >
                   Mẫu So sánh ĐK
@@ -544,11 +679,14 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                 value={adjIncoterm}
                 onChange={(e) => {
                   const nextInc = e.target.value;
+                  const nextPrice = computeSellingPriceScaled(ctx.prop, ctx.extraMeta, nextInc);
                   setAdjIncoterm(nextInc);
+                  setAdjPrice(nextPrice > 0 ? nextPrice.toFixed(2) : '');
                   if (ctx.inq && ctx.prop) {
-                    setEmailBodyHtml(buildQuotationEmailHtml(ctx.inq, ctx.cus, ctx.prop, ctx.extraMeta, ctx.sch, data.products, nextInc, numericAdjPrice));
+                    setEmailBodyHtml(buildQuotationEmailHtml(ctx.inq, ctx.cus, ctx.prop, ctx.extraMeta, ctx.sch, data.products, nextInc, nextPrice));
                   }
-                  void handleFieldValueChange('INCOTERM', nextInc);
+                  const { patch, nextItemsRows } = buildRecalculatedFieldsForIncoterm(nextInc, nextPrice);
+                  void applyBatchFieldsAndRerender(patch, nextItemsRows);
                 }}
                 className="px-2 py-1 rounded-lg bg-[#0f4a33] border border-[#f4d98a]/60 text-[#fff5d6] font-mono font-bold text-xs"
               >
@@ -565,8 +703,12 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                   onChange={(e) => {
                     setAdjPrice(e.target.value);
                     const val = toNum(e.target.value);
+                    if (ctx.inq && ctx.prop) {
+                      setEmailBodyHtml(buildQuotationEmailHtml(ctx.inq, ctx.cus, ctx.prop, ctx.extraMeta, ctx.sch, data.products, adjIncoterm, val));
+                    }
                     if (val > 0) {
-                      void handleFieldValueChange('CTR_VAL', val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+                      const { patch, nextItemsRows } = buildRecalculatedFieldsForIncoterm(adjIncoterm, val);
+                      void applyBatchFieldsAndRerender(patch, nextItemsRows);
                     }
                   }}
                   className="w-28 px-2 py-1 rounded-lg bg-[#d7eee4] text-[#07281c] font-mono font-bold text-xs"

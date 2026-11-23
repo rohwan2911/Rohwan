@@ -125,6 +125,8 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
   const [quickPhone, setQuickPhone] = useState('');
   const [quickNote, setQuickNote] = useState('');
   const [quickSaving, setQuickSaving] = useState(false);
+  const [quickFilterText, setQuickFilterText] = useState('');
+  const [quickFilterCountry, setQuickFilterCountry] = useState('');
 
   // Full RFQ Modal state
   const [rfqModalOpen, setRfqModalOpen] = useState(false);
@@ -404,7 +406,19 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
       .reverse();
   }, [data.inquiries, data.consignees, quickSearchLower]);
 
-  const quickCaptures = useMemo(() => filteredInquiries.filter((i) => isQuickCaptureStatus(i.inquiry_status)), [filteredInquiries]);
+  const quickCaptures = useMemo(() => {
+    const fLow = quickFilterText.trim().toLowerCase();
+    const cLow = quickFilterCountry.trim().toLowerCase();
+    return filteredInquiries
+      .filter((i) => isQuickCaptureStatus(i.inquiry_status))
+      .filter((i) => {
+        const cus = data.consignees.find((c) => c.consignee_id === i.consignee_id);
+        if (cLow && !(cus?.country || '').toLowerCase().includes(cLow)) return false;
+        if (!fLow) return true;
+        const hay = `${i.order_id} ${cus?.consignee_name || ''} ${cus?.country || ''} ${i.contact || cus?.contact_person || ''} ${i.email || cus?.email || ''} ${i.note || ''}`.toLowerCase();
+        return hay.includes(fLow);
+      });
+  }, [filteredInquiries, data.consignees, quickFilterText, quickFilterCountry]);
 
   const quotationRows = useMemo(() => {
     return filteredInquiries.filter((i) => !isQuickCaptureStatus(i.inquiry_status));
@@ -474,79 +488,142 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
               {quickSaving ? 'Đang lưu...' : 'Lưu Ghi nhận nhanh'}
             </button>
           </form>
-
-          {quickCaptures.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-[#186635] grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
-              {quickCaptures.map((q) => {
-                const cus = data.consignees.find((c) => c.consignee_id === q.consignee_id);
-                return (
-                  <div key={q.order_id} className="agri-card-inner p-2.5 flex items-center justify-between gap-2 text-xs">
-                    <div className="min-w-0">
-                      <div className="font-bold text-[#07281c] truncate">{cus?.consignee_name || q.consignee_id}</div>
-                      <div className="text-[11px] opacity-80 truncate">{cus?.country || '-'} · {q.note || 'Chờ tư vấn'}</div>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button type="button" onClick={() => openFullRfqModal(q)} className="px-2 py-1 rounded bg-[#0f4a33] text-[#f4d98a] font-bold text-[11px] cursor-pointer">
-                        Tạo RFQ đầy đủ
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onRequestConfirm(
-                            'Xóa ghi nhận nhanh?',
-                            `Xác nhận xóa bản ghi ${q.order_id}?`,
-                            () => onDeletePreContract(q.order_id),
-                            true
-                          )
-                        }
-                        className="p-1.5 rounded bg-[#8c3b3b] text-white cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
 
-        {/* All Inquiries Table */}
+        {/* Dedicated Quick-Log Table with Filter */}
         <div className="agri-table-wrap">
-          <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex items-center justify-between">
-            <h3 className="text-sm font-extrabold text-[#fff5d6]">Danh sách Yêu cầu Tính giá (RFQ) ({filteredInquiries.length})</h3>
+          <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-extrabold text-[#fff5d6]">
+              Bảng Khách hàng Ghi nhận nhanh ({quickCaptures.length})
+            </h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={quickFilterText}
+                onChange={(e) => setQuickFilterText(e.target.value)}
+                placeholder="Lọc tên khách, liên hệ, ghi chú..."
+                className="px-2.5 py-1 rounded-lg bg-[#07281c] border border-[#186635] text-xs text-[#fff5d6] placeholder-[#9bccb8]/70 outline-none w-52"
+              />
+              <input
+                value={quickFilterCountry}
+                onChange={(e) => setQuickFilterCountry(e.target.value)}
+                placeholder="Lọc quốc gia..."
+                className="px-2.5 py-1 rounded-lg bg-[#07281c] border border-[#186635] text-xs text-[#fff5d6] placeholder-[#9bccb8]/70 outline-none w-36"
+              />
+            </div>
           </div>
           <div className="agri-table-scroll">
             <table className="agri-table">
               <thead>
                 <tr>
-                  <th>Mã đơn</th>
-                  <th>Khách hàng</th>
-                  <th>Sản phẩm &amp; Đóng gói</th>
-                  <th className="text-right">KL Net</th>
-                  <th>Incoterm / TT</th>
-                  <th>Trạng thái</th>
-                  <th className="text-right">Thao tác</th>
+                  <th className="text-center">Mã đơn</th>
+                  <th className="text-left">Khách hàng / Quốc gia</th>
+                  <th className="text-left">Người liên hệ &amp; Email</th>
+                  <th className="text-left">Ghi chú nhu cầu</th>
+                  <th className="text-center">Trạng thái</th>
+                  <th className="text-center">Thao tác</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredInquiries.map((inq) => {
+                {quickCaptures.map((q) => {
+                  const cus = data.consignees.find((c) => c.consignee_id === q.consignee_id);
+                  return (
+                    <tr key={q.order_id}>
+                      <td className="text-center">
+                        <button type="button" onClick={() => onOpenTimeline(q.order_id)} className="font-mono font-bold hover:underline cursor-pointer">
+                          {q.order_id}
+                        </button>
+                        <div className="text-[10.5px] opacity-80">{q.timestamp?.slice(0, 10)}</div>
+                      </td>
+                      <td className="text-left">
+                        <div className="font-bold">{cus?.consignee_name || q.consignee_id}</div>
+                        <div className="text-[11px] opacity-80">{cus?.country || '-'} · Sale: {q.sale_rep}</div>
+                      </td>
+                      <td className="text-left text-xs">
+                        <div>{q.contact || cus?.contact_person || '-'}</div>
+                        <div className="text-[11px] opacity-80">{q.email || cus?.email || '-'}</div>
+                      </td>
+                      <td className="text-left text-xs">{stripItemsTag(q.note) || <span className="opacity-65 italic">Chờ tư vấn</span>}</td>
+                      <td className="text-center">
+                        <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
+                          {q.inquiry_status}
+                        </span>
+                      </td>
+                      <td className="text-center">
+                        <div className="inline-flex flex-wrap justify-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => openFullRfqModal(q)}
+                            className="keep-btn-style px-2.5 py-1 rounded bg-[#0f4a33] text-[#f4d98a] text-[11px] font-bold cursor-pointer"
+                          >
+                            Chuyển thành RFQ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onRequestConfirm(
+                                'Xóa ghi nhận nhanh?',
+                                `Xác nhận xóa bản ghi ${q.order_id}?`,
+                                () => onDeletePreContract(q.order_id),
+                                true
+                              )
+                            }
+                            className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer inline-flex items-center gap-1"
+                          >
+                            <Trash2 className="w-3 h-3" /> Xóa
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {quickCaptures.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="text-center py-6 opacity-75">
+                      Chưa có khách hàng ghi nhận nhanh nào phù hợp bộ lọc.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* All Inquiries Table (Full RFQs) */}
+        <div className="agri-table-wrap">
+          <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex items-center justify-between">
+            <h3 className="text-sm font-extrabold text-[#fff5d6]">Danh sách Yêu cầu Tính giá (RFQ) ({quotationRows.length})</h3>
+          </div>
+          <div className="agri-table-scroll">
+            <table className="agri-table">
+              <thead>
+                <tr>
+                  <th className="text-center">Mã đơn</th>
+                  <th className="text-left">Khách hàng</th>
+                  <th className="text-left">Sản phẩm &amp; Đóng gói</th>
+                  <th className="text-center">KL Net</th>
+                  <th className="text-center">Incoterm / TT</th>
+                  <th className="text-center">Trạng thái</th>
+                  <th className="text-center">Thao tác</th>
+                </tr>
+              </thead>
+              <tbody>
+                {quotationRows.map((inq) => {
                   const cus = data.consignees.find((c) => c.consignee_id === inq.consignee_id);
                   const items = parseOrderItems(inq, data.products, data.pricingRates);
                   const canDelete = !isContractCreatedStatus(inq.inquiry_status) && !data.orders.some((o) => o.order_id === inq.order_id && orderMetaMap[o.order_id]?.is_locked);
                   return (
                     <tr key={inq.order_id}>
-                      <td>
+                      <td className="text-center">
                         <button type="button" onClick={() => onOpenTimeline(inq.order_id)} className="font-mono font-bold hover:underline cursor-pointer">
                           {inq.order_id}
                         </button>
                         <div className="text-[10.5px] opacity-80">{inq.timestamp?.slice(0, 10)}</div>
                       </td>
-                      <td>
+                      <td className="text-left">
                         <div className="font-bold">{cus?.consignee_name || inq.consignee_id}</div>
                         <div className="text-[11px] opacity-80">{cus?.country || '-'} · Sale: {inq.sale_rep}</div>
                       </td>
-                      <td>
+                      <td className="text-left">
                         {items.length > 0 ? (
                           <div className="space-y-0.5">
                             {items.map((it, idx) => (
@@ -557,49 +634,58 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                             ))}
                           </div>
                         ) : (
-                          <span className="italic opacity-75">Ghi nhận nhanh</span>
+                          <span className="italic opacity-75">-</span>
                         )}
                       </td>
-                      <td className="text-right font-mono font-bold">{fmtNumber(inq.net_weight_kgs)} KG</td>
-                      <td>
+                      <td className="text-center font-mono font-bold">{fmtNumber(inq.net_weight_kgs)} KG</td>
+                      <td className="text-center">
                         <div className="font-mono font-bold">{inq.desired_incoterm}</div>
-                        <div className="text-[10.5px] opacity-80 max-w-[160px] truncate">{inq.proposed_payment_term}</div>
+                        <div className="text-[10.5px] opacity-80 max-w-[160px] mx-auto truncate">{inq.proposed_payment_term}</div>
                       </td>
-                      <td>
+                      <td className="text-center">
                         <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
                           {inq.inquiry_status}
                         </span>
                       </td>
-                      <td className="text-right whitespace-nowrap space-x-1">
-                        {canDelete && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => openFullRfqModal(inq)}
-                              className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
-                            >
-                              Sửa RFQ
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                onRequestConfirm(
-                                  'Hủy & Xóa đơn trước Hợp đồng?',
-                                  `Đơn ${inq.order_id} sẽ bị xóa khỏi inquiry_quotation, pricing_proposal (nếu có) và trừ lại số đơn của khách hàng.`,
-                                  () => onDeletePreContract(inq.order_id),
-                                  true
-                                )
-                              }
-                              className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer"
-                            >
-                              Hủy
-                            </button>
-                          </>
-                        )}
+                      <td className="text-center">
+                        <div className="inline-flex flex-wrap justify-center gap-1">
+                          {canDelete && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => openFullRfqModal(inq)}
+                                className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
+                              >
+                                Sửa RFQ
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onRequestConfirm(
+                                    'Hủy & Xóa đơn trước Hợp đồng?',
+                                    `Đơn ${inq.order_id} sẽ bị xóa khỏi inquiry_quotation, pricing_proposal (nếu có) và trừ lại số đơn của khách hàng.`,
+                                    () => onDeletePreContract(inq.order_id),
+                                    true
+                                  )
+                                }
+                                className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer"
+                              >
+                                Hủy
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
                 })}
+                {quotationRows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="text-center py-6 opacity-75">
+                      Chưa có Yêu cầu Tính giá (RFQ) nào.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -621,16 +707,31 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
               <form onSubmit={handleSubmitFullRfq} className="p-5 space-y-4 text-xs">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="block font-bold text-[#fff5d6] mb-1">Lọc theo Quốc gia</label>
-                    <SearchableCombo value={cusCountry} onChange={setCusCountry} options={countryOptions} placeholder="Chọn Quốc gia" />
+                    <label className="block font-bold text-[#fff5d6] mb-1">Quốc gia (Chọn hoặc nhập mới)</label>
+                    <SearchableCombo value={cusCountry} onChange={setCusCountry} options={countryOptions} placeholder="Chọn hoặc nhập Quốc gia" />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className="block font-bold text-[#fff5d6] mb-1">Chọn Khách hàng có sẵn</label>
-                    <SearchableCombo value={selectedConsigneeId} onChange={handleSelectConsignee} options={consigneeOptions} placeholder="Tìm khách hàng..." allowCustom={false} />
+                    <label className="block font-bold text-[#fff5d6] mb-1">Chọn Khách hàng có sẵn (tùy chọn)</label>
+                    <SearchableCombo value={selectedConsigneeId} onChange={handleSelectConsignee} options={consigneeOptions} placeholder="Tìm khách hàng cũ hoặc nhập mới bên dưới..." allowCustom={false} />
                   </div>
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Tên Khách hàng / Công ty *</label>
-                    <input value={cusName} onChange={(e) => setCusName(e.target.value)} className="agri-input" required />
+                    <input
+                      value={cusName}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setCusName(val);
+                        if (selectedConsigneeId) {
+                          const matched = data.consignees.find((c) => c.consignee_id === selectedConsigneeId);
+                          if (!matched || matched.consignee_name.trim().toLowerCase() !== val.trim().toLowerCase()) {
+                            setSelectedConsigneeId('');
+                          }
+                        }
+                      }}
+                      placeholder="Nhập tên khách hàng hoặc công ty mới..."
+                      className="agri-input"
+                      required
+                    />
                   </div>
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Người liên hệ</label>
@@ -803,13 +904,13 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
             <table className="agri-table">
               <thead>
                 <tr>
-                  <th>Số Báo giá / Mã đơn</th>
-                  <th>Khách hàng</th>
-                  <th>Sản phẩm · KL</th>
-                  <th>Incoterm</th>
-                  <th className="text-right">Giá chào (USD)</th>
-                  <th>Trạng thái</th>
-                  <th className="text-right">Thao tác</th>
+                  <th className="text-center">Số Báo giá / Mã đơn</th>
+                  <th className="text-left">Khách hàng</th>
+                  <th className="text-left">Sản phẩm · KL</th>
+                  <th className="text-center">Incoterm</th>
+                  <th className="text-center">Giá chào (USD)</th>
+                  <th className="text-center">Trạng thái</th>
+                  <th className="text-center">Thao tác</th>
                 </tr>
               </thead>
               <tbody>
@@ -820,80 +921,99 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   const cleanRef = cleanQuoteNoForCustomer(extra?.quotation_no || '', inq.order_id);
                   const readyOrSent = isPricedReadyStatus(inq.inquiry_status) || isSentWaitingCustomerStatus(inq.inquiry_status);
                   const canConfirm = readyOrSent && Boolean(prop);
+                  const canDelete = !isContractCreatedStatus(inq.inquiry_status) && !data.orders.some((o) => o.order_id === inq.order_id && orderMetaMap[o.order_id]?.is_locked);
                   return (
                     <tr key={inq.order_id}>
-                      <td>
+                      <td className="text-center">
                         <div className="font-mono font-bold">{cleanRef}</div>
                         <button type="button" onClick={() => onOpenTimeline(inq.order_id)} className="text-[11px] font-mono hover:underline cursor-pointer">
                           {inq.order_id}
                         </button>
                       </td>
-                      <td>
+                      <td className="text-left">
                         <div className="font-bold">{cus?.consignee_name || inq.consignee_id}</div>
                         <div className="text-[11px] opacity-80">{cus?.country || '-'} · {inq.email || cus?.email || '-'}</div>
                       </td>
-                      <td className="text-xs">
+                      <td className="text-left text-xs">
                         {inq.product_name_vie || inq.sku_code} · <span className="font-mono font-bold">{fmtNumber(inq.net_weight_kgs)} KG</span>
                       </td>
-                      <td className="font-mono font-bold">{prop?.recommended_incoterm || inq.desired_incoterm}</td>
-                      <td className="text-right font-mono font-extrabold">
+                      <td className="text-center font-mono font-bold">{prop?.recommended_incoterm || inq.desired_incoterm}</td>
+                      <td className="text-center font-mono font-extrabold">
                         {prop ? fmtUSD(prop.final_selling_price) : <span className="opacity-65 italic">Chờ XNK</span>}
                       </td>
-                      <td>
+                      <td className="text-center">
                         <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
                           {inq.inquiry_status}
                         </span>
                       </td>
-                      <td className="text-right whitespace-nowrap space-x-1">
-                        {prop && (
-                          <button
-                            type="button"
-                            onClick={() => onOpenPreview({ kind: 'QUOTATION', orderId: inq.order_id })}
-                            className="keep-btn-style px-2.5 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold cursor-pointer"
-                          >
-                            Xem &amp; Gửi Báo giá
-                          </button>
-                        )}
-                        {isStoredDocumentPath(inq.sent_mail_link) && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              openDocumentWithSignedUrl(inq.sent_mail_link).catch((err: any) =>
-                                onToast('error', err?.message || 'Không thể tải báo giá.')
-                              )
-                            }
-                            className="keep-btn-style px-2 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <ExternalLink className="w-3 h-3" /> Tải .docx
-                          </button>
-                        )}
-                        {canConfirm && (
-                          <>
+                      <td className="text-center">
+                        <div className="inline-flex flex-wrap justify-center gap-1">
+                          {prop && (
                             <button
                               type="button"
-                              onClick={() => {
-                                setRepriceOrderId(inq.order_id);
-                                setRepriceReason('');
-                              }}
-                              className="keep-btn-style px-2 py-1 rounded bg-[#07281c] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
+                              onClick={() => onOpenPreview({ kind: 'QUOTATION', orderId: inq.order_id })}
+                              className="keep-btn-style px-2.5 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold cursor-pointer"
                             >
-                              Tính lại
+                              Xem &amp; Gửi Báo giá
                             </button>
+                          )}
+                          {isStoredDocumentPath(inq.sent_mail_link) && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openDocumentWithSignedUrl(inq.sent_mail_link).catch((err: any) =>
+                                  onToast('error', err?.message || 'Không thể tải báo giá.')
+                                )
+                              }
+                              className="keep-btn-style px-2 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <ExternalLink className="w-3 h-3" /> Tải .docx
+                            </button>
+                          )}
+                          {canConfirm && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRepriceOrderId(inq.order_id);
+                                  setRepriceReason('');
+                                }}
+                                className="keep-btn-style px-2 py-1 rounded bg-[#07281c] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
+                              >
+                                Tính lại
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onRequestConfirm(
+                                    'Chốt đơn hàng?',
+                                    `Xác nhận khách hàng đã đồng ý báo giá ${cleanRef} và chuyển sang Phòng XNK khởi tạo Hợp đồng Ngoại thương?`,
+                                    () => onConfirmOrder(inq.order_id)
+                                  )
+                                }
+                                className="keep-btn-style px-2.5 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold cursor-pointer"
+                              >
+                                Khách Chốt đơn
+                              </button>
+                            </>
+                          )}
+                          {canDelete && (
                             <button
                               type="button"
                               onClick={() =>
                                 onRequestConfirm(
-                                  'Chốt đơn hàng?',
-                                  `Xác nhận khách hàng đã đồng ý báo giá ${cleanRef} và chuyển sang Phòng XNK khởi tạo Hợp đồng Ngoại thương?`,
-                                  () => onConfirmOrder(inq.order_id)
+                                  'Hủy & Xóa đơn trước Hợp đồng?',
+                                  `Đơn ${inq.order_id} sẽ bị xóa khỏi inquiry_quotation, pricing_proposal (nếu có) và trừ lại số đơn của khách hàng.`,
+                                  () => onDeletePreContract(inq.order_id),
+                                  true
                                 )
                               }
-                              className="keep-btn-style px-2.5 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold cursor-pointer"
+                              className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer"
                             >
-                              Khách Chốt đơn
+                              Hủy đơn
                             </button>
-                          </>
-                        )}
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -966,13 +1086,13 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
             <table className="agri-table">
               <thead>
                 <tr>
-                  <th>Số Hợp đồng / Đơn</th>
-                  <th>Khách hàng</th>
-                  <th>Sản phẩm · KL</th>
-                  <th>Incoterm / TT</th>
-                  <th className="text-right">Giá trị (USD)</th>
-                  <th>Trạng thái</th>
-                  <th className="text-right">Hồ sơ &amp; Xác nhận</th>
+                  <th className="text-center">Số Hợp đồng / Đơn</th>
+                  <th className="text-left">Khách hàng</th>
+                  <th className="text-left">Sản phẩm · KL</th>
+                  <th className="text-center">Incoterm / TT</th>
+                  <th className="text-center">Giá trị (USD)</th>
+                  <th className="text-center">Trạng thái</th>
+                  <th className="text-center">Hồ sơ &amp; Xác nhận</th>
                 </tr>
               </thead>
               <tbody>
@@ -982,36 +1102,36 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   const isLocked = Boolean(meta?.is_locked);
                   return (
                     <tr key={ord.order_id}>
-                      <td>
+                      <td className="text-center">
                         <div className="font-mono font-bold">{ord.contract_no}</div>
                         <button type="button" onClick={() => onOpenTimeline(ord.order_id)} className="text-[11px] font-mono hover:underline cursor-pointer">
                           {ord.order_id}
                         </button>
                       </td>
-                      <td>
+                      <td className="text-left">
                         <div className="font-bold">{cus?.consignee_name || ord.consignee_id}</div>
                         <div className="text-[11px] opacity-80">{ord.pol} → {ord.pod}</div>
                       </td>
-                      <td>
+                      <td className="text-left">
                         <div className="font-mono font-bold">{ord.sku_code}</div>
                         <div className="text-[11px] font-mono">{fmtNumber(ord.nw_confirmed_kgs)} KG</div>
                       </td>
-                      <td>
+                      <td className="text-center">
                         <div className="font-mono font-bold">{ord.applied_incoterm}</div>
                         <div className="text-[11px]">{ord.payment_terms}</div>
                       </td>
-                      <td className="text-right font-mono font-extrabold">{fmtUSD(ord.contract_value)}</td>
-                      <td>
+                      <td className="text-center font-mono font-extrabold">{fmtUSD(ord.contract_value)}</td>
+                      <td className="text-center">
                         <span className={`keep-badge-color inline-block px-2 py-0.5 rounded text-[11px] font-bold ${isLocked ? 'bg-[#0f4a33] text-[#fff5d6]' : 'bg-[#f4d98a] text-[#07281c]'}`}>
                           {isLocked ? `Đã ký (${meta?.signed_date || 'OK'})` : 'Chờ Sales đưa ký'}
                         </span>
                       </td>
-                      <td className="text-right">
-                        <div className="inline-flex flex-col items-end gap-1.5">
+                      <td className="text-center">
+                        <div className="inline-flex flex-wrap items-center justify-center gap-1">
                           <button
                             type="button"
                             onClick={() => onOpenPreview({ kind: 'CONTRACT', orderId: ord.order_id })}
-                            className="keep-btn-style px-2.5 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                            className="keep-btn-style px-2.5 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
                           >
                             <Eye className="w-3.5 h-3.5" /> Xem hợp đồng
                           </button>
@@ -1046,7 +1166,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                                   () => onConfirmSignedContract(ord.order_id)
                                 )
                               }
-                              className="keep-btn-style px-2.5 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold flex items-center gap-1 cursor-pointer"
+                              className="keep-btn-style px-2.5 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer"
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" /> Xác nhận Khách đã ký HĐ
                             </button>
@@ -1115,62 +1235,64 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
           <table className="agri-table">
             <thead>
               <tr>
-                <th>Mã KH</th>
-                <th>Tên Khách hàng / Công ty</th>
-                <th>Quốc gia</th>
-                <th>Liên hệ / Email / SĐT</th>
-                <th>Tax ID</th>
-                <th className="text-right">Số đơn</th>
-                <th>Phân loại</th>
-                <th className="text-right">Thao tác</th>
+                <th className="text-center">Mã KH</th>
+                <th className="text-left">Tên Khách hàng / Công ty</th>
+                <th className="text-center">Quốc gia</th>
+                <th className="text-left">Liên hệ / Email / SĐT</th>
+                <th className="text-center">Tax ID</th>
+                <th className="text-center">Số đơn</th>
+                <th className="text-center">Phân loại</th>
+                <th className="text-center">Thao tác</th>
               </tr>
             </thead>
             <tbody>
               {filteredCustomers.map((c) => (
                 <tr key={c.consignee_id}>
-                  <td className="font-mono font-bold">{c.consignee_id}</td>
-                  <td>
+                  <td className="text-center font-mono font-bold">{c.consignee_id}</td>
+                  <td className="text-left">
                     <div className="font-bold">{c.consignee_name}</div>
                     <div className="text-[11px] opacity-80">{c.address}</div>
                   </td>
-                  <td className="font-semibold">{c.country}</td>
-                  <td className="text-xs">
+                  <td className="text-center font-semibold">{c.country}</td>
+                  <td className="text-left text-xs">
                     <div>{c.contact_person} · {c.email}</div>
                     <div className="font-mono text-[11px]">Tel: {normalizePlainText(c.phone)} {c.fax ? `· Fax: ${normalizePlainText(c.fax)}` : ''}</div>
                   </td>
-                  <td className="font-mono text-xs">{normalizePlainText(c.tax) || '-'}</td>
-                  <td className="text-right font-mono font-extrabold">{toNum(c.order_count)}</td>
-                  <td>
+                  <td className="text-center font-mono text-xs">{normalizePlainText(c.tax) || '-'}</td>
+                  <td className="text-center font-mono font-extrabold">{toNum(c.order_count)}</td>
+                  <td className="text-center">
                     <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
                       {c.customer_type || classifyCustomerByCount(c.order_count)}
                     </span>
                   </td>
-                  <td className="text-right whitespace-nowrap space-x-1">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCusForm({ ...c });
-                        setCusIsEdit(true);
-                        setCusModalOpen(true);
-                      }}
-                      className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
-                    >
-                      <Edit3 className="w-3 h-3 inline mr-0.5" /> Sửa
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onRequestConfirm(
-                          'Xóa khách hàng?',
-                          `Xác nhận xóa khách hàng ${c.consignee_name}?`,
-                          () => onDeleteConsignee(c.consignee_id),
-                          true
-                        )
-                      }
-                      className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer"
-                    >
-                      Xóa
-                    </button>
+                  <td className="text-center">
+                    <div className="inline-flex flex-wrap justify-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCusForm({ ...c });
+                          setCusIsEdit(true);
+                          setCusModalOpen(true);
+                        }}
+                        className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
+                      >
+                        <Edit3 className="w-3 h-3 inline mr-0.5" /> Sửa
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onRequestConfirm(
+                            'Xóa khách hàng?',
+                            `Xác nhận xóa khách hàng ${c.consignee_name}?`,
+                            () => onDeleteConsignee(c.consignee_id),
+                            true
+                          )
+                        }
+                        className="keep-btn-style px-2 py-1 rounded bg-[#8c3b3b] text-white text-[11px] font-bold cursor-pointer"
+                      >
+                        Xóa
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

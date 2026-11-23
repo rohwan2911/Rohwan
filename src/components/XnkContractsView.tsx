@@ -87,12 +87,12 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
             <table className="agri-table">
               <thead>
                 <tr>
-                  <th>Hợp đồng / Đơn</th>
-                  <th>Khách hàng</th>
-                  <th>Tuyến &amp; Tàu / Booking</th>
-                  <th>Mốc 6 Cut-off đã nhập</th>
-                  <th>C/O Form</th>
-                  <th className="text-right">Xuất Chứng từ Chuẩn Quốc Tế</th>
+                  <th className="text-center">Hợp đồng / Đơn</th>
+                  <th className="text-left">Khách hàng</th>
+                  <th className="text-left">Tuyến &amp; Tàu / Booking</th>
+                  <th className="text-left">Mốc 6 Cut-off đã nhập</th>
+                  <th className="text-center">C/O Form</th>
+                  <th className="text-center">Xuất Chứng từ Chuẩn Quốc Tế</th>
                 </tr>
               </thead>
               <tbody>
@@ -110,26 +110,26 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                   ].filter(Boolean);
                   return (
                     <tr key={ord.order_id} className={isHighlighted ? '!bg-[#f4d98a]/40 ring-2 ring-inset ring-[#186635]' : ''}>
-                      <td>
+                      <td className="text-center">
                         <div className="font-mono font-bold">{ord.contract_no}</div>
                         <button type="button" onClick={() => onOpenTimeline(ord.order_id)} className="font-mono text-[11px] hover:underline cursor-pointer">
                           {ord.order_id}
                         </button>
                       </td>
-                      <td>
+                      <td className="text-left">
                         <div className="font-bold">{cus?.consignee_name || ord.consignee_id}</div>
                         <div className="text-[11px] opacity-80">{ord.applied_incoterm} · {fmtUSD(ord.contract_value)}</div>
                       </td>
-                      <td className="text-xs">
+                      <td className="text-left text-xs">
                         <div>{ord.pol} → {ord.pod}</div>
                         <div className="font-mono text-[11px]">BK: {meta?.bk_no || '-'} · {meta?.ves_voy || '-'}</div>
                       </td>
-                      <td className="text-[11px] font-mono">
+                      <td className="text-left text-[11px] font-mono">
                         {cutoffs.length > 0 ? cutoffs.join(' · ') : <span className="opacity-65 italic">Chưa nhập Cut-off</span>}
                       </td>
-                      <td className="font-mono font-bold">{ord.co_form || suggestCoFormCode(ord.pod, cus?.country)}</td>
-                      <td className="text-right whitespace-nowrap space-y-1">
-                        <div className="space-x-1">
+                      <td className="text-center font-mono font-bold">{ord.co_form || suggestCoFormCode(ord.pod, cus?.country)}</td>
+                      <td className="text-center space-y-1">
+                        <div className="inline-flex flex-wrap justify-center gap-1">
                           <button type="button" onClick={() => onOpenPreview({ kind: 'INVOICE', orderId: ord.order_id })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer">Invoice</button>
                           <button type="button" onClick={() => onOpenPreview({ kind: 'PACKING_LIST', orderId: ord.order_id })} className="keep-btn-style px-2 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold cursor-pointer">Packing List</button>
                           <button type="button" onClick={() => onOpenPreview({ kind: 'CO', orderId: ord.order_id })} className="keep-btn-style px-2 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold cursor-pointer">C/O</button>
@@ -140,7 +140,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                           isStoredDocumentPath(meta?.packing_list_link) ||
                           isStoredDocumentPath(meta?.co_link) ||
                           isStoredDocumentPath(meta?.bl_link)) && (
-                          <div className="flex justify-end flex-wrap gap-1">
+                          <div className="flex justify-center flex-wrap gap-1">
                             {meta?.invoice_link && (
                               <button type="button" onClick={() => openDocumentWithSignedUrl(meta.invoice_link!).catch((e: any) => onToast('error', e?.message || 'Lỗi tải file'))} className="keep-btn-style px-1.5 py-0.5 rounded bg-[#d7eee4] text-[#07281c] text-[10px] font-bold inline-flex items-center gap-0.5 cursor-pointer">
                                 <FileDown className="w-2.5 h-2.5" /> CI.docx
@@ -241,14 +241,14 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
           <table className="agri-table">
             <thead>
               <tr>
-                <th>Đơn / Số Hợp đồng</th>
-                <th>Khách hàng</th>
-                <th>Sản phẩm · KL</th>
-                <th>Incoterm / TT</th>
-                <th>POL → POD / Booking</th>
-                <th className="text-right">Giá trị HĐ</th>
-                <th>Trạng thái 6 Mốc</th>
-                <th className="text-right">Thao tác</th>
+                <th className="text-center">Đơn / Số Hợp đồng</th>
+                <th className="text-left">Khách hàng</th>
+                <th className="text-left">Sản phẩm · KL</th>
+                <th className="text-center">Incoterm / TT</th>
+                <th className="text-left">POL → POD / Booking</th>
+                <th className="text-center">Giá trị HĐ</th>
+                <th className="text-center">Trạng thái 6 Mốc</th>
+                <th className="text-center">Thao tác</th>
               </tr>
             </thead>
             <tbody>
@@ -261,7 +261,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                 const statusTxt = getEffectiveFulfillmentStatus(ord, meta);
                 return (
                   <tr key={ord.order_id}>
-                    <td>
+                    <td className="text-center">
                       <button type="button" onClick={() => onOpenTimeline(ord.order_id)} className="font-mono font-bold hover:underline cursor-pointer">
                         {ord.order_id}
                       </button>
@@ -271,31 +271,31 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                         {isLocked ? `Đã ký (${meta?.signed_date || 'OK'})` : meta?.sent_to_sales ? 'Đã gửi Sales ký' : 'Bản nháp XNK'}
                       </span>
                     </td>
-                    <td>
+                    <td className="text-left">
                       <div className="font-bold">{cus?.consignee_name || ord.consignee_id}</div>
                       <div className="text-[11px] opacity-80">NV: {ord.in_charge_staff}</div>
                     </td>
-                    <td>
+                    <td className="text-left">
                       <div className="font-mono font-bold">{ord.sku_code}</div>
                       <div className="font-mono text-[11px]">{fmtNumber(ord.nw_confirmed_kgs)} KG</div>
                     </td>
-                    <td>
+                    <td className="text-center">
                       <div className="font-mono font-bold">{ord.applied_incoterm}</div>
                       <div className="text-[11px]">{ord.payment_terms}</div>
                     </td>
-                    <td className="text-xs">
+                    <td className="text-left text-xs">
                       <div className="font-semibold">{ord.pol} → {ord.pod}</div>
                       {meta?.bk_no && <div className="font-mono text-[11px]">BK: {meta.bk_no}</div>}
                     </td>
-                    <td className="text-right font-mono font-extrabold">{fmtUSD(ord.contract_value)}</td>
-                    <td>
+                    <td className="text-center font-mono font-extrabold">{fmtUSD(ord.contract_value)}</td>
+                    <td className="text-center">
                       <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
                         {stageNum >= 7 ? COMPLETED_ORDER_STATUS : statusTxt}
                       </span>
                     </td>
-                    <td className="text-right space-y-1">
-                      <div className="flex justify-end gap-1 flex-wrap">
-                        <button type="button" onClick={() => onOpenPreview({ kind: 'CONTRACT', orderId: ord.order_id })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold flex items-center gap-1 cursor-pointer">
+                    <td className="text-center space-y-1">
+                      <div className="inline-flex justify-center gap-1 flex-wrap">
+                        <button type="button" onClick={() => onOpenPreview({ kind: 'CONTRACT', orderId: ord.order_id })} className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer">
                           <Eye className="w-3 h-3" /> Xem HĐ
                         </button>
                         {ord.contract_link && (
@@ -306,16 +306,16 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                                 onToast('error', err?.message || 'Không thể tải file Hợp đồng.')
                               )
                             }
-                            className="keep-btn-style px-2 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold flex items-center gap-1 cursor-pointer"
+                            className="keep-btn-style px-2 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer"
                           >
                             <FileDown className="w-3 h-3" /> Tải HĐ
                           </button>
                         )}
-                        <button type="button" onClick={() => openEditContractModal(ord)} className="keep-btn-style px-2 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold flex items-center gap-1 cursor-pointer">
+                        <button type="button" onClick={() => openEditContractModal(ord)} className="keep-btn-style px-2 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer">
                           <Edit3 className="w-3 h-3" /> Sửa / Booking
                         </button>
                       </div>
-                      <div className="flex justify-end gap-1">
+                      <div className="flex justify-center flex-wrap gap-1">
                         {!isLocked && (
                           <button
                             type="button"
@@ -326,7 +326,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                                 () => onSendContractToSales(ord)
                               )
                             }
-                            className="keep-btn-style px-2.5 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold flex items-center gap-1 cursor-pointer"
+                            className="keep-btn-style px-2.5 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer"
                           >
                             <Send className="w-3 h-3" /> Gửi Sales đưa ký
                           </button>
@@ -335,7 +335,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                           <button
                             type="button"
                             onClick={() => onAdvanceMilestone(ord, nextM.nextStatus)}
-                            className="keep-btn-style px-2.5 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                            className="keep-btn-style px-2.5 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
                           >
                             <ArrowRightCircle className="w-3 h-3" /> {nextM.label}
                           </button>

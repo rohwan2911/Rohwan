@@ -58,14 +58,35 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const waiting = data.inquiries.filter((i) => isWaitingPricingStatus(i.inquiry_status));
     const priced = data.inquiries.filter((i) => isPricedReadyStatus(i.inquiry_status));
     const sent = data.inquiries.filter((i) => isSentWaitingCustomerStatus(i.inquiry_status));
-    const confirmed = data.inquiries.filter((i) => isConfirmedStatus(i.inquiry_status));
+
+    const signedOrderIds = new Set(
+      data.orders
+        .filter((ord) => {
+          const meta = orderMetaMap[ord.order_id];
+          return Boolean(meta?.is_locked) || getOrderStage6Number(ord, meta) >= 3;
+        })
+        .map((o) => o.order_id)
+    );
+    const confirmedIds = new Set<string>();
+    data.inquiries.forEach((i) => {
+      if (isConfirmedStatus(i.inquiry_status) && !signedOrderIds.has(i.order_id)) {
+        confirmedIds.add(i.order_id);
+      }
+    });
+    data.orders.forEach((ord) => {
+      if (!signedOrderIds.has(ord.order_id)) {
+        confirmedIds.add(ord.order_id);
+      }
+    });
+    const confirmed = Array.from(confirmedIds);
+
     const now = Date.now();
     const overdueFollowUps = sent.filter((i) => {
       const ts = i.timestamp ? new Date(i.timestamp.replace(' ', 'T')).getTime() : NaN;
       return !Number.isNaN(ts) && now - ts > 72 * 3600000;
     });
     return { waiting, priced, sent, confirmed, overdueFollowUps };
-  }, [data.inquiries]);
+  }, [data.inquiries, data.orders, orderMetaMap]);
 
   const xnkMilestones = useMemo(() => {
     const buckets: Record<number, Array<{ id: string; label: string; sub: string }>> = {
@@ -292,12 +313,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <table className="agri-table">
                 <thead>
                   <tr>
-                    <th>Mã đơn</th>
-                    <th>Khách hàng</th>
-                    <th>Sản phẩm</th>
-                    <th className="text-right">KL (KG)</th>
-                    <th>Incoterm</th>
-                    <th>Trạng thái</th>
+                    <th className="text-center">Mã đơn</th>
+                    <th className="text-left">Khách hàng</th>
+                    <th className="text-left">Sản phẩm</th>
+                    <th className="text-center">KL (KG)</th>
+                    <th className="text-center">Incoterm</th>
+                    <th className="text-center">Trạng thái</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -305,12 +326,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     const cus = data.consignees.find((c) => c.consignee_id === inq.consignee_id);
                     return (
                       <tr key={inq.order_id} onClick={() => onOpenTimeline(inq.order_id)} className="cursor-pointer">
-                        <td className="font-mono font-bold">{inq.order_id}</td>
-                        <td className="font-semibold">{cus?.consignee_name || inq.consignee_id}</td>
-                        <td>{inq.product_name_vie || inq.sku_code}</td>
-                        <td className="text-right font-mono font-bold">{fmtNumber(inq.net_weight_kgs)}</td>
-                        <td className="font-mono font-bold">{inq.desired_incoterm}</td>
-                        <td className="font-semibold">{inq.inquiry_status}</td>
+                        <td className="text-center font-mono font-bold whitespace-nowrap">{inq.order_id}</td>
+                        <td className="text-left font-semibold">{cus?.consignee_name || inq.consignee_id}</td>
+                        <td className="text-left">{inq.product_name_vie || inq.sku_code}</td>
+                        <td className="text-center font-mono font-bold whitespace-nowrap">{fmtNumber(inq.net_weight_kgs)}</td>
+                        <td className="text-center font-mono font-bold whitespace-nowrap">{inq.desired_incoterm}</td>
+                        <td className="text-center font-semibold">
+                          <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
+                            {inq.inquiry_status}
+                          </span>
+                        </td>
                       </tr>
                     );
                   })}
@@ -378,11 +403,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <table className="agri-table">
                   <thead>
                     <tr>
-                      <th>Hợp đồng / Đơn</th>
-                      <th>Khách hàng</th>
-                      <th>Loại Cut-off</th>
-                      <th>Thời hạn</th>
-                      <th className="text-right">Đếm ngược</th>
+                      <th className="text-center">Hợp đồng / Đơn</th>
+                      <th className="text-left">Khách hàng</th>
+                      <th className="text-center">Loại Cut-off</th>
+                      <th className="text-center">Thời hạn</th>
+                      <th className="text-center">Đếm ngược</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -393,14 +418,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         className="cursor-pointer"
                         title="Bấm để mở Bộ chứng từ của đơn này"
                       >
-                        <td>
+                        <td className="text-center whitespace-nowrap">
                           <div className="font-mono font-bold">{row.contractNo}</div>
                           <div className="text-[10.5px] font-mono opacity-80">{row.orderId}</div>
                         </td>
-                        <td className="font-semibold">{row.customerName}</td>
-                        <td className="font-bold">{row.cutoffType}</td>
-                        <td className="font-mono text-xs">{row.cutoffDate}</td>
-                        <td className="text-right">
+                        <td className="text-left font-semibold">{row.customerName}</td>
+                        <td className="text-center font-bold whitespace-nowrap">{row.cutoffType}</td>
+                        <td className="text-center font-mono text-xs whitespace-nowrap">{row.cutoffDate}</td>
+                        <td className="text-center whitespace-nowrap">
                           <span
                             className={`keep-badge-color inline-block px-2 py-0.5 rounded text-[11px] font-extrabold ${
                               row.countdown.tone === 'danger'
@@ -612,13 +637,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <table className="agri-table">
                 <thead>
                   <tr>
-                    <th>Mã Lịch</th>
-                    <th>Hãng tàu</th>
-                    <th>Tuyến (POL → POD)</th>
-                    <th>ETD / ETA</th>
-                    <th className="text-right">Transit / Ngưỡng</th>
-                    <th>Hết hạn cước</th>
-                    <th className="text-right">Cảnh báo</th>
+                    <th className="text-center">Mã Lịch</th>
+                    <th className="text-left">Hãng tàu</th>
+                    <th className="text-left">Tuyến (POL → POD)</th>
+                    <th className="text-center">ETD / ETA</th>
+                    <th className="text-center">Transit / Ngưỡng</th>
+                    <th className="text-center">Hết hạn cước</th>
+                    <th className="text-center">Cảnh báo</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -628,9 +653,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       onClick={() => onNavigate('xnk-shipping', sch.schedule_id)}
                       className="cursor-pointer"
                     >
-                      <td className="font-mono font-bold underline">{sch.schedule_id}</td>
-                      <td className="font-semibold">{sch.shipping_line}</td>
-                      <td>
+                      <td className="text-center font-mono font-bold underline whitespace-nowrap">{sch.schedule_id}</td>
+                      <td className="text-left font-semibold">{sch.shipping_line}</td>
+                      <td className="text-left">
                         <div className="font-semibold">{sch.pol} → {sch.pod}</div>
                         {sch.pot && sch.pot !== '-' && (
                           <div className="text-[10.5px] opacity-80 flex items-center gap-1">
@@ -638,10 +663,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           </div>
                         )}
                       </td>
-                      <td className="font-mono text-xs">{sch.etd} / {sch.eta}</td>
-                      <td className="text-right font-mono">{status.transitDays}d / ≤{status.threshold}d</td>
-                      <td className="font-mono">{sch.expiry_date || '-'}</td>
-                      <td className="text-right">
+                      <td className="text-center font-mono text-xs whitespace-nowrap">{sch.etd} / {sch.eta}</td>
+                      <td className="text-center font-mono whitespace-nowrap">{status.transitDays}d / ≤{status.threshold}d</td>
+                      <td className="text-center font-mono whitespace-nowrap">{sch.expiry_date || '-'}</td>
+                      <td className="text-center whitespace-nowrap">
                         <span
                           className={`keep-badge-color inline-block px-2 py-0.5 rounded text-[11px] font-extrabold ${
                             status.state === 'EXPIRED'

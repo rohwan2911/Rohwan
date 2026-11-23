@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { restoreSupabaseUserSession, signOutSupabase } from './lib/supabase';
+import { adminProvisionAuthCredential, restoreSupabaseUserSession, signOutSupabase } from './lib/supabase';
 import {
   advanceContractMilestone,
   confirmBuyerSignedContract,
@@ -30,13 +30,14 @@ import type {
   AppDataState,
   OrderLogisticsMeta,
   ProposalExtraMeta,
+  RoleType,
   SysUser,
   ToastMessage,
   ViewId,
 } from './types';
 import { normalizeRole, WORKFLOW_STATUS } from './utils/calculations';
 import { LoginScreen } from './components/LoginScreen';
-import { Sidebar, TopHeader } from './components/SidebarHeader';
+import { NAV_GROUPS, Sidebar, TopHeader } from './components/SidebarHeader';
 import { DashboardView } from './components/DashboardView';
 import { SalesCrmView } from './components/SalesCrmView';
 import { XnkCostingView } from './components/XnkCostingView';
@@ -137,11 +138,27 @@ export const App: React.FC = () => {
     };
   }, [syncData]);
 
-  const role = useMemo(() => normalizeRole(currentUser?.department), [currentUser]);
+  const role = useMemo(() => normalizeRole(currentUser?.role, currentUser?.department), [currentUser]);
+
+  const canAccessView = useCallback((r: RoleType, view: ViewId): boolean => {
+    if (r === 'ADMIN') return true;
+    const item = NAV_GROUPS.flatMap((g) => g.items).find((it) => it.id === view);
+    return item ? item.roles.includes(r) : view === 'dashboard';
+  }, []);
+
+  useEffect(() => {
+    if (currentUser && !canAccessView(role, activeView)) {
+      setActiveView('dashboard');
+    }
+  }, [currentUser, role, activeView, canAccessView]);
 
   // Silent auto-reload ONLY when navigating back to Dashboard from another screen
   const handleNavigate = useCallback(
     (nextView: ViewId, highlightId?: string) => {
+      if (!canAccessView(role, nextView)) {
+        setActiveView('dashboard');
+        return;
+      }
       const prev = prevViewRef.current;
       prevViewRef.current = activeView;
       setActiveView(nextView);
@@ -150,7 +167,7 @@ export const App: React.FC = () => {
         void syncData({ silent: true });
       }
     },
-    [activeView, syncData]
+    [activeView, canAccessView, role, syncData]
   );
 
   const pendingSignCount = useMemo(() => {
@@ -387,7 +404,15 @@ export const App: React.FC = () => {
               onRefreshData={async () => {
                 await syncData({ silent: true });
               }}
-              onUpsertUser={async (row, isEdit) => {
+              onUpsertUser={async (row, isEdit, initialPassword) => {
+                if (!isEdit && initialPassword) {
+                  await adminProvisionAuthCredential({
+                    email: row.email,
+                    password: initialPassword,
+                    fullName: row.full_name,
+                    department: row.department,
+                  });
+                }
                 await upsertSysUserDirect(row, isEdit);
                 pushToast('success', 'Đã lưu thông tin nhân sự.');
                 await syncData({ silent: true });
