@@ -25,9 +25,11 @@
   font-family: 'Be Vietnam Pro', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
-html, body {
+html, body, #root {
   margin: 0;
   padding: 0;
+  height: 100%;
+  overflow: hidden;
   background-color: var(--workspace);
   color: #0b2418;
   -webkit-font-smoothing: antialiased;
@@ -39,7 +41,8 @@ html, body {
 ::-webkit-scrollbar-thumb:hover { background: #0f4a33; }
 
 .login-emerald-bg {
-  min-height: 100vh;
+  height: 100vh;
+  overflow-y: auto;
   background:
     radial-gradient(circle at 18% 22%, rgba(22, 151, 127, 0.42) 0%, transparent 52%),
     radial-gradient(circle at 82% 78%, rgba(106, 166, 63, 0.34) 0%, transparent 54%),
@@ -54,7 +57,19 @@ html, body {
 
 .workspace-shell {
   background-color: var(--workspace);
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+}
+
+.workspace-main {
+  flex: 1 1 0%;
+  min-width: 0;
+  height: 100vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
 }
 
 .sticky-header-bar {
@@ -66,9 +81,28 @@ html, body {
 .app-sidebar {
   width: 272px;
   min-width: 272px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background: linear-gradient(180deg, #07281c 0%, #0b3a27 65%, #0f4a33 100%);
   border-right: 2px solid var(--border);
   transition: width 0.2s ease, min-width 0.2s ease;
+}
+
+.app-sidebar .logo {
+  flex-shrink: 0;
+}
+
+.app-sidebar nav {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.app-sidebar .me {
+  flex-shrink: 0;
 }
 
 .app-sidebar.is-collapsed {
@@ -115,6 +149,7 @@ html, body {
   border-radius: 16px;
   box-shadow: 0 5px 0 var(--card-shadow-base), 0 10px 24px rgba(7, 40, 28, 0.18);
   color: var(--cream-text);
+  overflow: visible;
 }
 
 .agri-card-inner {
@@ -122,6 +157,7 @@ html, body {
   border: 1.5px solid var(--border);
   border-radius: 12px;
   color: #0b2418;
+  overflow: visible;
 }
 
 .agri-table-wrap {

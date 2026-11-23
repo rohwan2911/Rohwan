@@ -1421,15 +1421,18 @@ function findAncestorTag(el: Element | null, tagName: string): Element | null {
 }
 
 export async function extractDocxParagraphBlocks(buffer: ArrayBuffer): Promise<DocxParagraphBlock[]> {
-  const zip = await JSZip.loadAsync(buffer);
-  const xmlFiles = Object.keys(zip.files).filter(
+  const zip = new PizZip(buffer.slice(0));
+  const zipApi = zip as unknown as PizZipWithFileApi & { files: Record<string, unknown> };
+  const xmlFiles = Object.keys(zipApi.files || {}).filter(
     (name) => /^word\/(document|header\d+|footer\d+)\.xml$/i.test(name)
   );
   const parser = new DOMParser();
   const blocks: DocxParagraphBlock[] = [];
 
   for (const xmlFile of xmlFiles) {
-    const xmlStr = await zip.files[xmlFile].async('string');
+    const fileEntry = zipApi.file(xmlFile);
+    if (!fileEntry) continue;
+    const xmlStr = fileEntry.asText();
     const xmlDoc = parser.parseFromString(xmlStr, 'application/xml');
     const paragraphs = Array.from(xmlDoc.getElementsByTagName('w:p'));
 
@@ -1515,7 +1518,8 @@ export async function applyAiTagsToDocx(
   buffer: ArrayBuffer,
   replacements: Array<{ blockId: string; taggedText: string }>
 ): Promise<Uint8Array> {
-  const zip = await JSZip.loadAsync(buffer);
+  const zip = new PizZip(buffer.slice(0));
+  const zipApi = zip as unknown as PizZipWithFileApi;
   const byFile = new Map<string, Array<{ indexInFile: number; taggedText: string }>>();
 
   replacements.forEach((r) => {
@@ -1533,9 +1537,9 @@ export async function applyAiTagsToDocx(
   const serializer = new XMLSerializer();
 
   for (const [xmlFile, items] of byFile.entries()) {
-    const fileEntry = zip.files[xmlFile];
+    const fileEntry = zipApi.file(xmlFile);
     if (!fileEntry) continue;
-    const xmlStr = await fileEntry.async('string');
+    const xmlStr = fileEntry.asText();
     const xmlDoc = parser.parseFromString(xmlStr, 'application/xml');
     const paragraphs = Array.from(xmlDoc.getElementsByTagName('w:p'));
 
@@ -1546,6 +1550,12 @@ export async function applyAiTagsToDocx(
       if (tNodes.length === 0) {
         if (!taggedText) return;
         const rEl = xmlDoc.createElementNS(W_NS, 'w:r');
+        // Preserve default run formatting declared on <w:pPr><w:rPr>
+        const pPr = Array.from(p.children).find((c) => c.tagName === 'w:pPr');
+        const pRPr = pPr ? Array.from(pPr.children).find((c) => c.tagName === 'w:rPr') : undefined;
+        if (pRPr) {
+          rEl.appendChild(pRPr.cloneNode(true));
+        }
         const tEl = xmlDoc.createElementNS(W_NS, 'w:t');
         tEl.setAttribute('xml:space', 'preserve');
         tEl.textContent = taggedText;
@@ -1560,10 +1570,10 @@ export async function applyAiTagsToDocx(
       }
     });
 
-    zip.file(xmlFile, serializer.serializeToString(xmlDoc));
+    zipApi.file(xmlFile, serializer.serializeToString(xmlDoc));
   }
 
-  return zip.generateAsync({
+  return zip.generate({
     type: 'uint8array',
     mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   });

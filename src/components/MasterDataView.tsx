@@ -19,7 +19,12 @@ import {
   Hash,
   Check,
   Tag,
+  Image as ImageIcon,
+  Eye,
+  FileText,
 } from 'lucide-react';
+import { renderAsync } from 'docx-preview';
+import { SearchableCombo } from './SearchableCombo';
 import type {
   AppDataState,
   PricingRate,
@@ -69,6 +74,40 @@ interface MasterDataViewProps {
   onToast: (type: 'success' | 'error' | 'info' | 'warning', title: string) => void;
 }
 
+const ProductThumbnail: React.FC<{ url?: string; alt: string; sizeClass?: string }> = ({
+  url,
+  alt,
+  sizeClass = 'w-12 h-12',
+}) => {
+  const [failed, setFailed] = useState(false);
+  const trimmed = String(url || '').trim();
+
+  useEffect(() => {
+    setFailed(false);
+  }, [trimmed]);
+
+  if (!trimmed || failed) {
+    return (
+      <div
+        className={`${sizeClass} rounded-lg bg-[#d7eee4] border border-[#186635]/40 flex items-center justify-center text-[#0f4a33]/65 mx-auto shrink-0`}
+        title="Chưa có hình ảnh"
+      >
+        <ImageIcon className="w-5 h-5" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={trimmed}
+      alt={alt}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className={`${sizeClass} rounded-lg object-cover border border-[#186635]/50 bg-white mx-auto shrink-0 shadow-sm`}
+    />
+  );
+};
+
 export const MasterDataView: React.FC<MasterDataViewProps> = ({
   activeView,
   data,
@@ -112,10 +151,13 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
   const [tagEditorLoadingId, setTagEditorLoadingId] = useState<string | null>(null);
   const [tagBlockSearch, setTagBlockSearch] = useState('');
   const [tagOnlyMarked, setTagOnlyMarked] = useState(false);
+  const [tagEditorTab, setTagEditorTab] = useState<'edit' | 'preview'>('edit');
   const [pickerSearch, setPickerSearch] = useState('');
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const activeCursorRef = useRef<{ blockId: string; start: number; end: number } | null>(null);
   const blockTextareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
+  const docxLayoutPreviewRef = useRef<HTMLDivElement | null>(null);
+  const [docxPreviewLoading, setDocxPreviewLoading] = useState(false);
 
   const [usrModal, setUsrModal] = useState<{ open: boolean; isEdit: boolean; form: SysUser | null; initialPassword: string }>({
     open: false,
@@ -143,12 +185,72 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
     return list;
   }, [data.templatePlaceholders]);
 
+  const scheduleCountryOptions = useMemo(() => {
+    const set = new Set<string>();
+    data.schedules.forEach((s) => s.country && set.add(s.country.trim()));
+    data.consignees.forEach((c) => c.country && set.add(c.country.trim()));
+    return Array.from(set).sort().map((v) => ({ value: v, label: v }));
+  }, [data.schedules, data.consignees]);
+
+  const schedulePolOptions = useMemo(() => {
+    const set = new Set<string>(['Cát Lái (HCMC)', 'Hải Phòng', 'Đà Nẵng', 'Cái Mép - Thị Vải']);
+    data.schedules.forEach((s) => s.pol && set.add(s.pol.trim()));
+    return Array.from(set).sort().map((v) => ({ value: v, label: v }));
+  }, [data.schedules]);
+
+  const schedulePodOptions = useMemo(() => {
+    const countryLow = (schModal.form?.country || '').trim().toLowerCase();
+    const matched = data.schedules.filter((s) => !countryLow || s.country.trim().toLowerCase() === countryLow);
+    const pool = matched.length > 0 ? matched : data.schedules;
+    const map = new Map<string, { value: string; label: string; subLabel?: string }>();
+    pool.forEach((s) => {
+      if (!s.pod) return;
+      const p = s.pod.trim();
+      if (!map.has(p.toLowerCase())) {
+        map.set(p.toLowerCase(), { value: p, label: p, subLabel: s.country || undefined });
+      }
+    });
+    return Array.from(map.values());
+  }, [data.schedules, schModal.form?.country]);
+
   useEffect(() => {
     if (activeView === 'xnk-shipping' && highlightedId) {
       const target = data.schedules.find((s) => s.schedule_id === highlightedId);
       if (target) setSchModal({ open: true, isEdit: true, form: { ...target } });
     }
   }, [activeView, highlightedId, data.schedules]);
+
+  useEffect(() => {
+    if (!tagEditor?.open || tagEditorTab !== 'preview') return;
+    let cancelled = false;
+    const renderPreview = async () => {
+      const container = docxLayoutPreviewRef.current;
+      if (!container) return;
+      setDocxPreviewLoading(true);
+      try {
+        const changedReplacements = tagEditor.blocks
+          .filter((b) => b.text !== b.originalText)
+          .map((b) => ({ blockId: b.id, taggedText: b.text }));
+        const bytes = await applyAiTagsToDocx(tagEditor.buffer, changedReplacements);
+        if (cancelled || !docxLayoutPreviewRef.current) return;
+        docxLayoutPreviewRef.current.innerHTML = '';
+        await renderAsync(bytes, docxLayoutPreviewRef.current, undefined, {
+          inWrapper: true,
+          ignoreWidth: false,
+          ignoreHeight: false,
+          breakPages: true,
+        });
+      } catch {
+        // Ignore transient preview errors
+      } finally {
+        if (!cancelled) setDocxPreviewLoading(false);
+      }
+    };
+    void renderPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [tagEditor, tagEditorTab]);
 
   if (activeView === 'master-products') {
     const list = data.products.filter((p) => !qLower || `${p.sku_code} ${p.product_name_vie} ${p.product_name_eng} ${p.hs_code} ${p.product_group}`.toLowerCase().includes(qLower));
@@ -183,14 +285,15 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
         <div className="agri-table-wrap">
           <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635]">
             <h3 className="text-sm font-extrabold text-[#fff5d6] flex items-center gap-2">
-              <Package className="w-4 h-4 text-[#f4d98a]" /> Danh mục Sản phẩm ({list.length})
+              <Package className="w-4 h-4 text-[#f4d98a]" /> Danh mục Sản phẩm Nông sản Xuất khẩu ({list.length})
             </h3>
           </div>
           <div className="agri-table-scroll">
             <table className="agri-table">
               <thead>
                 <tr>
-                  <th className="text-center">STT / SKU</th>
+                  <th className="text-center whitespace-nowrap">STT / SKU</th>
+                  <th className="text-center whitespace-nowrap w-[76px]">HÌNH ẢNH</th>
                   <th className="text-left">Nhóm hàng</th>
                   <th className="text-left">Tên Tiếng Việt / English</th>
                   <th className="text-center">Giá vốn ($/kg)</th>
@@ -203,6 +306,9 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                 {list.map((p, idx) => (
                   <tr key={p.sku_code}>
                     <td className="text-center font-mono font-bold whitespace-nowrap">{idx + 1}. {p.sku_code}</td>
+                    <td className="text-center">
+                      <ProductThumbnail url={p.image_url} alt={p.product_name_vie || p.sku_code} />
+                    </td>
                     <td className="text-left">{p.product_group}</td>
                     <td className="text-left">
                       <div className="font-bold">{p.product_name_vie}</div>
@@ -226,7 +332,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
 
         {prodModal.open && prodModal.form && (
           <div className="fixed inset-0 z-50 bg-[#07281c]/75 flex items-center justify-center p-4">
-            <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl w-full max-w-xl p-5 text-[#f4f8f5] space-y-3 text-xs">
+            <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-5 text-[#f4f8f5] space-y-3 text-xs">
               <h4 className="text-base font-extrabold text-[#fff5d6]">{prodModal.isEdit ? 'Sửa Sản phẩm' : 'Thêm Sản phẩm Mới'}</h4>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block font-bold mb-1">SKU Code</label><input disabled={prodModal.isEdit} value={prodModal.form.sku_code} onChange={(e) => setProdModal({ ...prodModal, form: { ...prodModal.form!, sku_code: e.target.value } })} className="agri-input font-mono" /></div>
@@ -237,6 +343,22 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                 <div><label className="block font-bold mb-1">HS Code</label><input value={prodModal.form.hs_code} onChange={(e) => setProdModal({ ...prodModal, form: { ...prodModal.form!, hs_code: e.target.value } })} className="agri-input font-mono" /></div>
                 <div><label className="block font-bold mb-1">Loại Container</label><input value={prodModal.form.container_type} onChange={(e) => setProdModal({ ...prodModal, form: { ...prodModal.form!, container_type: e.target.value } })} className="agri-input" /></div>
                 <div><label className="block font-bold mb-1">Nhiệt độ bảo quản</label><input value={prodModal.form.storage_temperature} onChange={(e) => setProdModal({ ...prodModal, form: { ...prodModal.form!, storage_temperature: e.target.value } })} className="agri-input" /></div>
+                <div className="col-span-2">
+                  <label className="block font-bold mb-1">Đường dẫn Hình ảnh Sản phẩm (image_url)</label>
+                  <div className="flex items-center gap-3">
+                    <ProductThumbnail
+                      url={prodModal.form.image_url}
+                      alt={prodModal.form.product_name_vie || prodModal.form.sku_code}
+                    />
+                    <input
+                      type="url"
+                      placeholder="https://..."
+                      value={prodModal.form.image_url || ''}
+                      onChange={(e) => setProdModal({ ...prodModal, form: { ...prodModal.form!, image_url: e.target.value } })}
+                      className="agri-input flex-1"
+                    />
+                  </div>
+                </div>
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setProdModal({ open: false, isEdit: false, form: null })} className="px-3 py-1.5 rounded bg-[#07281c] text-white font-bold cursor-pointer">Hủy</button>
@@ -369,9 +491,36 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 <div><label className="block font-bold mb-1">Schedule ID</label><input disabled={schModal.isEdit} value={schModal.form.schedule_id} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, schedule_id: e.target.value } })} className="agri-input font-mono" /></div>
                 <div><label className="block font-bold mb-1">Hãng tàu</label><input value={schModal.form.shipping_line} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, shipping_line: e.target.value } })} className="agri-input" /></div>
-                <div><label className="block font-bold mb-1">Quốc gia đến</label><input value={schModal.form.country} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, country: e.target.value } })} className="agri-input" /></div>
-                <div><label className="block font-bold mb-1">POD</label><input value={schModal.form.pod} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, pod: e.target.value } })} className="agri-input" /></div>
-                <div><label className="block font-bold mb-1">POL</label><input value={schModal.form.pol} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, pol: e.target.value } })} className="agri-input" /></div>
+                <div>
+                  <label className="block font-bold mb-1">Quốc gia đến</label>
+                  <SearchableCombo
+                    value={schModal.form.country}
+                    onChange={(v) => setSchModal({ ...schModal, form: { ...schModal.form!, country: v } })}
+                    options={scheduleCountryOptions}
+                    allowCustom
+                    placeholder="Chọn hoặc nhập Quốc gia..."
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold mb-1">POD</label>
+                  <SearchableCombo
+                    value={schModal.form.pod}
+                    onChange={(v) => setSchModal({ ...schModal, form: { ...schModal.form!, pod: v } })}
+                    options={schedulePodOptions}
+                    allowCustom
+                    placeholder="Chọn hoặc nhập POD..."
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold mb-1">POL</label>
+                  <SearchableCombo
+                    value={schModal.form.pol}
+                    onChange={(v) => setSchModal({ ...schModal, form: { ...schModal.form!, pol: v } })}
+                    options={schedulePolOptions}
+                    allowCustom
+                    placeholder="Chọn hoặc nhập POL..."
+                  />
+                </div>
                 <div><label className="block font-bold mb-1">POT (Chuyển tải)</label><input value={schModal.form.pot} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, pot: e.target.value } })} className="agri-input" /></div>
                 <div><label className="block font-bold mb-1">Tàu (Vessel)</label><input value={schModal.form.vessel} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, vessel: e.target.value } })} className="agri-input" /></div>
                 <div><label className="block font-bold mb-1">Chuyến (Voyage)</label><input value={schModal.form.voyage} onChange={(e) => setSchModal({ ...schModal, form: { ...schModal.form!, voyage: e.target.value } })} className="agri-input font-mono" /></div>
@@ -528,6 +677,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
       }
       setTagBlockSearch('');
       setTagOnlyMarked(false);
+      setTagEditorTab('edit');
       setPickerSearch('');
       setActiveBlockId(blocks[0]?.id || null);
       activeCursorRef.current = null;
@@ -597,10 +747,8 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
           form: updatedForm,
         });
 
-        // When uploading a raw .docx file without existing tags, automatically launch interactive #-Marker Tag Review Modal
-        if (tags.length === 0) {
-          await openTagReviewModal(updatedForm, tplModal.isEdit, buf);
-        }
+        // Always open interactive #-Marker Template Variable Review Editor immediately whenever a .docx file is selected
+        await openTagReviewModal(updatedForm, tplModal.isEdit, buf);
       } catch (err: any) {
         onToast('error', err?.message || 'Tệp .docx không hợp lệ.');
       }
@@ -1447,6 +1595,79 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                 </div>
               </div>
 
+              {/* Inline Template Metadata Strip */}
+              <div className="px-4 py-2 bg-[#0b3a27] border-b border-[#186635] grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                <div>
+                  <label className="block text-[10px] font-bold text-[#9bccb8] mb-0.5">Template ID *</label>
+                  <input
+                    disabled={tagEditor.isEdit}
+                    value={tagEditor.templateForm.template_id}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setTagEditor((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              templateForm: {
+                                ...prev.templateForm,
+                                template_id: nextId,
+                                google_doc_file_id: nextId.trim() ? `templates/${nextId.trim()}.docx` : '',
+                              },
+                            }
+                          : prev
+                      );
+                    }}
+                    placeholder="VD: TMP_CONTRACT_01"
+                    className="agri-input py-1 text-xs font-mono disabled:opacity-70"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-[#9bccb8] mb-0.5">Tên chứng từ</label>
+                  <input
+                    value={tagEditor.templateForm.document_name}
+                    onChange={(e) =>
+                      setTagEditor((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              templateForm: { ...prev.templateForm, document_name: e.target.value },
+                            }
+                          : prev
+                      )
+                    }
+                    placeholder="VD: Hợp đồng Xuất khẩu"
+                    className="agri-input py-1 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-[#9bccb8] mb-0.5">Phòng ban</label>
+                  <select
+                    value={normalizeTemplateDepartment(
+                      tagEditor.templateForm.target_department,
+                      tagEditor.templateForm.template_id,
+                      tagEditor.templateForm.document_name
+                    )}
+                    onChange={(e) =>
+                      setTagEditor((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              templateForm: { ...prev.templateForm, target_department: e.target.value },
+                            }
+                          : prev
+                      )
+                    }
+                    className="agri-input py-1 text-xs font-bold"
+                  >
+                    {TEMPLATE_DEPARTMENT_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               {/* Mandatory Instruction Banner */}
               <div className="px-4 py-2.5 bg-[#f4d98a] text-[#07281c] border-b border-[#186635] flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -1471,31 +1692,65 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
 
               {/* Main 2-column Workspace */}
               <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12">
-                {/* Left: Extracted Document Blocks */}
+                {/* Left: Extracted Document Blocks OR Live Word Layout Preview */}
                 <div className="lg:col-span-8 flex flex-col min-h-0 bg-[#0b3a27] border-r border-[#186635]">
-                  <div className="px-3.5 py-2.5 bg-[#07281c] border-b border-[#186635] flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <div className="relative flex-1 min-w-[200px]">
-                      <Search className="w-3.5 h-3.5 text-[#0f4a33] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <input
-                        type="text"
-                        placeholder="Lọc nhanh đoạn văn bản trong phôi..."
-                        value={tagBlockSearch}
-                        onChange={(e) => setTagBlockSearch(e.target.value)}
-                        className="agri-input pl-8 py-1 text-xs"
-                      />
+                  <div className="px-3.5 py-2 bg-[#07281c] border-b border-[#186635] flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="inline-flex rounded-lg bg-[#0b3a27] p-0.5 border border-[#186635]">
+                      <button
+                        type="button"
+                        onClick={() => setTagEditorTab('edit')}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer ${
+                          tagEditorTab === 'edit' ? 'bg-[#f4d98a] text-[#07281c]' : 'text-[#d2ebe0]'
+                        }`}
+                      >
+                        <FileText className="w-3 h-3" /> Soạn thảo &amp; Gắn biến (#)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTagEditorTab('preview')}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer ${
+                          tagEditorTab === 'preview' ? 'bg-[#f4d98a] text-[#07281c]' : 'text-[#d2ebe0]'
+                        }`}
+                      >
+                        <Eye className="w-3 h-3" /> Xem trước bố cục (.docx)
+                      </button>
                     </div>
-                    <label className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#fff5d6] cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={tagOnlyMarked}
-                        onChange={(e) => setTagOnlyMarked(e.target.checked)}
-                        className="accent-[#f4d98a] cursor-pointer"
-                      />
-                      <span>Chỉ hiện dòng có # hoặc biến</span>
-                    </label>
+                    {tagEditorTab === 'edit' && (
+                      <>
+                        <div className="relative flex-1 min-w-[180px]">
+                          <Search className="w-3.5 h-3.5 text-[#0f4a33] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            type="text"
+                            placeholder="Lọc nhanh đoạn văn bản trong phôi..."
+                            value={tagBlockSearch}
+                            onChange={(e) => setTagBlockSearch(e.target.value)}
+                            className="agri-input pl-8 py-1 text-xs"
+                          />
+                        </div>
+                        <label className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#fff5d6] cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={tagOnlyMarked}
+                            onChange={(e) => setTagOnlyMarked(e.target.checked)}
+                            className="accent-[#f4d98a] cursor-pointer"
+                          />
+                          <span>Chỉ hiện dòng có # hoặc biến</span>
+                        </label>
+                      </>
+                    )}
                   </div>
 
-                  <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5 max-h-[60vh]">
+                  {tagEditorTab === 'preview' ? (
+                    <div className="flex-1 overflow-auto p-4 bg-[#e8f0ec] max-h-[56vh] relative">
+                      {docxPreviewLoading && (
+                        <div className="flex items-center justify-center gap-2 py-8 text-xs font-bold text-[#0f4a33]">
+                          <Loader2 className="w-4 h-4 animate-spin" /> Loading...
+                        </div>
+                      )}
+                      <div ref={docxLayoutPreviewRef} className="min-h-[300px]" />
+                    </div>
+                  ) : (
+                  <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5 max-h-[56vh]">
                     {filteredTagBlocks.map((block) => {
                       const isActive = activeBlockId === block.id;
                       const isUpdated = tagEditor.updatedBlockIds.includes(block.id);
@@ -1621,6 +1876,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                       </div>
                     )}
                   </div>
+                  )}
                 </div>
 
                 {/* Right: Quick-Insert Vietnamese Variable Picker */}

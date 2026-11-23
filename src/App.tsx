@@ -209,7 +209,7 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="workspace-shell flex min-h-screen">
+    <div className="workspace-shell flex h-screen overflow-hidden">
       <Sidebar
         currentUser={currentUser}
         role={role}
@@ -228,7 +228,7 @@ export const App: React.FC = () => {
         onNavigate={(v) => handleNavigate(v)}
       />
 
-      <div className="flex-1 min-w-0 flex flex-col">
+      <main className="workspace-main flex-1 min-w-0 h-screen overflow-y-auto overscroll-contain flex flex-col">
         <TopHeader
           currentUser={currentUser}
           activeView={activeView}
@@ -244,7 +244,7 @@ export const App: React.FC = () => {
           }}
         />
 
-        <main className="flex-1 p-4 sm:p-5">
+        <div className="flex-1 p-4 sm:p-5">
           {activeView === 'dashboard' && (
             <DashboardView
               data={data}
@@ -435,8 +435,8 @@ export const App: React.FC = () => {
               onToast={pushToast}
             />
           )}
-        </main>
-      </div>
+        </div>
+      </main>
 
       {/* Modals */}
       <DocumentPreviewModal

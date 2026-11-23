@@ -130,19 +130,20 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
   const insuranceCatalog = useMemo(() => getInsuranceCatalog(data.pricingRates), [data.pricingRates]);
 
   const orderOptions = useMemo(() => {
-    return data.inquiries
-      .filter((i) => isWaitingPricingStatus(i.inquiry_status) || isRepriceRequestedStatus(i.inquiry_status) || data.proposals.some((p) => p.order_id === i.order_id))
-      .slice()
-      .reverse()
-      .map((i) => {
-        const cus = data.consignees.find((c) => c.consignee_id === i.consignee_id);
-        return {
-          value: i.order_id,
-          label: `${i.order_id} · ${cus?.consignee_name || i.consignee_id}`,
-          subLabel: `${i.inquiry_status} · ${fmtNumber(i.net_weight_kgs)} KG`,
-        };
-      });
-  }, [data.inquiries, data.consignees, data.proposals]);
+    const prioritized = data.inquiries.slice().reverse().sort((a, b) => {
+      const aUrgent = isWaitingPricingStatus(a.inquiry_status) || isRepriceRequestedStatus(a.inquiry_status) ? 0 : 1;
+      const bUrgent = isWaitingPricingStatus(b.inquiry_status) || isRepriceRequestedStatus(b.inquiry_status) ? 0 : 1;
+      return aUrgent - bUrgent;
+    });
+    return prioritized.map((i) => {
+      const cus = data.consignees.find((c) => c.consignee_id === i.consignee_id);
+      return {
+        value: i.order_id,
+        label: `${i.order_id} · ${cus?.consignee_name || i.consignee_id}`,
+        subLabel: `${i.inquiry_status} · ${fmtNumber(i.net_weight_kgs)} KG`,
+      };
+    });
+  }, [data.inquiries, data.consignees]);
 
   const selectedInq = useMemo(() => data.inquiries.find((i) => i.order_id === selectedOrderId), [data.inquiries, selectedOrderId]);
   const selectedCus = useMemo(() => (selectedInq ? data.consignees.find((c) => c.consignee_id === selectedInq.consignee_id) : undefined), [data.consignees, selectedInq]);
@@ -373,6 +374,25 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
       .forEach((x) => x.pod && s.add(x.pod.trim()));
     return Array.from(s).sort().map((v) => ({ value: v, label: v }));
   }, [data.schedules, countryFilter]);
+
+  const scheduleComboOptions = useMemo(() => {
+    const source = scheduleEvaluations.evals.length > 0
+      ? scheduleEvaluations.evals.map((e) => e.s)
+      : data.schedules;
+    return source.map((s) => ({
+      value: s.schedule_id,
+      label: `${s.schedule_id} · ${s.shipping_line}`,
+      subLabel: `${s.pol} → ${s.pod} (${s.country}) · ETD ${s.etd || '-'}`,
+    }));
+  }, [scheduleEvaluations.evals, data.schedules]);
+
+  const insuranceBaseOptions = useMemo(() => {
+    return insuranceCatalog.basePolicies.map((p) => ({
+      value: p.fee_code,
+      label: `${p.fee_code} · ${p.fee_name_vie}`,
+      subLabel: `Tỷ lệ phí: ${p.standard_rate.toFixed(2)}%`,
+    }));
+  }, [insuranceCatalog.basePolicies]);
 
   // Core Cost Components
   const goodsCost = useMemo(() => {
@@ -772,12 +792,12 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
 
             {/* Tầng 1: Items Packing Breakdown */}
             <div className="overflow-x-auto">
-              <table className="w-full text-left border border-[#186635]/40 rounded-lg overflow-hidden">
+              <table className="w-full text-left border border-[#186635]/40 rounded-lg">
                 <thead className="bg-[#547d59] text-[#fff5d6] text-[11px]">
                   <tr>
                     <th className="p-2 text-center">SKU</th>
                     <th className="p-2 text-left">Sản phẩm</th>
-                    <th className="p-2 text-left">Quy cách đóng gói</th>
+                    <th className="p-2 text-left min-w-[240px]">Quy cách đóng gói</th>
                     <th className="p-2 text-center">KL / Số thùng</th>
                     <th className="p-2 text-center">Giá vốn / Bao bì</th>
                     <th className="p-2 text-center">Thành tiền hàng</th>
@@ -788,28 +808,28 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                     const prod = data.products.find((p) => p.sku_code.toLowerCase() === it.sku.toLowerCase());
                     const unitCost = toNum(prod?.unit_price);
                     const packOpts = getPackingOptionsForProduct(prod, data.pricingRates, data.lookups);
+                    const packComboOptions = packOpts.map((pk) => ({
+                      value: pk.code,
+                      label: `${pk.code} – ${pk.name}`,
+                      subLabel: `+$${pk.perKgRate.toFixed(2)}/kg`,
+                    }));
                     const calc = computeItemPackingAndPallet(it.weight, it.packingCode, it.packingExtra, data.pricingRates);
                     return (
                       <tr key={idx} className="border-t border-[#186635]/30 bg-white/60">
                         <td className="p-2 text-center font-mono font-bold">{it.sku}</td>
                         <td className="p-2 text-left font-semibold">{it.name}</td>
                         <td className="p-2 text-left">
-                          <select
+                          <SearchableCombo
                             value={it.packingCode}
-                            onChange={(e) => {
-                              const code = e.target.value;
+                            options={packComboOptions}
+                            allowCustom={false}
+                            placeholder="Chọn quy cách đóng gói..."
+                            onChange={(code) => {
                               const spec = resolvePackingSpec(code, data.pricingRates);
                               setItemsState((prev) => prev.map((r, i) => (i === idx ? { ...r, packingCode: code, packingName: spec.nameVie, packingExtra: spec.rate } : r)));
                               setPackingManualCost('');
                             }}
-                            className="px-2 py-1 rounded border border-[#186635] bg-[#d7eee4] text-xs font-semibold"
-                          >
-                            {packOpts.map((pk) => (
-                              <option key={pk.code} value={pk.code}>
-                                {pk.code} – {pk.name} (+${pk.perKgRate.toFixed(2)}/kg)
-                              </option>
-                            ))}
-                          </select>
+                          />
                         </td>
                         <td className="p-2 text-center font-mono">{fmtNumber(it.weight)} KG · {fmtNumber(calc.cartons)} th</td>
                         <td className="p-2 text-center font-mono">{fmtUSD(unitCost)} · BB: {fmtUSD(calc.packingCost)}</td>
@@ -915,8 +935,48 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
             <Ship className="w-4 h-4 text-[#f4d98a]" /> Khung 2 · So sánh &amp; Chọn Lịch Tàu ({selectedScheduleId || 'Chưa chọn'})
           </h3>
           <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-            <div className="w-48"><SearchableCombo value={countryFilter} onChange={setCountryFilter} options={countryOptions} placeholder="Lọc Quốc gia..." /></div>
-            <div className="w-52"><SearchableCombo value={podFilter} onChange={setPodFilter} options={podOptions} placeholder="Lọc Cảng đến (POD)..." /></div>
+            <div className="w-44">
+              <SearchableCombo
+                value={countryFilter}
+                onChange={(nextCountry) => {
+                  setCountryFilter(nextCountry);
+                  if (podFilter && nextCountry) {
+                    const stillValid = data.schedules.some(
+                      (s) =>
+                        s.country.trim().toLowerCase() === nextCountry.trim().toLowerCase() &&
+                        s.pod.trim() === podFilter.trim()
+                    );
+                    if (!stillValid) setPodFilter('');
+                  }
+                }}
+                options={countryOptions}
+                placeholder="Lọc Quốc gia..."
+              />
+            </div>
+            <div className="w-48">
+              <SearchableCombo
+                value={podFilter}
+                onChange={setPodFilter}
+                options={podOptions}
+                placeholder="Lọc Cảng đến (POD)..."
+              />
+            </div>
+            <div className="w-56">
+              <SearchableCombo
+                value={selectedScheduleId}
+                onChange={(sid) => {
+                  setSelectedScheduleId(sid);
+                  const found = data.schedules.find((s) => s.schedule_id === sid);
+                  if (found) {
+                    if (found.country) setCountryFilter(found.country);
+                    if (found.pod) setPodFilter(found.pod);
+                  }
+                }}
+                options={scheduleComboOptions}
+                allowCustom={false}
+                placeholder="Chọn nhanh Schedule_ID..."
+              />
+            </div>
           </div>
         </div>
         <div className="agri-table-wrap">
@@ -1217,13 +1277,17 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <div className="sm:col-span-2">
-                  <select value={insBaseCode} onChange={(e) => { setInsBaseCode(e.target.value); setManualInsurance(''); setIncludeInsurance(e.target.value !== 'INS-NONE'); }} className="agri-input text-xs">
-                    {insuranceCatalog.basePolicies.map((p) => (
-                      <option key={p.fee_code} value={p.fee_code}>
-                        {p.fee_code} · {p.fee_name_vie} ({p.standard_rate.toFixed(2)}%)
-                      </option>
-                    ))}
-                  </select>
+                  <SearchableCombo
+                    value={insBaseCode}
+                    onChange={(code) => {
+                      setInsBaseCode(code);
+                      setManualInsurance('');
+                      setIncludeInsurance(code !== 'INS-NONE');
+                    }}
+                    options={insuranceBaseOptions}
+                    allowCustom={false}
+                    placeholder="Chọn gói Bảo hiểm..."
+                  />
                 </div>
                 <div>
                   <input

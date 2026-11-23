@@ -8,11 +8,13 @@ import {
   getEffectiveFulfillmentStatus,
   getNextContractMilestone,
   getOrderStage6Number,
+  INCOTERMS_2020_MATRIX,
   isConfirmedStatus,
   suggestCoFormCode,
   toNum,
 } from '../utils/calculations';
 import type { PreviewModalTarget } from './Modals';
+import { SearchableCombo } from './SearchableCombo';
 import { isStoredDocumentPath, openDocumentWithSignedUrl } from '../services/supabaseService';
 
 interface XnkContractsViewProps {
@@ -68,20 +70,69 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
       .reverse();
   }, [data.orders, data.consignees, qLower]);
 
+  const [quickOrderSelect, setQuickOrderSelect] = useState('');
+
+  const contractOrderSelectOptions = useMemo(() => {
+    const existingOpts = data.orders
+      .slice()
+      .reverse()
+      .map((o) => {
+        const cus = data.consignees.find((c) => c.consignee_id === o.consignee_id);
+        return {
+          value: o.order_id,
+          label: `${o.order_id} · ${o.contract_no}`,
+          subLabel: `${cus?.consignee_name || o.consignee_id} · ${o.applied_incoterm} · ${o.pod || '-'}`,
+        };
+      });
+    const pendingOpts = pendingConfirmed.map((i) => {
+      const cus = data.consignees.find((c) => c.consignee_id === i.consignee_id);
+      return {
+        value: i.order_id,
+        label: `${i.order_id} · Chờ tạo Nháp HĐ`,
+        subLabel: `${cus?.consignee_name || i.consignee_id} · ${fmtNumber(i.net_weight_kgs)} KG`,
+      };
+    });
+    return activeView === 'xnk-contract' ? [...pendingOpts, ...existingOpts] : existingOpts;
+  }, [data.orders, data.consignees, pendingConfirmed, activeView]);
+
   const openEditContractModal = (ord: OrderMaster) => {
     const meta = orderMetaMap[ord.order_id] || { order_id: ord.order_id };
     setEditOrder({ ...ord, co_form: ord.co_form || suggestCoFormCode(ord.pod, data.consignees.find((c) => c.consignee_id === ord.consignee_id)?.country) });
     setEditMeta({ ...meta });
   };
 
+  const handleQuickJumpOrder = (orderId: string) => {
+    setQuickOrderSelect(orderId);
+    if (!orderId) return;
+    const existing = data.orders.find((o) => o.order_id === orderId);
+    if (existing) {
+      openEditContractModal(existing);
+      return;
+    }
+    const pending = pendingConfirmed.find((i) => i.order_id === orderId);
+    if (pending && activeView === 'xnk-contract') {
+      void onCreateContractDraft(pending.order_id);
+    }
+  };
+
   if (activeView === 'xnk-documents') {
     return (
       <div key="xnk-documents" className="space-y-4">
         <div className="agri-table-wrap">
-          <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex items-center justify-between">
+          <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-extrabold text-[#fff5d6] flex items-center gap-2">
               <FolderOpen className="w-4 h-4 text-[#f4d98a]" /> Bộ chứng từ Xuất khẩu · Commercial Invoice · Packing List · C/O · Draft B/L
             </h3>
+            <div className="w-72">
+              <SearchableCombo
+                dark
+                value={quickOrderSelect}
+                onChange={handleQuickJumpOrder}
+                options={contractOrderSelectOptions}
+                allowCustom={false}
+                placeholder="Chọn nhanh Order ID / Hợp đồng..."
+              />
+            </div>
           </div>
           <div className="agri-table-scroll">
             <table className="agri-table">
@@ -178,6 +229,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
         {/* Shared Modal for Cut-offs & Booking */}
         {editOrder && (
           <ContractBookingModal
+            data={data}
             order={editOrder}
             meta={editMeta}
             isLocked={Boolean(orderMetaMap[editOrder.order_id]?.is_locked)}
@@ -234,8 +286,18 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
       )}
 
       <div className="agri-table-wrap">
-        <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635]">
+        <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-extrabold text-[#fff5d6]">Quản lý Hợp đồng Ngoại thương ({filteredOrders.length} HĐ)</h3>
+          <div className="w-72">
+            <SearchableCombo
+              dark
+              value={quickOrderSelect}
+              onChange={handleQuickJumpOrder}
+              options={contractOrderSelectOptions}
+              allowCustom={false}
+              placeholder="Chọn nhanh Order ID / Hợp đồng..."
+            />
+          </div>
         </div>
         <div className="agri-table-scroll">
           <table className="agri-table">
@@ -359,6 +421,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
 
       {editOrder && (
         <ContractBookingModal
+          data={data}
           order={editOrder}
           meta={editMeta}
           isLocked={Boolean(orderMetaMap[editOrder.order_id]?.is_locked)}
@@ -386,6 +449,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
 };
 
 interface ContractBookingModalProps {
+  data: AppDataState;
   order: OrderMaster;
   meta: OrderLogisticsMeta;
   isLocked: boolean;
@@ -397,6 +461,7 @@ interface ContractBookingModalProps {
 }
 
 const ContractBookingModal: React.FC<ContractBookingModalProps> = ({
+  data,
   order,
   meta,
   isLocked,
@@ -406,6 +471,140 @@ const ContractBookingModal: React.FC<ContractBookingModalProps> = ({
   onClose,
   onSave,
 }) => {
+  const cus = useMemo(
+    () => data.consignees.find((c) => c.consignee_id === order.consignee_id),
+    [data.consignees, order.consignee_id]
+  );
+  const prop = useMemo(
+    () => data.proposals.find((p) => p.order_id === order.order_id),
+    [data.proposals, order.order_id]
+  );
+  const [selectedScheduleId, setSelectedScheduleId] = useState(prop?.schedule_id || '');
+
+  const incotermOptions = useMemo(() => {
+    const map = new Map<string, { value: string; label: string; subLabel?: string }>();
+    data.incoterms.forEach((h) => {
+      const code = String(h.incoterms_code || '').trim().toUpperCase();
+      if (!code) return;
+      map.set(code, { value: code, label: code, subLabel: h.full_name || h.risk_transfer_point });
+    });
+    INCOTERMS_2020_MATRIX.forEach((r) => {
+      if (!map.has(r.code)) {
+        map.set(r.code, { value: r.code, label: r.code, subLabel: r.fullName });
+      }
+    });
+    return Array.from(map.values());
+  }, [data.incoterms]);
+
+  const coFormOptions = useMemo(() => {
+    const map = new Map<string, { value: string; label: string; subLabel?: string }>();
+    data.lookups
+      .filter((l) => /co|c\/o|origin/i.test(`${l.category} ${l.code} ${l.display_name_vie}`))
+      .forEach((l) => {
+        const val = l.display_name_vie || l.code;
+        if (val) map.set(val.toUpperCase(), { value: val, label: val, subLabel: l.contract_text_eng || l.code });
+      });
+    [
+      { value: 'Form B', label: 'Form B', subLabel: 'Non-preferential C/O (General)' },
+      { value: 'Form D', label: 'Form D', subLabel: 'ATIGA (ASEAN)' },
+      { value: 'Form E', label: 'Form E', subLabel: 'ACFTA (China)' },
+      { value: 'Form AK', label: 'Form AK', subLabel: 'AKFTA / VKFTA (Korea)' },
+      { value: 'Form AJ', label: 'Form AJ', subLabel: 'AJCEP / VJEPA (Japan)' },
+      { value: 'Form EUR.1', label: 'Form EUR.1', subLabel: 'EVFTA (EU)' },
+      { value: 'Form CPTPP', label: 'Form CPTPP', subLabel: 'CPTPP Member Countries' },
+      { value: 'Form RCEP', label: 'Form RCEP', subLabel: 'RCEP Member Countries' },
+      { value: 'Form AANZ', label: 'Form AANZ', subLabel: 'AANZFTA (Australia / NZ)' },
+      { value: 'Form AI', label: 'Form AI', subLabel: 'AIFTA (India)' },
+    ].forEach((d) => {
+      if (!map.has(d.value.toUpperCase())) map.set(d.value.toUpperCase(), d);
+    });
+    return Array.from(map.values());
+  }, [data.lookups]);
+
+  const paymentOptions = useMemo(() => {
+    const set = new Map<string, { value: string; label: string; subLabel?: string }>();
+    data.lookups
+      .filter((l) => String(l.category).toUpperCase().includes('PAYMENT'))
+      .forEach((l) => {
+        const val = l.contract_text_eng || l.display_name_vie;
+        if (val) set.set(val.toLowerCase(), { value: val, label: val, subLabel: l.display_name_vie !== val ? l.display_name_vie : l.code });
+      });
+    [
+      'T/T 30% Deposit / 70% against B/L copy',
+      'T/T 100% in advance',
+      'Irrevocable L/C at sight',
+      'D/P at sight',
+      'D/A 30 days',
+    ].forEach((d) => {
+      if (!set.has(d.toLowerCase())) set.set(d.toLowerCase(), { value: d, label: d });
+    });
+    return Array.from(set.values());
+  }, [data.lookups]);
+
+  const polOptions = useMemo(() => {
+    const set = new Set<string>(['Cát Lái (HCMC)', 'Hải Phòng', 'Đà Nẵng', 'Cái Mép - Thị Vải']);
+    data.schedules.forEach((s) => s.pol && set.add(s.pol.trim()));
+    return Array.from(set).sort().map((v) => ({ value: v, label: v }));
+  }, [data.schedules]);
+
+  const podOptions = useMemo(() => {
+    const countryLow = (cus?.country || '').trim().toLowerCase();
+    const matched = data.schedules.filter((s) => !countryLow || s.country.trim().toLowerCase() === countryLow);
+    const pool = matched.length > 0 ? matched : data.schedules;
+    const map = new Map<string, { value: string; label: string; subLabel?: string }>();
+    pool.forEach((s) => {
+      if (!s.pod) return;
+      const p = s.pod.trim();
+      if (!map.has(p.toLowerCase())) {
+        map.set(p.toLowerCase(), { value: p, label: p, subLabel: s.country || undefined });
+      }
+    });
+    // Also include remaining PODs if country filter narrowed the list
+    if (matched.length > 0 && matched.length < data.schedules.length) {
+      data.schedules.forEach((s) => {
+        if (!s.pod) return;
+        const p = s.pod.trim();
+        if (!map.has(p.toLowerCase())) {
+          map.set(p.toLowerCase(), { value: p, label: p, subLabel: `${s.country || ''} (Khác quốc gia KH)` });
+        }
+      });
+    }
+    return Array.from(map.values());
+  }, [data.schedules, cus?.country]);
+
+  const scheduleOptions = useMemo(() => {
+    const countryLow = (cus?.country || '').trim().toLowerCase();
+    const sorted = data.schedules.slice().sort((a, b) => {
+      const aMatch = countryLow && a.country.trim().toLowerCase() === countryLow ? 0 : 1;
+      const bMatch = countryLow && b.country.trim().toLowerCase() === countryLow ? 0 : 1;
+      return aMatch - bMatch;
+    });
+    return sorted.map((s) => ({
+      value: s.schedule_id,
+      label: `${s.schedule_id} · ${s.shipping_line} (${s.pol} → ${s.pod})`,
+      subLabel: `${s.country} · ${s.vessel || '-'} ${s.voyage || ''} · ETD ${s.etd || '-'}`,
+    }));
+  }, [data.schedules, cus?.country]);
+
+  const blTypeOptions = useMemo(() => {
+    const base = [
+      { value: 'ORIGINAL', label: 'Original B/L', subLabel: 'Vận đơn gốc (3/3)' },
+      { value: 'SURRENDERED', label: 'Surrendered B/L', subLabel: 'Vận đơn điện giao hàng' },
+      { value: 'SEAWAY BILL', label: 'Sea Waybill', subLabel: 'Giấy gửi hàng đường biển' },
+    ];
+    const seen = new Set(base.map((b) => b.value.toUpperCase()));
+    data.lookups
+      .filter((l) => /bl|b\/l|bill/i.test(`${l.category} ${l.code}`))
+      .forEach((l) => {
+        const val = (l.code || l.display_name_vie).trim();
+        if (val && !seen.has(val.toUpperCase())) {
+          seen.add(val.toUpperCase());
+          base.push({ value: val, label: l.display_name_vie || val, subLabel: l.contract_text_eng || '' });
+        }
+      });
+    return base;
+  }, [data.lookups]);
+
   return (
     <div className="fixed inset-0 z-50 bg-[#07281c]/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
       <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto text-[#f4f8f5]">
@@ -427,7 +626,14 @@ const ContractBookingModal: React.FC<ContractBookingModalProps> = ({
             </div>
             <div>
               <label className="block font-bold mb-1">Incoterm áp dụng</label>
-              <input disabled={isLocked} value={order.applied_incoterm} onChange={(e) => onChangeOrder({ ...order, applied_incoterm: e.target.value })} className="agri-input font-mono disabled:opacity-60" />
+              <SearchableCombo
+                disabled={isLocked}
+                value={order.applied_incoterm}
+                onChange={(v) => onChangeOrder({ ...order, applied_incoterm: v.toUpperCase() })}
+                options={incotermOptions}
+                allowCustom
+                placeholder="Chọn Incoterm..."
+              />
             </div>
             <div>
               <label className="block font-bold mb-1">Giá trị HĐ (USD)</label>
@@ -435,19 +641,44 @@ const ContractBookingModal: React.FC<ContractBookingModalProps> = ({
             </div>
             <div>
               <label className="block font-bold mb-1">C/O Form</label>
-              <input value={order.co_form} onChange={(e) => onChangeOrder({ ...order, co_form: e.target.value })} className="agri-input font-mono" />
+              <SearchableCombo
+                value={order.co_form}
+                onChange={(v) => onChangeOrder({ ...order, co_form: v })}
+                options={coFormOptions}
+                allowCustom
+                placeholder="Chọn Form C/O..."
+              />
             </div>
             <div className="sm:col-span-2">
               <label className="block font-bold mb-1">Thanh toán</label>
-              <input disabled={isLocked} value={order.payment_terms} onChange={(e) => onChangeOrder({ ...order, payment_terms: e.target.value })} className="agri-input disabled:opacity-60" />
+              <SearchableCombo
+                disabled={isLocked}
+                value={order.payment_terms}
+                onChange={(v) => onChangeOrder({ ...order, payment_terms: v })}
+                options={paymentOptions}
+                allowCustom
+                placeholder="Chọn điều khoản thanh toán..."
+              />
             </div>
             <div>
               <label className="block font-bold mb-1">POL (Cảng đi)</label>
-              <input value={order.pol} onChange={(e) => onChangeOrder({ ...order, pol: e.target.value })} className="agri-input" />
+              <SearchableCombo
+                value={order.pol}
+                onChange={(v) => onChangeOrder({ ...order, pol: v })}
+                options={polOptions}
+                allowCustom
+                placeholder="Chọn Cảng đi..."
+              />
             </div>
             <div>
-              <label className="block font-bold mb-1">POD (Cảng đến)</label>
-              <input value={order.pod} onChange={(e) => onChangeOrder({ ...order, pod: e.target.value })} className="agri-input" />
+              <label className="block font-bold mb-1">POD (Cảng đến{cus?.country ? ` · ${cus.country}` : ''})</label>
+              <SearchableCombo
+                value={order.pod}
+                onChange={(v) => onChangeOrder({ ...order, pod: v })}
+                options={podOptions}
+                allowCustom
+                placeholder="Chọn Cảng đến..."
+              />
             </div>
             <div className="sm:col-span-4">
               <label className="block font-bold mb-1">Đường dẫn Tệp Hợp đồng đã ký</label>
@@ -456,7 +687,33 @@ const ContractBookingModal: React.FC<ContractBookingModalProps> = ({
           </div>
 
           <div className="agri-card-inner p-3.5 space-y-3">
-            <div className="font-extrabold text-[#07281c] uppercase text-[11px]">Thông tin Booking &amp; Vận hành Tàu</div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="font-extrabold text-[#07281c] uppercase text-[11px]">Thông tin Booking &amp; Vận hành Tàu</div>
+              <div className="w-full sm:w-80">
+                <SearchableCombo
+                  value={selectedScheduleId}
+                  onChange={(sid) => {
+                    setSelectedScheduleId(sid);
+                    const sch = data.schedules.find((s) => s.schedule_id === sid);
+                    if (sch) {
+                      onChangeOrder({
+                        ...order,
+                        pol: sch.pol || order.pol,
+                        pod: sch.pod || order.pod,
+                      });
+                      onChangeMeta({
+                        ...meta,
+                        ves_voy: [sch.vessel, sch.voyage].filter(Boolean).join(' / ') || meta.ves_voy,
+                        fwd_name: sch.shipping_line || meta.fwd_name,
+                      });
+                    }
+                  }}
+                  options={scheduleOptions}
+                  allowCustom={false}
+                  placeholder="Áp dụng nhanh từ Lịch tàu (Schedule_ID)..."
+                />
+              </div>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block font-bold mb-1">Số Booking (B/K No.)</label>
@@ -472,11 +729,13 @@ const ContractBookingModal: React.FC<ContractBookingModalProps> = ({
               </div>
               <div>
                 <label className="block font-bold mb-1">Loại Vận đơn (B/L Type)</label>
-                <select value={meta.bl_type || 'ORIGINAL'} onChange={(e) => onChangeMeta({ ...meta, bl_type: e.target.value })} className="agri-input">
-                  <option value="ORIGINAL">Original B/L</option>
-                  <option value="SURRENDERED">Surrendered B/L</option>
-                  <option value="SEAWAY BILL">Sea Waybill</option>
-                </select>
+                <SearchableCombo
+                  value={meta.bl_type || 'ORIGINAL'}
+                  onChange={(v) => onChangeMeta({ ...meta, bl_type: v })}
+                  options={blTypeOptions}
+                  allowCustom
+                  placeholder="Chọn loại B/L..."
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1">FWD / Hãng tàu phụ trách</label>

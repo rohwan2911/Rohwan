@@ -202,6 +202,21 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     return list.map((v) => ({ value: v, label: v }));
   }, [data.lookups]);
 
+  const incotermOptions = useMemo(() => {
+    const map = new Map<string, { value: string; label: string; subLabel?: string }>();
+    data.incoterms.forEach((h) => {
+      const code = String(h.incoterms_code || '').trim().toUpperCase();
+      if (!code) return;
+      map.set(code, { value: code, label: code, subLabel: h.full_name || h.risk_transfer_point });
+    });
+    INCOTERMS_2020_MATRIX.forEach((r) => {
+      if (!map.has(r.code)) {
+        map.set(r.code, { value: r.code, label: r.code, subLabel: r.fullName });
+      }
+    });
+    return Array.from(map.values());
+  }, [data.incoterms]);
+
   const openFullRfqModal = (fromInquiry?: InquiryQuotation) => {
     if (fromInquiry) {
       setEditingOrderId(fromInquiry.order_id);
@@ -546,12 +561,16 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                 placeholder="Lọc tên khách, liên hệ, ghi chú..."
                 className="px-2.5 py-1 rounded-lg bg-[#07281c] border border-[#186635] text-xs text-[#fff5d6] placeholder-[#9bccb8]/70 outline-none w-52"
               />
-              <input
-                value={quickFilterCountry}
-                onChange={(e) => setQuickFilterCountry(e.target.value)}
-                placeholder="Lọc quốc gia..."
-                className="px-2.5 py-1 rounded-lg bg-[#07281c] border border-[#186635] text-xs text-[#fff5d6] placeholder-[#9bccb8]/70 outline-none w-36"
-              />
+              <div className="w-44">
+                <SearchableCombo
+                  dark
+                  value={quickFilterCountry}
+                  onChange={setQuickFilterCountry}
+                  options={countryOptions}
+                  allowCustom
+                  placeholder="Lọc quốc gia..."
+                />
+              </div>
             </div>
           </div>
           <div className="agri-table-scroll">
@@ -873,17 +892,17 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                         <div className="flex flex-col sm:flex-row gap-2.5 items-end">
                           <div className="w-full sm:w-[72%]">
                             <label className="block text-[10.5px] font-bold text-[#07281c] mb-1">Quy cách đóng gói</label>
-                            <select
+                            <SearchableCombo
                               value={ln.packingCode}
-                              onChange={(e) => setLines((prev) => prev.map((r, i) => (i === idx ? { ...r, packingCode: e.target.value } : r)))}
-                              className="agri-input text-xs"
-                            >
-                              {packOpts.map((pk) => (
-                                <option key={pk.code} value={pk.code}>
-                                  {pk.code} – {pk.name} (+${pk.perKgRate.toFixed(2)}/kg)
-                                </option>
-                              ))}
-                            </select>
+                              allowCustom={false}
+                              options={packOpts.map((pk) => ({
+                                value: pk.code,
+                                label: `${pk.code} – ${pk.name}`,
+                                subLabel: `+$${pk.perKgRate.toFixed(2)}/kg`,
+                              }))}
+                              placeholder="Chọn quy cách đóng gói..."
+                              onChange={(code) => setLines((prev) => prev.map((r, i) => (i === idx ? { ...r, packingCode: code } : r)))}
+                            />
                           </div>
                           <div className="w-full sm:w-[28%] flex items-end gap-1.5">
                             <div className="flex-1 min-w-0">
@@ -920,11 +939,13 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Incoterm mong muốn</label>
-                    <select value={desiredIncoterm} onChange={(e) => setDesiredIncoterm(e.target.value)} className="agri-input">
-                      {INCOTERMS_2020_MATRIX.map((r) => (
-                        <option key={r.code} value={r.code}>{r.code}</option>
-                      ))}
-                    </select>
+                    <SearchableCombo
+                      value={desiredIncoterm}
+                      onChange={(v) => setDesiredIncoterm(v.toUpperCase())}
+                      options={incotermOptions}
+                      allowCustom={false}
+                      placeholder="Chọn Incoterm..."
+                    />
                   </div>
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Chế độ Báo giá</label>
@@ -1454,7 +1475,13 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
               </div>
               <div>
                 <label className="block font-bold mb-1">Quốc gia</label>
-                <input value={cusForm.country} onChange={(e) => setCusForm({ ...cusForm, country: e.target.value })} className="agri-input" />
+                <SearchableCombo
+                  value={cusForm.country}
+                  onChange={(v) => setCusForm({ ...cusForm, country: v })}
+                  options={countryOptions}
+                  allowCustom
+                  placeholder="Chọn hoặc nhập Quốc gia..."
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1">Tax ID</label>
@@ -1482,7 +1509,13 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
               </div>
               <div>
                 <label className="block font-bold mb-1">Thanh toán mặc định</label>
-                <input value={cusForm.default_payment_term} onChange={(e) => setCusForm({ ...cusForm, default_payment_term: e.target.value })} className="agri-input" />
+                <SearchableCombo
+                  value={cusForm.default_payment_term}
+                  onChange={(v) => setCusForm({ ...cusForm, default_payment_term: v })}
+                  options={paymentOptions}
+                  allowCustom
+                  placeholder="Chọn điều khoản thanh toán..."
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1">Số đơn baseline</label>

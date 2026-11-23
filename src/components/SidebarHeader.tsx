@@ -102,6 +102,7 @@ export const COMPANY_LOGO_URL =
   'https://cqxchzwksyfwguzavqbz.supabase.co/storage/v1/object/public/images/logo-icon.png';
 
 export const Sidebar: React.FC<SidebarProps> = ({
+  currentUser,
   role,
   activeView,
   collapsed,
@@ -112,11 +113,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onNavigate,
 }) => {
   const [logoError, setLogoError] = React.useState(false);
+  const initials = (currentUser.full_name || 'NS')
+    .trim()
+    .split(/\s+/)
+    .slice(-2)
+    .map((p) => p[0]?.toUpperCase() || '')
+    .join('');
 
   return (
-    <aside className={`app-sidebar flex flex-col shrink-0 select-none ${collapsed ? 'is-collapsed' : ''}`}>
+    <aside className={`app-sidebar h-screen flex flex-col overflow-hidden shrink-0 select-none ${collapsed ? 'is-collapsed' : ''}`}>
       <div
-        className={`border-b border-[#186635] flex items-center ${
+        className={`logo shrink-0 border-b border-[#186635] flex items-center ${
           collapsed ? 'flex-col gap-2 px-2 py-3' : 'justify-between gap-2.5 px-3.5 py-3.5'
         }`}
       >
@@ -150,7 +157,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto p-2.5 space-y-4">
+      <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-2.5 space-y-4">
         {NAV_GROUPS.map((group) => {
           const visibleItems = group.items.filter((it) => role === 'ADMIN' || it.roles.includes(role));
           if (visibleItems.length === 0) return null;
@@ -196,6 +203,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
       </nav>
+
+      <div
+        className={`me shrink-0 border-t border-[#186635] bg-[#07281c]/75 flex items-center gap-2.5 ${
+          collapsed ? 'justify-center px-2 py-2.5' : 'px-3.5 py-2.5'
+        }`}
+        title={`${currentUser.full_name} · ${translateDepartment(currentUser.department)}`}
+      >
+        <div className="w-8 h-8 rounded-full bg-[#16977f] border border-[#f4d98a] text-[#fff5d6] text-xs font-extrabold flex items-center justify-center shrink-0">
+          {initials || 'NS'}
+        </div>
+        <div className="sidebar-hide-collapsed min-w-0 flex-1 leading-tight">
+          <div className="text-xs font-bold text-[#fff5d6] truncate">{currentUser.full_name}</div>
+          <div className="text-[10px] text-[#f4d98a] font-semibold truncate">
+            {translateDepartment(currentUser.department)} · {currentUser.role || 'Staff'}
+          </div>
+        </div>
+      </div>
     </aside>
   );
 };
