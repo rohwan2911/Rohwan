@@ -235,7 +235,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
 
       <div className="agri-table-wrap">
         <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635]">
-          <h3 className="text-sm font-extrabold text-[#fff5d6]">Quản lý Hợp đồng Ngoại thương (15 cột Order Master · {filteredOrders.length} HĐ)</h3>
+          <h3 className="text-sm font-extrabold text-[#fff5d6]">Quản lý Hợp đồng Ngoại thương ({filteredOrders.length} HĐ)</h3>
         </div>
         <div className="agri-table-scroll">
           <table className="agri-table">
@@ -450,7 +450,7 @@ const ContractBookingModal: React.FC<ContractBookingModalProps> = ({
               <input value={order.pod} onChange={(e) => onChangeOrder({ ...order, pod: e.target.value })} className="agri-input" />
             </div>
             <div className="sm:col-span-4">
-              <label className="block font-bold mb-1">Link File Hợp đồng đã ký (Supabase Storage Path / URL)</label>
+              <label className="block font-bold mb-1">Đường dẫn Tệp Hợp đồng đã ký</label>
               <input value={order.contract_link} onChange={(e) => onChangeOrder({ ...order, contract_link: e.target.value })} placeholder="orders/..." className="agri-input" />
             </div>
           </div>

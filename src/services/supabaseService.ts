@@ -81,7 +81,10 @@ async function fetchTemplatePlaceholdersSafe(): Promise<TemplatePlaceholder[]> {
     .order('placeholder_key', { ascending: true });
 
   if (!withAuto.error) {
-    return (withAuto.data || []) as TemplatePlaceholder[];
+    return (withAuto.data || []).map((row: any) => ({
+      ...row,
+      placeholder_key: String(row.placeholder_key || '').trim().replace(/^\{+|\}+$/g, '').trim(),
+    })) as TemplatePlaceholder[];
   }
 
   const fallback = await supabase
@@ -92,7 +95,10 @@ async function fetchTemplatePlaceholdersSafe(): Promise<TemplatePlaceholder[]> {
   if (fallback.error) {
     return [];
   }
-  return (fallback.data || []) as TemplatePlaceholder[];
+  return (fallback.data || []).map((row: any) => ({
+    ...row,
+    placeholder_key: String(row.placeholder_key || '').trim().replace(/^\{+|\}+$/g, '').trim(),
+  })) as TemplatePlaceholder[];
 }
 
 export async function fetchAllAppData(): Promise<AppDataState> {
@@ -191,11 +197,19 @@ export async function downloadTemplateDocx(storagePath: string): Promise<ArrayBu
   throw new Error(primary.error?.message || `Không thể tải phôi mẫu ${clean} từ Storage.`);
 }
 
-export async function uploadTemplateDocx(fileName: string, data: Uint8Array | Blob | ArrayBuffer): Promise<string> {
+export async function uploadTemplateDocx(
+  templateIdOrPath: string,
+  data: Uint8Array | Blob | ArrayBuffer
+): Promise<string> {
   assertConfigured();
-  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const finalName = safeName.toLowerCase().endsWith('.docx') ? safeName : `${safeName}.docx`;
-  const path = `templates/${finalName}`;
+  const raw = String(templateIdOrPath || '')
+    .trim()
+    .replace(/^\/+/, '')
+    .replace(/^documents\//i, '')
+    .replace(/^preview_templates\//i, 'templates/')
+    .replace(/^templates\//i, '');
+  const baseName = raw.replace(/\.docx$/i, '').replace(/[^a-zA-Z0-9._-]/g, '_') || `TMP_${Date.now()}`;
+  const path = `templates/${baseName}.docx`;
   const part: ArrayBuffer =
     data instanceof Uint8Array
       ? (data.slice().buffer as ArrayBuffer)
@@ -206,7 +220,7 @@ export async function uploadTemplateDocx(fileName: string, data: Uint8Array | Bl
     upsert: true,
     contentType: DOCX_MIME,
   });
-  if (error) throw new Error(`Lỗi tải phôi lên Storage: ${error.message}`);
+  if (error) throw new Error(`Lỗi tải phôi mẫu: ${error.message}`);
   return path;
 }
 
@@ -318,10 +332,10 @@ export async function upsertTemplatePlaceholders(rows: TemplatePlaceholder[]): P
   if (!rows || rows.length === 0) return;
 
   const cleanRows = rows.map((r) => ({
-    placeholder_key: String(r.placeholder_key || '').trim().replace(/^\{\{|\}\}$/g, '').toUpperCase(),
+    placeholder_key: String(r.placeholder_key || '').trim().replace(/^\{+|\}+$/g, '').toUpperCase(),
     scope: String(r.scope || 'ALL').trim(),
     source_table: String(r.source_table || 'computed').trim(),
-    source_column: String(r.source_column || 'TBA').trim(),
+    source_column: String(r.source_column || '').trim().toUpperCase() === 'TBA' ? '' : String(r.source_column || '').trim(),
     description_vie: String(r.description_vie || '').trim(),
     is_auto_created: r.is_auto_created ?? true,
   })).filter((r) => r.placeholder_key);

@@ -706,7 +706,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                                 onClick={() =>
                                   onRequestConfirm(
                                     'Hủy & Xóa đơn trước Hợp đồng?',
-                                    `Đơn ${inq.order_id} sẽ bị xóa khỏi inquiry_quotation, pricing_proposal (nếu có) và trừ lại số đơn của khách hàng.`,
+                                    `Đơn ${inq.order_id} sẽ bị xóa khỏi danh sách yêu cầu, bảng tính giá (nếu có) và cập nhật lại số đơn của khách hàng.`,
                                     () => onDeletePreContract(inq.order_id),
                                     true
                                   )
@@ -1113,7 +1113,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                               onClick={() =>
                                 onRequestConfirm(
                                   'Hủy & Xóa đơn trước Hợp đồng?',
-                                  `Đơn ${inq.order_id} sẽ bị xóa khỏi inquiry_quotation, pricing_proposal (nếu có) và trừ lại số đơn của khách hàng.`,
+                                  `Đơn ${inq.order_id} sẽ bị xóa khỏi danh sách yêu cầu, bảng tính giá (nếu có) và cập nhật lại số đơn của khách hàng.`,
                                   () => onDeletePreContract(inq.order_id),
                                   true
                                 )

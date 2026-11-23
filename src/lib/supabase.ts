@@ -21,10 +21,10 @@ export const supabase: SupabaseClient = createClient(
 function assertActiveUserStatus(userProfile: SysUser): void {
   const st = String(userProfile.status || '').trim().toLowerCase();
   if (st === 'pending' || st.includes('chờ duyệt') || st.includes('chờ phê duyệt')) {
-    throw new Error('Tài khoản đang ở trạng thái PENDING chờ Quản trị viên phê duyệt.');
+    throw new Error('Tài khoản đang chờ Quản trị viên phê duyệt.');
   }
   if (st.includes('khóa') || st.includes('inactive') || st.includes('disabled') || st.includes('ngưng')) {
-    throw new Error('Tài khoản đang bị tạm khóa trong bảng sys_users.');
+    throw new Error('Tài khoản đang bị tạm khóa.');
   }
 }
 
@@ -140,7 +140,7 @@ export async function registerWithSupabaseEmail(params: {
   });
 
   if (signUpErr) {
-    throw new Error(signUpErr.message || 'Không thể đăng ký tài khoản Supabase Auth.');
+    throw new Error(signUpErr.message || 'Không thể đăng ký tài khoản.');
   }
 
   const suffix = String(Date.now()).slice(-4);
@@ -159,7 +159,7 @@ export async function registerWithSupabaseEmail(params: {
     await supabase.auth.signOut();
   }
   if (insertErr) {
-    throw new Error(`Tài khoản Auth đã tạo nhưng lỗi lưu sys_users: ${insertErr.message}`);
+    throw new Error(`Không thể hoàn tất lưu hồ sơ nhân sự: ${insertErr.message}`);
   }
 }
 
@@ -193,7 +193,7 @@ export async function adminProvisionAuthCredential(params: {
     },
   });
   if (error && !String(error.message || '').toLowerCase().includes('already registered')) {
-    throw new Error(`Lỗi tạo Supabase Auth cho nhân sự: ${error.message}`);
+    throw new Error(`Lỗi tạo tài khoản đăng nhập cho nhân sự: ${error.message}`);
   }
 }
 

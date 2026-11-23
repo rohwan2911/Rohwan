@@ -110,6 +110,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [descriptors, setDescriptors] = useState<TemplateFieldDescriptor[]>([]);
   const [itemsRows, setItemsRows] = useState<Array<Record<string, string>>>([]);
+  const [comparisonRows, setComparisonRows] = useState<Array<Record<string, string>>>([]);
   const [renderedDocxBytes, setRenderedDocxBytes] = useState<Uint8Array | null>(null);
   const [loadError, setLoadError] = useState<string>('');
 
@@ -121,14 +122,20 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
   const ctx = useMemo(() => {
     if (!target) return null;
-    const inq = data.inquiries.find((i) => i.order_id === target.orderId);
-    const prop = data.proposals.find((p) => p.order_id === target.orderId);
+    const targetIdLow = target.orderId.trim().toLowerCase();
+    const inq = data.inquiries.find((i) => i.order_id.trim().toLowerCase() === targetIdLow);
+    const prop = data.proposals.find((p) => p.order_id.trim().toLowerCase() === targetIdLow);
     const extraMeta = proposalMetaMap[target.orderId];
-    const order = data.orders.find((o) => o.order_id === target.orderId);
+    const order = data.orders.find((o) => o.order_id.trim().toLowerCase() === targetIdLow);
     const meta = orderMetaMap[target.orderId];
-    const cusId = order?.consignee_id || inq?.consignee_id || '';
-    const cus = data.consignees.find((c) => c.consignee_id === cusId);
-    const sch = prop ? data.schedules.find((s) => s.schedule_id === prop.schedule_id) : undefined;
+    const cusId = (order?.consignee_id || inq?.consignee_id || '').trim().toLowerCase();
+    const cus = cusId
+      ? data.consignees.find((c) => c.consignee_id.trim().toLowerCase() === cusId)
+      : undefined;
+    const schId = String(prop?.schedule_id || '').trim().toLowerCase();
+    const sch = schId
+      ? data.schedules.find((s) => s.schedule_id.trim().toLowerCase() === schId)
+      : undefined;
     const items = inq
       ? parseOrderItems(inq, data.products, data.pricingRates)
       : order
@@ -235,6 +242,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       setFieldValues(built.fields);
       setDescriptors(built.descriptors);
       setItemsRows(built.itemsTableRows);
+      setComparisonRows(built.comparisonRows);
       setDocLoading(false);
       return;
     }
@@ -273,13 +281,19 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
           keys
         );
 
-        const docxBytes = await renderPopulatedDocxBytes(buf, built.fields, built.itemsTableRows);
+        const docxBytes = await renderPopulatedDocxBytes(
+          buf,
+          built.fields,
+          built.itemsTableRows,
+          built.comparisonRows
+        );
         if (cancelled) return;
 
         setTemplateBuffer(buf);
         setFieldValues(built.fields);
         setDescriptors(built.descriptors);
         setItemsRows(built.itemsTableRows);
+        setComparisonRows(built.comparisonRows);
         setRenderedDocxBytes(docxBytes);
       } catch (err: any) {
         if (cancelled) return;
@@ -353,12 +367,15 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
   const applyBatchFieldsAndRerender = async (
     patch: Record<string, string>,
-    overrideItemsRows?: Array<Record<string, string>>
+    overrideItemsRows?: Array<Record<string, string>>,
+    overrideCompRows?: Array<Record<string, string>>
   ) => {
     const updated = { ...fieldValues, ...patch };
     const nextRows = overrideItemsRows || itemsRows;
+    const nextCompRows = overrideCompRows || comparisonRows;
     setFieldValues(updated);
     if (overrideItemsRows) setItemsRows(overrideItemsRows);
+    if (overrideCompRows) setComparisonRows(overrideCompRows);
     setDescriptors((prev) =>
       prev.map((d) => {
         const v = patch[d.key] ?? patch[d.key.toUpperCase()];
@@ -367,7 +384,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     );
     if (templateBuffer) {
       try {
-        const bytes = await renderPopulatedDocxBytes(templateBuffer, updated, nextRows);
+        const bytes = await renderPopulatedDocxBytes(templateBuffer, updated, nextRows, nextCompRows);
         setRenderedDocxBytes(bytes);
       } catch {
         // Ignore transient render error while typing

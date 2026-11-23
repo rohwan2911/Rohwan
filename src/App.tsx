@@ -115,7 +115,7 @@ export const App: React.FC = () => {
       setProposalMetaMap(readProposalExtraMetaMap());
       const now = new Date();
       setLastSyncedAt(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
-      if (!opts?.silent) pushToast('success', 'Đã đồng bộ dữ liệu từ Supabase.');
+      if (!opts?.silent) pushToast('success', 'Đã đồng bộ dữ liệu.');
     } catch (err: any) {
       if (!opts?.silent) pushToast('error', err?.message || 'Lỗi tải dữ liệu.');
     } finally {

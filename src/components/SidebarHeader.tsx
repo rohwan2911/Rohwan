@@ -77,7 +77,7 @@ const VIEW_TITLES: Record<ViewId, string> = {
   'sales-contracts': 'Hợp đồng Chờ Ký & Xác nhận Khách',
   'sales-customers': 'Danh sách Khách hàng Quốc tế',
   'xnk-pricing': 'Bảng Tính giá XNK · FCL/LCL & Incoterms 2020',
-  'xnk-contract': 'Quản lý Hợp đồng Ngoại thương (Order Master)',
+  'xnk-contract': 'Quản lý Hợp đồng Ngoại thương',
   'xnk-documents': 'Bộ chứng từ Xuất khẩu (Docs Hub)',
   'xnk-shipping': 'Lịch tàu & Cước vận chuyển Đường biển',
   'xnk-rates': 'Bảng giá Phụ phí, Bao bì, Bảo hiểm & Container',

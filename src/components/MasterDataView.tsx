@@ -1,5 +1,25 @@
-import React, { useEffect, useState } from 'react';
-import { Plus, Trash2, Edit3, Package, Ship, Receipt, FileCode2, ShieldCheck, Sparkles, Upload, FileDown, Loader2 } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Plus,
+  Trash2,
+  Edit3,
+  Package,
+  Ship,
+  Receipt,
+  FileCode2,
+  ShieldCheck,
+  Sparkles,
+  Upload,
+  FileDown,
+  Loader2,
+  X,
+  Search,
+  Wand2,
+  Save,
+  Hash,
+  Check,
+  Tag,
+} from 'lucide-react';
 import type {
   AppDataState,
   PricingRate,
@@ -13,10 +33,19 @@ import type {
 import { capitalizeWordsPreservingSpaces, computeFreightExpiryStatus, fmtUSD, normalizePlainText, todayIsoDate, toNum } from '../utils/calculations';
 import {
   applyAiTagsToDocx,
+  DocxParagraphBlock,
   extractDocxParagraphBlocks,
   extractPlaceholdersFromDocx,
+  formatTemplateDepartmentLabel,
+  getVietnamesePlaceholderLabel,
+  normalizeTemplateDepartment,
+  parsePlaceholderKeyList,
+  resolveCleanVietnameseLabel,
+  stripPlaceholderBraces,
+  TEMPLATE_DEPARTMENT_OPTIONS,
 } from '../utils/docxEngine';
 import {
+  downloadTemplateDocx,
   openDocumentWithSignedUrl,
   uploadTemplateDocx,
   upsertTemplatePlaceholders,
@@ -67,12 +96,52 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
   const [tplFile, setTplFile] = useState<File | null>(null);
   const [tplDetectedTags, setTplDetectedTags] = useState<string[]>([]);
   const [tplBusy, setTplBusy] = useState(false);
+  const [tplFieldSearch, setTplFieldSearch] = useState('');
+
+  // Interactive #-Marker Smart-Fill & Manual Tag Review Modal state
+  const [tagEditor, setTagEditor] = useState<{
+    open: boolean;
+    isEdit: boolean;
+    templateForm: TemplateManager;
+    buffer: ArrayBuffer;
+    blocks: DocxParagraphBlock[];
+    pendingNewPlaceholders: TemplatePlaceholder[];
+    updatedBlockIds: string[];
+  } | null>(null);
+  const [tagEditorBusy, setTagEditorBusy] = useState(false);
+  const [tagEditorLoadingId, setTagEditorLoadingId] = useState<string | null>(null);
+  const [tagBlockSearch, setTagBlockSearch] = useState('');
+  const [tagOnlyMarked, setTagOnlyMarked] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState('');
+  const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
+  const activeCursorRef = useRef<{ blockId: string; start: number; end: number } | null>(null);
+  const blockTextareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
+
   const [usrModal, setUsrModal] = useState<{ open: boolean; isEdit: boolean; form: SysUser | null; initialPassword: string }>({
     open: false,
     isEdit: false,
     form: null,
     initialPassword: '',
   });
+
+  const normalizedPlaceholders = useMemo(() => {
+    const seen = new Set<string>();
+    const list: Array<{ key: string; label: string; scope: string; tp: TemplatePlaceholder }> = [];
+    data.templatePlaceholders.forEach((tp) => {
+      const key = stripPlaceholderBraces(tp.placeholder_key);
+      if (!key) return;
+      const upper = key.toUpperCase();
+      if (seen.has(upper)) return;
+      seen.add(upper);
+      list.push({
+        key,
+        label: resolveCleanVietnameseLabel(key, tp),
+        scope: tp.scope || 'COMMON',
+        tp: { ...tp, placeholder_key: key },
+      });
+    });
+    return list;
+  }, [data.templatePlaceholders]);
 
   useEffect(() => {
     if (activeView === 'xnk-shipping' && highlightedId) {
@@ -447,36 +516,100 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
   }
 
   if (activeView === 'admin-templates') {
+    const openTagReviewModal = async (
+      templateForm: TemplateManager,
+      isEdit: boolean,
+      buffer: ArrayBuffer
+    ) => {
+      const blocks = await extractDocxParagraphBlocks(buffer);
+      if (blocks.length === 0) {
+        onToast('warning', 'Không đọc được nội dung văn bản trong tệp .docx này.');
+        return;
+      }
+      setTagBlockSearch('');
+      setTagOnlyMarked(false);
+      setPickerSearch('');
+      setActiveBlockId(blocks[0]?.id || null);
+      activeCursorRef.current = null;
+      setTagEditor({
+        open: true,
+        isEdit,
+        templateForm: {
+          ...templateForm,
+          target_department: normalizeTemplateDepartment(
+            templateForm.target_department,
+            templateForm.template_id,
+            templateForm.document_name
+          ),
+        },
+        buffer,
+        blocks,
+        pendingNewPlaceholders: [],
+        updatedBlockIds: [],
+      });
+    };
+
+    const handleOpenTagEditorForExistingRow = async (tpl: TemplateManager) => {
+      if (!tpl.google_doc_file_id) {
+        onToast('warning', 'Mẫu này chưa có tệp .docx. Vui lòng chọn "Sửa / Thay phôi" để tải tệp lên trước.');
+        return;
+      }
+      setTagEditorLoadingId(tpl.template_id);
+      try {
+        const buf = await downloadTemplateDocx(tpl.google_doc_file_id);
+        await openTagReviewModal(tpl, true, buf);
+      } catch (err: any) {
+        onToast('error', err?.message || 'Không thể tải tệp phôi .docx.');
+      } finally {
+        setTagEditorLoadingId(null);
+      }
+    };
+
     const handleSelectDocxFile = async (file: File | null) => {
       setTplFile(file);
       setTplDetectedTags([]);
-      if (!file) return;
+      if (!file || !tplModal.form) return;
       try {
         const buf = await file.arrayBuffer();
         const tags = await extractPlaceholdersFromDocx(buf);
         setTplDetectedTags(tags);
-        if (tplModal.form) {
-          const baseName = file.name.replace(/\.docx$/i, '');
-          const autoId = tplModal.form.template_id || `TMP_${baseName.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`;
-          setTplModal({
-            ...tplModal,
-            form: {
-              ...tplModal.form,
-              template_id: autoId,
-              document_name: tplModal.form.document_name || baseName,
-              google_doc_file_id: `templates/${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`,
-              supported_placeholders: tags.length > 0 ? tags.join(', ') : tplModal.form.supported_placeholders,
-            },
-          });
+
+        const baseName = file.name.replace(/\.docx$/i, '');
+        const cleanAutoId =
+          tplModal.form.template_id.trim() ||
+          `TMP_${baseName.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`;
+        const nextDept = normalizeTemplateDepartment(
+          tplModal.form.target_department,
+          cleanAutoId,
+          tplModal.form.document_name || baseName
+        );
+        const updatedForm: TemplateManager = {
+          ...tplModal.form,
+          template_id: cleanAutoId,
+          document_name: tplModal.form.document_name || baseName,
+          target_department: nextDept,
+          google_doc_file_id: `templates/${cleanAutoId}.docx`,
+          supported_placeholders:
+            tags.length > 0 ? tags.join(', ') : tplModal.form.supported_placeholders,
+        };
+        setTplModal({
+          ...tplModal,
+          form: updatedForm,
+        });
+
+        // When uploading a raw .docx file without existing tags, automatically launch interactive #-Marker Tag Review Modal
+        if (tags.length === 0) {
+          await openTagReviewModal(updatedForm, tplModal.isEdit, buf);
         }
       } catch (err: any) {
-        onToast('error', err?.message || 'File .docx không hợp lệ.');
+        onToast('error', err?.message || 'Tệp .docx không hợp lệ.');
       }
     };
 
     const handleUploadTaggedDocx = async () => {
       if (!tplModal.form || !tplFile) return;
-      if (!tplModal.form.template_id.trim()) {
+      const cleanId = tplModal.form.template_id.trim();
+      if (!cleanId) {
         onToast('warning', 'Vui lòng nhập Template ID.');
         return;
       }
@@ -484,49 +617,149 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
       try {
         const buf = await tplFile.arrayBuffer();
         const tags = await extractPlaceholdersFromDocx(buf);
-        const storagePath = await uploadTemplateDocx(tplFile.name, buf);
+        const storagePath = await uploadTemplateDocx(cleanId, buf);
+        const mergedKeys = parsePlaceholderKeyList(
+          [...tags, ...parsePlaceholderKeyList(tplModal.form.supported_placeholders)].join(', ')
+        );
         const nextRow: TemplateManager = {
           ...tplModal.form,
+          template_id: cleanId,
+          target_department: normalizeTemplateDepartment(
+            tplModal.form.target_department,
+            cleanId,
+            tplModal.form.document_name
+          ),
           google_doc_file_id: storagePath,
-          supported_placeholders: tags.join(', ') || tplModal.form.supported_placeholders,
+          supported_placeholders: mergedKeys.join(', '),
         };
         await onUpsertTemplate(nextRow, tplModal.isEdit);
         setTplModal({ open: false, isEdit: false, form: null });
         setTplFile(null);
       } catch (err: any) {
-        onToast('error', err?.message || 'Lỗi tải phôi lên Storage.');
+        onToast('error', err?.message || 'Lỗi tải phôi .docx.');
       } finally {
         setTplBusy(false);
       }
     };
 
-    const handleAiSmartFillAndSave = async () => {
-      if (!tplModal.form || !tplFile) {
-        onToast('warning', 'Vui lòng chọn file .docx thô cần gắn biến.');
-        return;
-      }
+    const handleOpenTagEditorFromModal = async () => {
+      if (!tplModal.form) return;
       if (!tplModal.form.template_id.trim()) {
-        onToast('warning', 'Vui lòng nhập Template ID.');
+        onToast('warning', 'Vui lòng nhập Template ID trước khi mở trình gắn biến.');
         return;
       }
       setTplBusy(true);
       try {
-        const buf = await tplFile.arrayBuffer();
-        const blocks = await extractDocxParagraphBlocks(buf);
-        if (blocks.length === 0) {
-          throw new Error('Không đọc được nội dung văn bản trong file .docx.');
+        let buf: ArrayBuffer;
+        if (tplFile) {
+          buf = await tplFile.arrayBuffer();
+        } else if (tplModal.form.google_doc_file_id) {
+          buf = await downloadTemplateDocx(tplModal.form.google_doc_file_id);
+        } else {
+          onToast('warning', 'Vui lòng chọn tệp .docx trước khi gắn biến.');
+          return;
         }
+        await openTagReviewModal(tplModal.form, tplModal.isEdit, buf);
+      } catch (err: any) {
+        onToast('error', err?.message || 'Không thể mở tệp phôi để gắn biến.');
+      } finally {
+        setTplBusy(false);
+      }
+    };
+
+    const handleUpdateTagBlockText = (blockId: string, nextText: string) => {
+      setTagEditor((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          blocks: prev.blocks.map((b) => (b.id === blockId ? { ...b, text: nextText } : b)),
+        };
+      });
+    };
+
+    const handleInsertSnippetAtCursor = (snippet: string, explicitBlockId?: string) => {
+      if (!tagEditor) return;
+      const targetId = explicitBlockId || activeBlockId || tagEditor.blocks[0]?.id;
+      if (!targetId) return;
+
+      const block = tagEditor.blocks.find((b) => b.id === targetId);
+      if (!block) return;
+
+      const cursor =
+        activeCursorRef.current && activeCursorRef.current.blockId === targetId
+          ? activeCursorRef.current
+          : { blockId: targetId, start: block.text.length, end: block.text.length };
+
+      const before = block.text.slice(0, cursor.start);
+      const after = block.text.slice(cursor.end);
+      const nextText = `${before}${snippet}${after}`;
+      const nextCaret = cursor.start + snippet.length;
+
+      handleUpdateTagBlockText(targetId, nextText);
+      setActiveBlockId(targetId);
+      activeCursorRef.current = { blockId: targetId, start: nextCaret, end: nextCaret };
+
+      window.requestAnimationFrame(() => {
+        const el = blockTextareaRefs.current[targetId];
+        if (el) {
+          el.focus();
+          el.setSelectionRange(nextCaret, nextCaret);
+        }
+      });
+    };
+
+    const handleRemoveTagFromBlock = (blockId: string, tagKey: string) => {
+      if (!tagEditor) return;
+      const block = tagEditor.blocks.find((b) => b.id === blockId);
+      if (!block) return;
+      const escaped = tagKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const nextText = block.text
+        .replace(new RegExp(`\\{\\{\\s*${escaped}\\s*\\}\\}`, 'g'), '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+      handleUpdateTagBlockText(blockId, nextText);
+    };
+
+    const handleSmartFillHashMarkers = async () => {
+      if (!tagEditor) return;
+      const markedIndices: number[] = [];
+      tagEditor.blocks.forEach((b, idx) => {
+        if (b.text.includes('#')) markedIndices.push(idx);
+      });
+
+      if (markedIndices.length === 0) {
+        onToast(
+          'warning',
+          'Vui lòng điền ít nhất một dấu # vào vị trí cần gán dữ liệu trong văn bản trước khi bấm Tự động nhận diện.'
+        );
+        return;
+      }
+
+      setTagEditorBusy(true);
+      try {
+        const markedBlocksPayload = markedIndices.map((idx) => {
+          const b = tagEditor.blocks[idx];
+          const prevBlock = idx > 0 ? tagEditor.blocks[idx - 1] : undefined;
+          const nextBlock = idx < tagEditor.blocks.length - 1 ? tagEditor.blocks[idx + 1] : undefined;
+          const prevContext = [b.contextHint, prevBlock?.text].filter(Boolean).join(' | ');
+          return {
+            id: b.id,
+            text: b.text,
+            prevText: prevContext,
+            nextText: nextBlock?.text || '',
+          };
+        });
 
         const resp = await fetch('/api/gemini', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            action: 'smart_fill_template',
-            documentName: tplModal.form.document_name || tplFile.name,
-            targetDepartment: tplModal.form.target_department || 'XNK',
-            blocks: blocks.map((b) => ({ id: b.id, text: b.text })),
+            action: 'smart_fill_hash_markers',
+            documentName: tagEditor.templateForm.document_name || tagEditor.templateForm.template_id,
+            targetDepartment: tagEditor.templateForm.target_department,
+            markedBlocks: markedBlocksPayload,
             existingPlaceholders: data.templatePlaceholders.map((p) => ({
-              placeholder_key: p.placeholder_key,
+              placeholder_key: stripPlaceholderBraces(p.placeholder_key),
               scope: p.scope,
               source_table: p.source_table,
               source_column: p.source_column,
@@ -536,52 +769,218 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
         });
         const json = await resp.json();
         if (!resp.ok || !json.success) {
-          throw new Error(json.message || 'Lỗi Gemini AI Smart-Fill.');
+          throw new Error(json.message || 'Không thể tự động nhận diện biến cho các dấu #.');
         }
 
-        const replacements = Array.isArray(json.replacements) ? json.replacements : [];
-        const newPlaceholders = (Array.isArray(json.newPlaceholders) ? json.newPlaceholders : []) as TemplatePlaceholder[];
-        const taggedBytes = await applyAiTagsToDocx(buf, replacements);
-        const abTagged = taggedBytes.buffer.slice(taggedBytes.byteOffset, taggedBytes.byteOffset + taggedBytes.byteLength) as ArrayBuffer;
+        const replacements = (Array.isArray(json.replacements) ? json.replacements : []) as Array<{
+          blockId: string;
+          taggedText: string;
+        }>;
+        const replacementMap = new Map<string, string>();
+        replacements.forEach((r) => {
+          if (r.blockId && typeof r.taggedText === 'string') {
+            replacementMap.set(r.blockId, r.taggedText);
+          }
+        });
+
+        const returnedNew = (Array.isArray(json.newPlaceholders) ? json.newPlaceholders : []) as TemplatePlaceholder[];
+        const cleanNew = returnedNew
+          .map((np) => ({
+            ...np,
+            placeholder_key: stripPlaceholderBraces(np.placeholder_key),
+            is_auto_created: true,
+          }))
+          .filter((np) => Boolean(np.placeholder_key));
+
+        setTagEditor((prev) => {
+          if (!prev) return prev;
+          const existingNewKeys = new Set(prev.pendingNewPlaceholders.map((p) => p.placeholder_key.toUpperCase()));
+          const mergedNew = [
+            ...prev.pendingNewPlaceholders,
+            ...cleanNew.filter((np) => !existingNewKeys.has(np.placeholder_key.toUpperCase())),
+          ];
+          return {
+            ...prev,
+            blocks: prev.blocks.map((b) =>
+              replacementMap.has(b.id) ? { ...b, text: replacementMap.get(b.id)! } : b
+            ),
+            pendingNewPlaceholders: mergedNew,
+            updatedBlockIds: Array.from(replacementMap.keys()),
+          };
+        });
+
+        onToast(
+          'success',
+          `Đã nhận diện & điền biến cho ${replacementMap.size} vị trí dấu #. Vui lòng kiểm tra lại và bấm Lưu phôi.`
+        );
+      } catch (err: any) {
+        onToast('error', err?.message || 'Lỗi tự động nhận diện dấu #.');
+      } finally {
+        setTagEditorBusy(false);
+      }
+    };
+
+    const handleSaveReviewedDocx = async () => {
+      if (!tagEditor) return;
+      const cleanId = tagEditor.templateForm.template_id.trim();
+      if (!cleanId) {
+        onToast('warning', 'Vui lòng nhập Template ID trước khi lưu phôi.');
+        return;
+      }
+
+      setTagEditorBusy(true);
+      try {
+        const changedReplacements = tagEditor.blocks
+          .filter((b) => b.text !== b.originalText)
+          .map((b) => ({ blockId: b.id, taggedText: b.text }));
+
+        const taggedBytes = await applyAiTagsToDocx(tagEditor.buffer, changedReplacements);
+        const abTagged = taggedBytes.buffer.slice(
+          taggedBytes.byteOffset,
+          taggedBytes.byteOffset + taggedBytes.byteLength
+        ) as ArrayBuffer;
         const finalTags = await extractPlaceholdersFromDocx(abTagged);
 
-        const storagePath = await uploadTemplateDocx(tplFile.name, taggedBytes);
-        const existingKeySet = new Set(data.templatePlaceholders.map((p) => p.placeholder_key.toUpperCase()));
-        const trulyNew = newPlaceholders
-          .filter((np) => np.placeholder_key && !existingKeySet.has(np.placeholder_key.trim().toUpperCase()))
-          .map((np) => ({ ...np, is_auto_created: true }));
+        const storagePath = await uploadTemplateDocx(cleanId, taggedBytes);
 
+        const existingKeySet = new Set(
+          data.templatePlaceholders.map((p) => stripPlaceholderBraces(p.placeholder_key).toUpperCase())
+        );
+        const trulyNew = tagEditor.pendingNewPlaceholders.filter(
+          (np) => np.placeholder_key && !existingKeySet.has(np.placeholder_key.toUpperCase())
+        );
         if (trulyNew.length > 0) {
           await upsertTemplatePlaceholders(trulyNew);
         }
 
-        await onUpsertTemplate(
-          {
-            ...tplModal.form,
-            google_doc_file_id: storagePath,
-            supported_placeholders: finalTags.join(', '),
-          },
-          tplModal.isEdit
-        );
+        const nextTemplateRow: TemplateManager = {
+          ...tagEditor.templateForm,
+          template_id: cleanId,
+          target_department: normalizeTemplateDepartment(
+            tagEditor.templateForm.target_department,
+            cleanId,
+            tagEditor.templateForm.document_name
+          ),
+          google_doc_file_id: storagePath,
+          supported_placeholders: finalTags.join(', '),
+        };
+
+        await onUpsertTemplate(nextTemplateRow, tagEditor.isEdit);
         if (onRefreshData) await onRefreshData();
 
         onToast(
           'success',
-          `AI đã gắn ${finalTags.length} biến vào phôi (tạo mới ${trulyNew.length} biến vào template_placeholders).`
+          `Đã lưu phôi ${cleanId} thành công (${finalTags.length} trường dữ liệu đã gắn).`
         );
+        setTagEditor(null);
         setTplModal({ open: false, isEdit: false, form: null });
         setTplFile(null);
       } catch (err: any) {
-        onToast('error', err?.message || 'Lỗi AI Smart-Fill.');
+        onToast('error', err?.message || 'Lỗi lưu phôi .docx.');
       } finally {
-        setTplBusy(false);
+        setTagEditorBusy(false);
       }
     };
+
+    const toggleModalPlaceholder = (key: string) => {
+      if (!tplModal.form) return;
+      const currentKeys = parsePlaceholderKeyList(tplModal.form.supported_placeholders);
+      const upper = key.toUpperCase();
+      const exists = currentKeys.some((k) => k.toUpperCase() === upper);
+      const nextKeys = exists
+        ? currentKeys.filter((k) => k.toUpperCase() !== upper)
+        : [...currentKeys, key];
+      setTplModal({
+        ...tplModal,
+        form: {
+          ...tplModal.form,
+          supported_placeholders: nextKeys.join(', '),
+        },
+      });
+    };
+
+    const modalSelectedKeySet = new Set(
+      parsePlaceholderKeyList(tplModal.form?.supported_placeholders).map((k) => k.toUpperCase())
+    );
+
+    const modalSelectableFields = (() => {
+      const base = [...normalizedPlaceholders];
+      const existingUpper = new Set(base.map((x) => x.key.toUpperCase()));
+      parsePlaceholderKeyList(tplModal.form?.supported_placeholders).forEach((k) => {
+        if (!existingUpper.has(k.toUpperCase())) {
+          existingUpper.add(k.toUpperCase());
+          base.push({
+            key: k,
+            label: getVietnamesePlaceholderLabel(k, data.templatePlaceholders),
+            scope: 'CUSTOM',
+            tp: {
+              placeholder_key: k,
+              scope: 'CUSTOM',
+              source_table: 'manual',
+              source_column: '',
+              description_vie: getVietnamesePlaceholderLabel(k, data.templatePlaceholders),
+            },
+          });
+        }
+      });
+      const q = tplFieldSearch.trim().toLowerCase();
+      return base.filter((item) => !q || item.label.toLowerCase().includes(q));
+    })();
+
+    const tagEditorPickerItems = (() => {
+      const merged = [...normalizedPlaceholders];
+      const seen = new Set(merged.map((x) => x.key.toUpperCase()));
+      (tagEditor?.pendingNewPlaceholders || []).forEach((np) => {
+        const k = stripPlaceholderBraces(np.placeholder_key);
+        if (!k || seen.has(k.toUpperCase())) return;
+        seen.add(k.toUpperCase());
+        merged.unshift({
+          key: k,
+          label: resolveCleanVietnameseLabel(k, np),
+          scope: np.scope || 'NEW',
+          tp: np,
+        });
+      });
+      const q = pickerSearch.trim().toLowerCase();
+      return merged.filter(
+        (item) => !q || item.label.toLowerCase().includes(q) || item.key.toLowerCase().includes(q)
+      );
+    })();
+
+    const allTagEditorPlaceholders = [
+      ...data.templatePlaceholders,
+      ...(tagEditor?.pendingNewPlaceholders || []),
+    ];
+
+    const filteredTagBlocks = (tagEditor?.blocks || []).filter((b) => {
+      const hasHash = b.text.includes('#');
+      const hasVar = /\{\{\s*[A-Za-z0-9_.-]+\s*\}\}/.test(b.text);
+      if (tagOnlyMarked && !hasHash && !hasVar) return false;
+      const q = tagBlockSearch.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        b.text.toLowerCase().includes(q) ||
+        String(b.contextHint || '').toLowerCase().includes(q)
+      );
+    });
+
+    const totalHashCount = (tagEditor?.blocks || []).reduce(
+      (sum, b) => sum + (b.text.match(/#/g)?.length || 0),
+      0
+    );
+
+    const filteredTemplates = data.templates.filter(
+      (t) =>
+        !qLower ||
+        `${t.template_id} ${t.document_name} ${formatTemplateDepartmentLabel(t.target_department, t.template_id, t.document_name)} ${t.google_doc_file_id}`
+          .toLowerCase()
+          .includes(qLower)
+    );
 
     return (
       <div className="space-y-5">
         <div className="agri-table-wrap">
-          <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex items-center justify-between gap-2">
+          <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-extrabold text-[#fff5d6] flex items-center gap-2">
               <FileCode2 className="w-4 h-4 text-[#f4d98a]" /> Quản lý Phôi mẫu Chứng từ (.docx)
             </h3>
@@ -590,6 +989,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
               onClick={() => {
                 setTplFile(null);
                 setTplDetectedTags([]);
+                setTplFieldSearch('');
                 setTplModal({
                   open: true,
                   isEdit: false,
@@ -597,7 +997,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                     template_id: '',
                     document_name: '',
                     google_doc_file_id: '',
-                    target_department: 'XNK',
+                    target_department: 'Xuất nhập khẩu (XNK)',
                     status: 'Active',
                     supported_placeholders: '',
                   },
@@ -608,126 +1008,171 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
               + Thêm / Tải lên Phôi .docx
             </button>
           </div>
-          <div className="agri-table-scroll">
-            <table className="agri-table">
+
+          <div className="w-full overflow-x-auto">
+            <table className="agri-table w-full min-w-[1140px]">
               <thead>
                 <tr>
-                  <th className="text-center">Template ID</th>
-                  <th className="text-left">Tên chứng từ</th>
-                  <th className="text-center">Phòng ban</th>
-                  <th className="text-left">Storage Path (.docx)</th>
-                  <th className="text-left">Biến hỗ trợ</th>
-                  <th className="text-center">Trạng thái</th>
-                  <th className="text-center">Thao tác</th>
+                  <th className="text-left w-[160px] whitespace-nowrap">TEMPLATE ID</th>
+                  <th className="text-left w-[195px]">TÊN CHỨNG TỪ</th>
+                  <th className="text-center w-[155px] whitespace-nowrap">PHÒNG BAN</th>
+                  <th className="text-left w-[205px]">STORAGE PATH</th>
+                  <th className="text-left w-[240px]">BIẾN HỖ TRỢ</th>
+                  <th className="text-center w-[95px] whitespace-nowrap">TRẠNG THÁI</th>
+                  <th className="text-center w-[225px] whitespace-nowrap">THAO TÁC</th>
                 </tr>
               </thead>
               <tbody>
-                {data.templates.map((t) => (
-                  <tr key={t.template_id}>
-                    <td className="text-center font-mono font-bold whitespace-nowrap">{t.template_id}</td>
-                    <td className="text-left font-bold">{t.document_name}</td>
-                    <td className="text-center font-bold">{t.target_department}</td>
-                    <td className="text-left font-mono text-xs">{t.google_doc_file_id || '-'}</td>
-                    <td className="text-left font-mono text-[10.5px] max-w-xs truncate" title={t.supported_placeholders}>
-                      {t.supported_placeholders || '-'}
-                    </td>
-                    <td className="text-center">
-                      <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
-                        {t.status}
-                      </span>
-                    </td>
-                    <td className="text-center">
-                      <div className="inline-flex flex-wrap items-center justify-center gap-1">
-                        {t.google_doc_file_id && (
+                {filteredTemplates.map((t) => {
+                  const deptLabel = formatTemplateDepartmentLabel(
+                    t.target_department,
+                    t.template_id,
+                    t.document_name
+                  );
+                  const isSaleDept = deptLabel === 'Kinh doanh (Sale)';
+                  const keys = parsePlaceholderKeyList(t.supported_placeholders);
+                  const vieLabels = Array.from(
+                    new Set(keys.map((k) => getVietnamesePlaceholderLabel(k, data.templatePlaceholders)))
+                  );
+                  const previewLabels = vieLabels.slice(0, 3);
+                  const extraCount = Math.max(0, vieLabels.length - previewLabels.length);
+                  const isRowLoading = tagEditorLoadingId === t.template_id;
+
+                  return (
+                    <tr key={t.template_id}>
+                      <td className="text-left font-mono font-bold text-xs whitespace-nowrap">
+                        {t.template_id}
+                      </td>
+                      <td className="text-left font-bold text-xs leading-snug">
+                        {t.document_name}
+                      </td>
+                      <td className="text-center whitespace-nowrap">
+                        <span
+                          className={`keep-badge-color inline-block px-2 py-0.5 rounded text-[11px] font-bold ${
+                            isSaleDept
+                              ? 'bg-[#f4d98a] text-[#07281c]'
+                              : 'bg-[#0f4a33] text-[#fff5d6]'
+                          }`}
+                        >
+                          {deptLabel}
+                        </span>
+                      </td>
+                      <td className="text-left font-mono text-[11px] break-all leading-snug">
+                        {t.google_doc_file_id || '-'}
+                      </td>
+                      <td className="text-left text-[11px] leading-snug" title={vieLabels.join(', ')}>
+                        {vieLabels.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {previewLabels.map((lbl) => (
+                              <span
+                                key={lbl}
+                                className="inline-block px-1.5 py-0.5 rounded bg-[#0f4a33]/15 border border-[#0f4a33]/25 text-[#07281c] text-[10.5px] font-semibold"
+                              >
+                                {lbl}
+                              </span>
+                            ))}
+                            {extraCount > 0 && (
+                              <span className="inline-block px-1.5 py-0.5 rounded bg-[#07281c] text-[#f4d98a] text-[10.5px] font-bold">
+                                +{extraCount} trường
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="opacity-65 italic">Chưa gắn trường dữ liệu</span>
+                        )}
+                      </td>
+                      <td className="text-center whitespace-nowrap">
+                        <span
+                          className={`keep-badge-color inline-block px-2 py-0.5 rounded text-[11px] font-bold ${
+                            String(t.status || '').toLowerCase() === 'active'
+                              ? 'bg-[#0f4a33] text-[#fff5d6]'
+                              : 'bg-[#8c3b3b] text-white'
+                          }`}
+                        >
+                          {t.status}
+                        </span>
+                      </td>
+                      <td className="text-center whitespace-nowrap">
+                        <div className="inline-flex items-center justify-center gap-1">
+                          {t.google_doc_file_id && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openDocumentWithSignedUrl(t.google_doc_file_id).catch((err: any) =>
+                                  onToast('error', err?.message || 'Không thể tải phôi.')
+                                )
+                              }
+                              className="keep-btn-style px-2 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <FileDown className="w-3 h-3" /> Tải
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() =>
-                              openDocumentWithSignedUrl(t.google_doc_file_id).catch((err: any) =>
-                                onToast('error', err?.message || 'Không thể tải phôi.')
-                              )
-                            }
-                            className="keep-btn-style px-2 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                            disabled={isRowLoading}
+                            onClick={() => void handleOpenTagEditorForExistingRow(t)}
+                            className="keep-btn-style px-2 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer disabled:opacity-60"
                           >
-                            <FileDown className="w-3 h-3" /> Tải
+                            {isRowLoading ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Sparkles className="w-3 h-3" />
+                            )}
+                            <span>Tự thêm biến</span>
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTplFile(null);
-                            setTplDetectedTags([]);
-                            setTplModal({ open: true, isEdit: true, form: { ...t } });
-                          }}
-                          className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
-                        >
-                          Sửa / Thay phôi
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTplFile(null);
+                              setTplDetectedTags([]);
+                              setTplFieldSearch('');
+                              setTplModal({
+                                open: true,
+                                isEdit: true,
+                                form: {
+                                  ...t,
+                                  target_department: normalizeTemplateDepartment(
+                                    t.target_department,
+                                    t.template_id,
+                                    t.document_name
+                                  ),
+                                },
+                              });
+                            }}
+                            className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
+                          >
+                            Sửa
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
 
-        {/* Từ điển biến chuẩn */}
-        <div className="agri-table-wrap">
-          <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635]">
-            <h3 className="text-sm font-extrabold text-[#fff5d6]">
-              Từ điển Trường Dữ liệu Chứng từ
-            </h3>
-          </div>
-          <div className="agri-table-scroll">
-            <table className="agri-table">
-              <thead>
-                <tr>
-                  <th>Placeholder Key</th>
-                  <th>Phạm vi (Scope)</th>
-                  <th>Bảng nguồn</th>
-                  <th>Cột / Công thức</th>
-                  <th>Mô tả tiếng Việt</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.templatePlaceholders.map((tp) => (
-                  <tr key={tp.placeholder_key}>
-                    <td className="font-mono font-bold">
-                      {`{{${tp.placeholder_key}}}`}
-                      {tp.is_auto_created && (
-                        <span className="keep-badge-color ml-1.5 px-1.5 py-0.5 rounded bg-[#f4d98a] text-[#07281c] text-[10px] font-extrabold">
-                          AI Auto
-                        </span>
-                      )}
-                    </td>
-                    <td className="font-mono text-xs">{tp.scope}</td>
-                    <td className="font-mono text-xs">{tp.source_table}</td>
-                    <td className="font-mono text-xs">{tp.source_column}</td>
-                    <td className="text-xs">{tp.description_vie}</td>
-                  </tr>
-                ))}
-                {data.templatePlaceholders.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="text-center py-6 opacity-75">
-                      Chưa có dữ liệu từ điển trường chứng từ.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
+        {/* Add / Edit Template Modal */}
         {tplModal.open && tplModal.form && (
           <div className="fixed inset-0 z-50 bg-[#07281c]/75 flex items-center justify-center p-4">
-            <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl w-full max-w-xl p-5 text-[#f4f8f5] space-y-3 text-xs">
-              <h4 className="text-base font-extrabold text-[#fff5d6]">
-                {tplModal.isEdit ? 'Cập nhật Phôi mẫu Chứng từ (.docx)' : 'Thêm Phôi mẫu Chứng từ (.docx)'}
-              </h4>
+            <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-5 text-[#f4f8f5] space-y-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-base font-extrabold text-[#fff5d6]">
+                  {tplModal.isEdit ? 'Cập nhật Phôi mẫu Chứng từ (.docx)' : 'Thêm Phôi mẫu Chứng từ (.docx)'}
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setTplModal({ open: false, isEdit: false, form: null })}
+                  className="p-1 rounded-lg bg-[#07281c] text-[#fff5d6] cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
 
               <div className="agri-card-inner p-3 space-y-2">
                 <label className="block font-extrabold text-[#07281c]">
-                  Chọn file Word (.docx) từ máy để tải lên Storage hoặc gắn biến tự động bằng AI:
+                  Chọn tệp Word (.docx) từ máy tính để tải lên hoặc mở trình đánh dấu biến (#):
                 </label>
                 <input
                   type="file"
@@ -738,75 +1183,171 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                 {tplFile && (
                   <div className="text-[11px] font-semibold text-[#0f4a33]">
                     {tplDetectedTags.length > 0
-                      ? `Phát hiện ${tplDetectedTags.length} biến {{...}} sẵn có: ${tplDetectedTags.slice(0, 8).join(', ')}${tplDetectedTags.length > 8 ? '...' : ''}`
-                      : 'Chưa phát hiện thẻ {{...}} — Có thể bấm "Tự gắn biến AI & Lưu phôi" để AI tự động đánh dấu biến chuẩn.'}
+                      ? `Đã đọc tệp "${tplFile.name}" (${tplDetectedTags.length} trường dữ liệu đã có sẵn trong phôi).`
+                      : `Tệp "${tplFile.name}" chưa có trường gán dữ liệu — đã sẵn sàng mở trình gắn biến bằng dấu #`}
                   </div>
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label className="block font-bold mb-1">Template ID *</label>
                   <input
                     disabled={tplModal.isEdit}
                     placeholder="VD: TMP_CONTRACT_EDIBLE_NUTS"
                     value={tplModal.form.template_id}
-                    onChange={(e) => setTplModal({ ...tplModal, form: { ...tplModal.form!, template_id: e.target.value } })}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setTplModal({
+                        ...tplModal,
+                        form: {
+                          ...tplModal.form!,
+                          template_id: nextId,
+                          google_doc_file_id: nextId.trim() ? `templates/${nextId.trim()}.docx` : '',
+                        },
+                      });
+                    }}
                     className="agri-input font-mono"
                   />
                 </div>
                 <div>
                   <label className="block font-bold mb-1">Phòng ban</label>
                   <select
-                    value={tplModal.form.target_department}
-                    onChange={(e) => setTplModal({ ...tplModal, form: { ...tplModal.form!, target_department: e.target.value } })}
-                    className="agri-input"
+                    value={normalizeTemplateDepartment(
+                      tplModal.form.target_department,
+                      tplModal.form.template_id,
+                      tplModal.form.document_name
+                    )}
+                    onChange={(e) =>
+                      setTplModal({
+                        ...tplModal,
+                        form: { ...tplModal.form!, target_department: e.target.value },
+                      })
+                    }
+                    className="agri-input font-bold"
                   >
-                    <option value="XNK">XNK</option>
-                    <option value="SALES">SALES</option>
-                    <option value="ALL">ALL</option>
+                    {TEMPLATE_DEPARTMENT_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
                   </select>
                 </div>
-                <div className="col-span-2">
+                <div className="sm:col-span-2">
                   <label className="block font-bold mb-1">Tên chứng từ *</label>
                   <input
-                    placeholder="VD: Sales Contract - Edible Nuts (.docx)"
+                    placeholder="VD: Báo giá Chuẩn (Quotation)"
                     value={tplModal.form.document_name}
-                    onChange={(e) => setTplModal({ ...tplModal, form: { ...tplModal.form!, document_name: e.target.value } })}
+                    onChange={(e) =>
+                      setTplModal({
+                        ...tplModal,
+                        form: { ...tplModal.form!, document_name: e.target.value },
+                      })
+                    }
                     className="agri-input"
                   />
                 </div>
-                <div className="col-span-2">
-                  <label className="block font-bold mb-1">Đường dẫn Storage (documents bucket)</label>
+                <div>
+                  <label className="block font-bold mb-1">Đường dẫn tệp mẫu (.docx)</label>
                   <input
-                    placeholder="templates/TMP_CONTRACT_EDIBLE_NUTS.docx"
+                    placeholder="templates/TMP_QUOTATION_01.docx"
                     value={tplModal.form.google_doc_file_id}
-                    onChange={(e) => setTplModal({ ...tplModal, form: { ...tplModal.form!, google_doc_file_id: e.target.value } })}
+                    onChange={(e) =>
+                      setTplModal({
+                        ...tplModal,
+                        form: { ...tplModal.form!, google_doc_file_id: e.target.value },
+                      })
+                    }
                     className="agri-input font-mono"
                   />
                 </div>
-                <div className="col-span-2">
-                  <label className="block font-bold mb-1">Danh sách biến hỗ trợ</label>
-                  <input
-                    placeholder="CTR_NO, CNE_NAME, TOT_AMT_WORDS..."
-                    value={tplModal.form.supported_placeholders}
-                    onChange={(e) => setTplModal({ ...tplModal, form: { ...tplModal.form!, supported_placeholders: e.target.value } })}
-                    className="agri-input font-mono"
-                  />
+                <div>
+                  <label className="block font-bold mb-1">Trạng thái</label>
+                  <select
+                    value={tplModal.form.status || 'Active'}
+                    onChange={(e) =>
+                      setTplModal({
+                        ...tplModal,
+                        form: { ...tplModal.form!, status: e.target.value },
+                      })
+                    }
+                    className="agri-input font-bold"
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </div>
+
+                <div className="sm:col-span-2 space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="block font-bold">
+                      Trường dữ liệu hỗ trợ ({modalSelectedKeySet.size} trường đã chọn)
+                    </label>
+                    <div className="relative w-52">
+                      <Search className="w-3.5 h-3.5 text-[#0f4a33] absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Tìm trường tiếng Việt..."
+                        value={tplFieldSearch}
+                        onChange={(e) => setTplFieldSearch(e.target.value)}
+                        className="agri-input pl-7 py-1 text-[11px]"
+                      />
+                    </div>
+                  </div>
+                  <div className="bg-[#0b3a27] border border-[#186635] rounded-xl p-2.5 max-h-44 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {modalSelectableFields.map((field) => {
+                      const checked = modalSelectedKeySet.has(field.key.toUpperCase());
+                      return (
+                        <label
+                          key={field.key}
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                            checked
+                              ? 'bg-[#0f4a33] border border-[#f4d98a]/70 text-[#fff5d6]'
+                              : 'bg-[#07281c]/60 border border-transparent text-[#d2ebe0] hover:bg-[#0f4a33]/60'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleModalPlaceholder(field.key)}
+                            className="accent-[#f4d98a] rounded cursor-pointer shrink-0"
+                          />
+                          <span className="text-[11px] font-semibold leading-tight">
+                            {field.label}
+                          </span>
+                        </label>
+                      );
+                    })}
+                    {modalSelectableFields.length === 0 && (
+                      <div className="col-span-2 text-center py-4 text-[#9bccb8] italic">
+                        Không tìm thấy trường dữ liệu phù hợp.
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              <div className="flex flex-wrap justify-end gap-2 pt-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#186635]/60">
                 <button
                   type="button"
-                  disabled={tplBusy}
-                  onClick={() => setTplModal({ open: false, isEdit: false, form: null })}
-                  className="px-3 py-1.5 rounded bg-[#07281c] text-white font-bold cursor-pointer"
+                  disabled={tplBusy || (!tplFile && !tplModal.form.google_doc_file_id)}
+                  onClick={() => void handleOpenTagEditorFromModal()}
+                  className="px-3 py-1.5 rounded-lg bg-[#f4d98a] text-[#07281c] font-extrabold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
-                  Hủy
+                  {tplBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                  <span>Tự thêm biến</span>
                 </button>
-                {tplFile ? (
-                  <>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={tplBusy}
+                    onClick={() => setTplModal({ open: false, isEdit: false, form: null })}
+                    className="px-3 py-1.5 rounded bg-[#07281c] text-white font-bold cursor-pointer"
+                  >
+                    Hủy
+                  </button>
+                  {tplFile ? (
                     <button
                       type="button"
                       disabled={tplBusy}
@@ -814,31 +1355,316 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                       className="px-3 py-1.5 rounded-lg bg-[#16977f] hover:bg-[#117865] text-white font-bold inline-flex items-center gap-1.5 cursor-pointer"
                     >
                       {tplBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                      <span>Tải phôi lên Storage &amp; Lưu</span>
+                      <span>Tải tệp &amp; Lưu phôi</span>
                     </button>
+                  ) : (
                     <button
                       type="button"
                       disabled={tplBusy}
-                      onClick={() => void handleAiSmartFillAndSave()}
-                      className="agri-btn-gold inline-flex items-center gap-1.5"
+                      onClick={async () => {
+                        if (!tplModal.form!.template_id.trim()) {
+                          onToast('warning', 'Vui lòng nhập Template ID.');
+                          return;
+                        }
+                        await onUpsertTemplate(
+                          {
+                            ...tplModal.form!,
+                            target_department: normalizeTemplateDepartment(
+                              tplModal.form!.target_department,
+                              tplModal.form!.template_id,
+                              tplModal.form!.document_name
+                            ),
+                          },
+                          tplModal.isEdit
+                        );
+                        setTplModal({ open: false, isEdit: false, form: null });
+                      }}
+                      className="agri-btn-gold"
                     >
-                      {tplBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                      <span>Tự gắn biến AI &amp; Lưu phôi</span>
+                      Lưu Phôi mẫu
                     </button>
-                  </>
-                ) : (
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Interactive #-Marker AI Smart-Fill & Manual Tag Review Modal */}
+        {tagEditor && tagEditor.open && (
+          <div className="fixed inset-0 z-[60] bg-[#07281c]/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
+            <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden text-[#f4f8f5]">
+              {/* Header */}
+              <div className="px-4 py-3 bg-[#0f4a33] border-b-2 border-[#186635] flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm sm:text-base font-extrabold text-[#fff5d6] flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-[#f4d98a]" />
+                    <span>Trình Gắn &amp; Chỉnh sửa Trường Dữ liệu Phôi .docx</span>
+                  </h4>
+                  <p className="text-[11px] text-[#9bccb8]">
+                    {tagEditor.templateForm.template_id} · {tagEditor.templateForm.document_name || 'Phôi chứng từ mới'} ·{' '}
+                    {tagEditor.templateForm.target_department}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    disabled={tplBusy}
-                    onClick={async () => {
-                      await onUpsertTemplate(tplModal.form!, tplModal.isEdit);
-                      setTplModal({ open: false, isEdit: false, form: null });
-                    }}
-                    className="agri-btn-gold"
+                    disabled={tagEditorBusy}
+                    onClick={() => void handleSmartFillHashMarkers()}
+                    className="agri-btn-gold text-xs inline-flex items-center gap-1.5 disabled:opacity-60"
                   >
-                    Lưu Metadata Phôi mẫu
+                    {tagEditorBusy ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Wand2 className="w-3.5 h-3.5" />
+                    )}
+                    <span>Tự động nhận diện &amp; Điền biến</span>
                   </button>
-                )}
+
+                  <button
+                    type="button"
+                    disabled={tagEditorBusy}
+                    onClick={() => void handleSaveReviewedDocx()}
+                    className="px-3 py-1.5 rounded-lg bg-[#16977f] hover:bg-[#117865] text-white text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                  >
+                    {tagEditorBusy ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Save className="w-3.5 h-3.5" />
+                    )}
+                    <span>Lưu phôi .docx</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={tagEditorBusy}
+                    onClick={() => setTagEditor(null)}
+                    className="p-1.5 rounded-lg bg-[#8c3b3b] text-white hover:bg-[#6e2b2b] cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Mandatory Instruction Banner */}
+              <div className="px-4 py-2.5 bg-[#f4d98a] text-[#07281c] border-b border-[#186635] flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#0f4a33] text-[#f4d98a] font-extrabold text-xs shrink-0">
+                    #
+                  </span>
+                  <div>
+                    <div className="text-xs sm:text-sm font-extrabold">
+                      Điền # vào chỗ cần điền trường gán dữ liệu
+                    </div>
+                    <div className="text-[11px] font-medium opacity-90">
+                      Gõ trực tiếp ký tự <strong>#</strong> vào các dòng bên dưới, bấm <strong>&quot;Tự động nhận diện &amp; Điền biến&quot;</strong>, hoặc chỉnh sửa / chèn nhanh trường từ danh sách bên phải trước khi lưu.
+                    </div>
+                  </div>
+                </div>
+                <div className="inline-flex items-center gap-2 text-xs font-extrabold">
+                  <span className="px-2.5 py-1 rounded-lg bg-[#0f4a33] text-[#fff5d6]">
+                    Đang đánh dấu: {totalHashCount} dấu #
+                  </span>
+                </div>
+              </div>
+
+              {/* Main 2-column Workspace */}
+              <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12">
+                {/* Left: Extracted Document Blocks */}
+                <div className="lg:col-span-8 flex flex-col min-h-0 bg-[#0b3a27] border-r border-[#186635]">
+                  <div className="px-3.5 py-2.5 bg-[#07281c] border-b border-[#186635] flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="relative flex-1 min-w-[200px]">
+                      <Search className="w-3.5 h-3.5 text-[#0f4a33] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Lọc nhanh đoạn văn bản trong phôi..."
+                        value={tagBlockSearch}
+                        onChange={(e) => setTagBlockSearch(e.target.value)}
+                        className="agri-input pl-8 py-1 text-xs"
+                      />
+                    </div>
+                    <label className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#fff5d6] cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={tagOnlyMarked}
+                        onChange={(e) => setTagOnlyMarked(e.target.checked)}
+                        className="accent-[#f4d98a] cursor-pointer"
+                      />
+                      <span>Chỉ hiện dòng có # hoặc biến</span>
+                    </label>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5 max-h-[60vh]">
+                    {filteredTagBlocks.map((block) => {
+                      const isActive = activeBlockId === block.id;
+                      const isUpdated = tagEditor.updatedBlockIds.includes(block.id);
+                      const hasHash = block.text.includes('#');
+                      const tagsInBlock = Array.from(
+                        new Set(
+                          Array.from(block.text.matchAll(/\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}/g)).map(
+                            (m) => m[1].trim()
+                          )
+                        )
+                      );
+
+                      return (
+                        <div
+                          key={block.id}
+                          className={`rounded-xl p-2.5 border transition-colors ${
+                            isActive
+                              ? 'bg-[#0f4a33] border-[#f4d98a]'
+                              : isUpdated
+                              ? 'bg-[#0f4a33]/80 border-[#16977f]'
+                              : hasHash
+                              ? 'bg-[#0f4a33]/70 border-[#f4d98a]/60'
+                              : 'bg-[#07281c]/70 border-[#186635]'
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                            <div className="flex items-center gap-1.5 text-[10.5px] text-[#9bccb8] font-semibold">
+                              {block.isTableCell && (
+                                <span className="px-1.5 py-0.5 rounded bg-[#07281c] text-[#f4d98a] font-bold">
+                                  Ô bảng
+                                </span>
+                              )}
+                              {block.contextHint && (
+                                <span className="truncate max-w-[340px]" title={block.contextHint}>
+                                  Cạnh: &quot;{block.contextHint}&quot;
+                                </span>
+                              )}
+                              {isUpdated && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-[#16977f] text-white font-bold">
+                                  <Check className="w-3 h-3" /> Đã điền biến
+                                </span>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleInsertSnippetAtCursor('#', block.id)}
+                              className="px-2 py-0.5 rounded bg-[#f4d98a]/20 hover:bg-[#f4d98a] text-[#f4d98a] hover:text-[#07281c] text-[10.5px] font-extrabold inline-flex items-center gap-0.5 cursor-pointer transition-colors"
+                            >
+                              <Hash className="w-3 h-3" /> Chèn #
+                            </button>
+                          </div>
+
+                          <textarea
+                            ref={(el) => {
+                              blockTextareaRefs.current[block.id] = el;
+                            }}
+                            rows={Math.min(4, Math.max(1, Math.ceil((block.text.length || 1) / 88)))}
+                            value={block.text}
+                            placeholder="Nhập # tại đây để đánh dấu vị trí điền dữ liệu..."
+                            onFocus={(e) => {
+                              setActiveBlockId(block.id);
+                              activeCursorRef.current = {
+                                blockId: block.id,
+                                start: e.currentTarget.selectionStart ?? block.text.length,
+                                end: e.currentTarget.selectionEnd ?? block.text.length,
+                              };
+                            }}
+                            onClick={(e) => {
+                              setActiveBlockId(block.id);
+                              activeCursorRef.current = {
+                                blockId: block.id,
+                                start: e.currentTarget.selectionStart ?? block.text.length,
+                                end: e.currentTarget.selectionEnd ?? block.text.length,
+                              };
+                            }}
+                            onKeyUp={(e) => {
+                              activeCursorRef.current = {
+                                blockId: block.id,
+                                start: e.currentTarget.selectionStart ?? block.text.length,
+                                end: e.currentTarget.selectionEnd ?? block.text.length,
+                              };
+                            }}
+                            onChange={(e) => {
+                              const nextVal = e.target.value;
+                              activeCursorRef.current = {
+                                blockId: block.id,
+                                start: e.target.selectionStart ?? nextVal.length,
+                                end: e.target.selectionEnd ?? nextVal.length,
+                              };
+                              handleUpdateTagBlockText(block.id, nextVal);
+                            }}
+                            className="w-full rounded-lg bg-[#d7eee4] text-[#07281c] px-2.5 py-1.5 text-xs font-medium leading-relaxed border border-[#186635] focus:outline-none focus:ring-2 focus:ring-[#f4d98a]"
+                          />
+
+                          {tagsInBlock.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                              {tagsInBlock.map((tagKey) => (
+                                <span
+                                  key={tagKey}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#07281c] border border-[#f4d98a]/50 text-[#fff5d6] text-[10.5px] font-semibold"
+                                >
+                                  <Tag className="w-2.5 h-2.5 text-[#f4d98a]" />
+                                  <span>{getVietnamesePlaceholderLabel(tagKey, allTagEditorPlaceholders)}</span>
+                                  <button
+                                    type="button"
+                                    title="Xóa biến này khỏi đoạn văn"
+                                    onClick={() => handleRemoveTagFromBlock(block.id, tagKey)}
+                                    className="ml-0.5 text-[#f4d98a] hover:text-red-300 cursor-pointer"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {filteredTagBlocks.length === 0 && (
+                      <div className="text-center py-8 text-xs text-[#9bccb8] italic">
+                        Không có đoạn văn bản nào khớp bộ lọc.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right: Quick-Insert Vietnamese Variable Picker */}
+                <div className="lg:col-span-4 flex flex-col min-h-0 bg-[#07281c]">
+                  <div className="p-3 border-b border-[#186635] space-y-2">
+                    <div className="text-xs font-extrabold text-[#f4d98a] uppercase tracking-wider">
+                      Chèn nhanh Trường Dữ liệu
+                    </div>
+                    <p className="text-[11px] text-[#9bccb8]">
+                      Chọn dòng bên trái, sau đó bấm vào trường tiếng Việt bên dưới để chèn trực tiếp vào vị trí con trỏ.
+                    </p>
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-[#0f4a33] absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Tìm trường dữ liệu..."
+                        value={pickerSearch}
+                        onChange={(e) => setPickerSearch(e.target.value)}
+                        className="agri-input pl-8 py-1 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5 max-h-[60vh]">
+                    {tagEditorPickerItems.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => handleInsertSnippetAtCursor(`{{${item.key}}}`)}
+                        className="w-full text-left px-2.5 py-2 rounded-lg bg-[#0f4a33]/80 hover:bg-[#16977f] border border-[#186635] text-[#fff5d6] transition-colors cursor-pointer flex items-center justify-between gap-2"
+                      >
+                        <span className="text-xs font-semibold leading-snug">{item.label}</span>
+                        <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-[#07281c] text-[#f4d98a] shrink-0">
+                          + Chèn
+                        </span>
+                      </button>
+                    ))}
+                    {tagEditorPickerItems.length === 0 && (
+                      <div className="text-center py-6 text-xs text-[#9bccb8] italic">
+                        Không tìm thấy trường phù hợp.
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -885,7 +1711,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                 <th className="text-left">Họ tên</th>
                 <th className="text-center">Phòng ban</th>
                 <th className="text-center">Vai trò</th>
-                <th className="text-left">Email (Supabase Auth)</th>
+                <th className="text-left">Email đăng nhập</th>
                 <th className="text-center">Trạng thái</th>
                 <th className="text-center">Thao tác</th>
               </tr>
@@ -992,15 +1818,15 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                 />
               </div>
               <div className="sm:col-span-2">
-                <label className="block font-bold mb-1">Email Supabase Auth *</label>
+                <label className="block font-bold mb-1">Email đăng nhập *</label>
                 <input type="email" placeholder="name@greenagri-vn.com" value={usrModal.form.email} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, email: e.target.value } })} className="agri-input" />
               </div>
               {!usrModal.isEdit && (
                 <div className="sm:col-span-2">
-                  <label className="block font-bold mb-1">Mật khẩu khởi tạo Supabase Auth (tùy chọn, ≥ 6 ký tự)</label>
+                  <label className="block font-bold mb-1">Mật khẩu khởi tạo (tùy chọn, ≥ 6 ký tự)</label>
                   <input
                     type="password"
-                    placeholder="Bỏ trống nếu nhân sự đã có tài khoản Auth"
+                    placeholder="Bỏ trống nếu nhân sự đã có tài khoản"
                     value={usrModal.initialPassword}
                     onChange={(e) => setUsrModal({ ...usrModal, initialPassword: e.target.value })}
                     className="agri-input"

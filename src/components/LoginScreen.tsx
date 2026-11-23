@@ -76,7 +76,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       setConfirmPassword('');
       setFullName('');
       setMode('login');
-      setSuccessMsg('Đăng ký thành công! Tài khoản đang ở trạng thái PENDING chờ Quản trị viên phê duyệt trước khi đăng nhập.');
+      setSuccessMsg('Đăng ký thành công! Tài khoản đang chờ Quản trị viên phê duyệt trước khi đăng nhập.');
     } catch (err: any) {
       setError(err?.message || 'Đăng ký tài khoản thất bại.');
     } finally {
