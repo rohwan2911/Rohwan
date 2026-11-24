@@ -549,7 +549,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     const usdFmt = fmtUSD(sellingVal);
     const words = numberToEnglishWordsUsd(sellingVal);
     const totalNw = toNum(ctx.order?.nw_confirmed_kgs) || toNum(ctx.inq?.net_weight_kgs) || 0;
-    const avgUnit = totalNw > 0 ? `$${fmtDecimal(subtotalAmt / totalNw, 3)}` : fieldValues.UNIT_PRICE || '$0,000';
+    const avgUnit = totalNw > 0 ? `$${fmtDecimal(subtotalAmt / totalNw, 3)}` : fieldValues.UNIT_PRICE || '$0.000';
 
     const itemTarget = target.kind === 'QUOTATION' ? subtotalAmt : sellingVal;
     const allocated = computeSilentFobUnitPrices(ctx.items, itemTarget, data.products, data.pricingRates);
@@ -799,7 +799,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                 <input
                   type="text"
                   inputMode="decimal"
-                  placeholder="VD: 2.160,00"
+                  placeholder="VD: 2,160.00"
                   value={adjPrice}
                   onChange={(e) => {
                     setAdjPrice(e.target.value);

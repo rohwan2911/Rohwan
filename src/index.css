@@ -216,13 +216,13 @@ html, body, #root {
   color: #ffffff !important;
 }
 
-.agri-table tbody tr:hover td,
-.agri-table tbody tr:hover div,
-.agri-table tbody tr:hover span:not(.keep-badge-color) {
+.agri-table tbody tr:hover td:not(.keep-hover-color),
+.agri-table tbody tr:hover div:not(.keep-hover-color),
+.agri-table tbody tr:hover span:not(.keep-badge-color):not(.keep-hover-color) {
   color: #ffffff;
 }
 
-.agri-table tbody tr:hover .font-mono {
+.agri-table tbody tr:hover .font-mono:not(.keep-hover-color) {
   color: #fff3c4 !important;
 }
 

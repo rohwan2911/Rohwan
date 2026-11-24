@@ -20,6 +20,7 @@ import {
   isQuickCaptureStatus,
   normalizePlainText,
   parseLocaleNumber,
+  slugifyShippingLine,
   suggestCoFormCode,
   todayIsoDate,
   toNum,
@@ -122,7 +123,7 @@ export async function fetchAllAppData(): Promise<AppDataState> {
     supabase.from('consignee_directory').select('consignee_id, consignee_name, country, address, tax, contact_person, phone, email, fax, default_payment_term, customer_type, order_count, created_date'),
     supabase.from('product_catalog').select('product_group, sku_code, product_name_vie, product_name_eng, unit_price, hs_code, container_type, storage_temperature, image_url').order('sku_code', { ascending: true }),
     supabase.from('pricing_rates').select('*'),
-    supabase.from('shipping_schedule').select('schedule_id, pol, pod, country, pot, shipping_line, vessel, voyage, etd, eta, rate_20_dc, rate_40_dc, rate_40_hc, rate_20_rf, rate_40_rf, rate_40_rh, baf_fee, lss_fee, pss_fee, b_l_fee, seal_fee, updated_date, expiry_date, thc_20_dry, thc_40_dry, thc_20_reefer, thc_40_reefer, bill_seal_fee_shipment'),
+    supabase.from('shipping_schedule').select('*'),
     supabase.from('incoterms_handbook').select('incoterms_code, incoterm_group, full_name, transport_mode, contract_text_eng, freight_term, freight_payer, insurance_payer, export_customs, import_customs, risk_transfer_point, activation_condition, risk_benefit_seller, note, practical_notes_vie, seller_cost_scope').order('incoterms_code', { ascending: true }),
     supabase.from('system_lookups').select('category, code, scope, display_name_vie, contract_text_eng, extra_value'),
     supabase.from('template_manager').select('template_id, document_name, google_doc_file_id, target_department, status, supported_placeholders'),
@@ -187,6 +188,7 @@ export async function fetchAllAppData(): Promise<AppDataState> {
     thc_20_reefer: parseLocaleNumber(s.thc_20_reefer),
     thc_40_reefer: parseLocaleNumber(s.thc_40_reefer),
     bill_seal_fee_shipment: parseLocaleNumber(s.bill_seal_fee_shipment),
+    logo_url: typeof s.logo_url === 'string' ? s.logo_url.trim() : '',
   })) as ShippingSchedule[];
 
   const normalizedInquiries = (inquiriesRes.data || []).map((i: any) => ({
@@ -849,6 +851,27 @@ export async function deleteProductDirect(skuCode: string): Promise<void> {
   if (error) throw new Error(`Lỗi xóa sản phẩm: ${error.message}`);
 }
 
+export async function uploadShippingLineLogo(shippingLine: string, file: File): Promise<string> {
+  assertConfigured();
+  const slug = slugifyShippingLine(shippingLine);
+  if (!slug) {
+    throw new Error('Vui lòng nhập tên Hãng tàu trước khi tải logo.');
+  }
+  const path = `shipping-lines/${slug}.png`;
+  const { error } = await supabase.storage.from('images').upload(path, file, {
+    upsert: true,
+    contentType: file.type || 'image/png',
+  });
+  if (error) {
+    throw new Error(`Không thể tải logo hãng tàu lên Storage: ${error.message}`);
+  }
+  const { data } = supabase.storage.from('images').getPublicUrl(path);
+  if (!data?.publicUrl) {
+    throw new Error('Không lấy được đường dẫn công khai của logo hãng tàu.');
+  }
+  return data.publicUrl;
+}
+
 export async function upsertScheduleDirect(row: ShippingSchedule, isEdit: boolean): Promise<void> {
   assertConfigured();
   const clean: ShippingSchedule = {
@@ -880,11 +903,22 @@ export async function upsertScheduleDirect(row: ShippingSchedule, isEdit: boolea
     thc_20_reefer: toNum(row.thc_20_reefer),
     thc_40_reefer: toNum(row.thc_40_reefer),
     bill_seal_fee_shipment: toNum(row.bill_seal_fee_shipment),
+    logo_url: String(row.logo_url || '').trim(),
   };
-  const { error } = isEdit
+  const primary = isEdit
     ? await supabase.from('shipping_schedule').update(clean).eq('schedule_id', clean.schedule_id)
     : await supabase.from('shipping_schedule').insert(clean);
-  if (error) throw new Error(`Lỗi lưu lịch tàu: ${error.message}`);
+
+  if (primary.error && /logo_url/i.test(primary.error.message || '')) {
+    const { logo_url: _ignored, ...withoutLogo } = clean;
+    const fb = isEdit
+      ? await supabase.from('shipping_schedule').update(withoutLogo).eq('schedule_id', clean.schedule_id)
+      : await supabase.from('shipping_schedule').insert(withoutLogo);
+    if (fb.error) throw new Error(`Lỗi lưu lịch tàu: ${fb.error.message}`);
+    return;
+  }
+
+  if (primary.error) throw new Error(`Lỗi lưu lịch tàu: ${primary.error.message}`);
 }
 
 export async function deleteScheduleDirect(scheduleId: string): Promise<void> {

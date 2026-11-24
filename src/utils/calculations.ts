@@ -37,22 +37,19 @@ export function parseLocaleNumber(val: unknown): number {
       s = s.replace(/,/g, '');
     }
   } else if (commaCount > 0) {
-    if (commaCount > 1) {
-      // Multiple commas: thousands separators (e.g. 1,234,567)
+    if (commaCount > 1 || /^[1-9]\d{0,2},\d{3}$/.test(s)) {
+      // Standard en-US thousands separators (e.g. "1,250", "27,400", "1,234,567")
       s = s.replace(/,/g, '');
     } else {
-      // Single comma: Vietnamese decimal separator (e.g. "2,70", "14,037", "0,25")
+      // Single comma with non-3-digit decimal part (e.g. "2,50", "0,25", "12,5")
       s = s.replace(',', '.');
     }
   } else if (dotCount > 0) {
     if (dotCount > 1) {
-      // Multiple dots: Vietnamese thousands separators (e.g. "1.250.000")
-      s = s.replace(/\./g, '');
-    } else if (/^[1-9]\d{0,2}\.\d{3}$/.test(s)) {
-      // Single dot with Vietnamese thousands grouping (e.g. "5.960", "27.400", "1.250")
+      // Multiple dots: thousands separators (e.g. "1.250.000")
       s = s.replace(/\./g, '');
     }
-    // Otherwise keep dot as standard decimal point (e.g. "2.70", "0.125", "16.33")
+    // Single dot is always treated as standard en-US decimal point (e.g. "16.330", "2.70", "0.125")
   }
 
   const n = Number(isNegative ? `-${s}` : s);
@@ -65,7 +62,7 @@ export function toNum(val: unknown): number {
 
 export function fmtDecimal(value: unknown, decimals = 2): string {
   const n = parseLocaleNumber(value);
-  return n.toLocaleString('vi-VN', {
+  return n.toLocaleString('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
@@ -80,7 +77,7 @@ export function fmtUSD(num: unknown): string {
 }
 
 export function fmtNumber(num: unknown, maxDecimals = 3): string {
-  return parseLocaleNumber(num).toLocaleString('vi-VN', {
+  return parseLocaleNumber(num).toLocaleString('en-US', {
     maximumFractionDigits: maxDecimals,
   });
 }
@@ -89,12 +86,12 @@ export function formatEditableNumber(val: unknown, decimals?: number): string {
   if (val === null || val === undefined || val === '') return '';
   const n = parseLocaleNumber(val);
   if (decimals !== undefined) {
-    return n.toLocaleString('vi-VN', {
+    return n.toLocaleString('en-US', {
       minimumFractionDigits: decimals,
       maximumFractionDigits: decimals,
     });
   }
-  return n.toLocaleString('vi-VN', { maximumFractionDigits: 4 });
+  return n.toLocaleString('en-US', { maximumFractionDigits: 4 });
 }
 
 export function normalizePlainText(val: unknown): string {
@@ -111,6 +108,90 @@ export function todayIsoDate(): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+export function formatDateDDMMYYYY(val?: string | null): string {
+  const raw = String(val || '').trim();
+  if (!raw || raw === '-') return '-';
+  const isoMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    return `${isoMatch[3].padStart(2, '0')}/${isoMatch[2].padStart(2, '0')}/${isoMatch[1]}`;
+  }
+  const dmyMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmyMatch) {
+    return `${dmyMatch[1].padStart(2, '0')}/${dmyMatch[2].padStart(2, '0')}/${dmyMatch[3]}`;
+  }
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    const dd = String(parsed.getDate()).padStart(2, '0');
+    const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+    const yyyy = parsed.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  }
+  return raw;
+}
+
+export function deduplicatePortName(port?: string | null): string {
+  const raw = String(port || '').trim();
+  if (!raw) return '';
+  if (/\s+[-–—/]\s+/.test(raw)) {
+    const parts = raw.split(/\s*[-–—/]\s*/).map((p) => p.trim()).filter(Boolean);
+    const unique: string[] = [];
+    const seen = new Set<string>();
+    for (const p of parts) {
+      const key = p.toLowerCase().replace(/\s+/g, ' ');
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(p);
+      }
+    }
+    return unique.join(' - ');
+  }
+  if (raw.includes(',')) {
+    const parts = raw.split(',').map((p) => p.trim()).filter(Boolean);
+    if (parts.length === 2 && parts[0].toLowerCase() === parts[1].toLowerCase()) {
+      return parts[0];
+    }
+  }
+  return raw;
+}
+
+const DEFAULT_SUPABASE_PUBLIC_BASE = 'https://cqxchzwksyfwguzavqbz.supabase.co';
+
+export function slugifyShippingLine(name?: string | null): string {
+  return String(name || '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/gi, 'd')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+export function getShippingLineLogoUrl(shippingLine?: string | null, explicitLogoUrl?: string | null): string {
+  const direct = String(explicitLogoUrl || '').trim();
+  if (direct) return direct;
+  const slug = slugifyShippingLine(shippingLine);
+  if (!slug) return '';
+  const envUrl = String(import.meta.env.VITE_SUPABASE_URL || '').trim().replace(/\/+$/, '');
+  const base = envUrl && /^https?:\/\//i.test(envUrl) ? envUrl : DEFAULT_SUPABASE_PUBLIC_BASE;
+  return `${base}/storage/v1/object/public/images/shipping-lines/${slug}.png`;
+}
+
+export function getShippingLineMonogram(name?: string | null): string {
+  const clean = String(name || '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .trim();
+  if (!clean) return 'SL';
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length === 1) {
+    return words[0].slice(0, Math.min(3, words[0].length)).toUpperCase();
+  }
+  return (words[0][0] + words[1][0]).toUpperCase();
 }
 
 function cleanUpperAscii(val?: string): string {
@@ -276,12 +357,12 @@ export const DEFAULT_PACKING_AND_CONTAINER_RATES: Array<Partial<PricingRate>> = 
   { fee_category: 'PACKING', fee_code: 'PKG-IQF-5K', scope_or_cont_type: 'REEFER', fee_name_vie: 'Bao PE khối IQF 5kg + Thùng chống ẩm 15kg', contract_text_eng: '5kg IQF Block Bags in 15kg Waxed Carton', unit_basis: 'Carton', standard_rate: 0.31, provider_or_rule: '15', note: 'Hàng cấp đông bulk 15kg', dim_cm: '45x32x28', net_kg: 15, tare_kg: 1.15, max_per_pallet: 40 },
   { fee_category: 'PACKING', fee_code: 'PKG-PLT-YES', scope_or_cont_type: 'ALL', fee_name_vie: 'Pallet Nhựa / Gỗ Hun Trùng ISPM-15 (Đế pallet + Quấn màng PE)', contract_text_eng: 'Heat-Treated ISPM-15 Export Pallet with Stretch Film', unit_basis: 'Pallet', standard_rate: 18, provider_or_rule: '50 thùng/pallet', note: 'Tải trọng Pallet + màng quấn 18kg · 0.17 CBM/pallet', dim_cm: '120x100x14.17', net_kg: 0, tare_kg: 18, max_per_pallet: 50 },
   { fee_category: 'PACKING', fee_code: 'PKG-PLT-NO', scope_or_cont_type: 'ALL', fee_name_vie: 'Không dùng Pallet (Xếp sàn container - Floor Load)', contract_text_eng: 'Loose Floor-Loaded in Container (No Pallet)', unit_basis: 'Pallet', standard_rate: 0, provider_or_rule: 'Xếp rời tối ưu thể tích', note: 'Không phát sinh phí & bì pallet', dim_cm: '0x0x0', net_kg: 0, tare_kg: 0, max_per_pallet: 0 },
-  { fee_category: 'CONTAINER', fee_code: 'CONT-20GP', scope_or_cont_type: "20'DC", fee_name_vie: "Container 20' Khô tiêu chuẩn (20'DC / 20GP)", contract_text_eng: '20ft General Purpose Dry Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 28.200 KG / 28 CBM / 10 Pallet', dim_cm: '589x235x239', net_kg: 28200, tare_kg: 28, max_per_pallet: 10 },
-  { fee_category: 'CONTAINER', fee_code: 'CONT-40GP', scope_or_cont_type: "40'DC", fee_name_vie: "Container 40' Khô tiêu chuẩn (40'DC / 40GP)", contract_text_eng: '40ft General Purpose Dry Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 26.700 KG / 58 CBM / 20 Pallet', dim_cm: '1203x235x239', net_kg: 26700, tare_kg: 58, max_per_pallet: 20 },
-  { fee_category: 'CONTAINER', fee_code: 'CONT-40HC', scope_or_cont_type: "40'HC", fee_name_vie: "Container 40' Khô Cao (40'HC)", contract_text_eng: '40ft High-Cube Dry Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 26.500 KG / 67 CBM / 21 Pallet', dim_cm: '1203x235x269', net_kg: 26500, tare_kg: 67, max_per_pallet: 21 },
-  { fee_category: 'CONTAINER', fee_code: 'CONT-20RF', scope_or_cont_type: "20'RF", fee_name_vie: "Container 20' Lạnh (20'RF)", contract_text_eng: '20ft Reefer Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 27.400 KG / 24 CBM / 9 Pallet', dim_cm: '544x229x227', net_kg: 27400, tare_kg: 24, max_per_pallet: 9 },
-  { fee_category: 'CONTAINER', fee_code: 'CONT-40RF', scope_or_cont_type: "40'RF", fee_name_vie: "Container 40' Lạnh Tiêu Chuẩn (40'RF)", contract_text_eng: '40ft Standard Reefer Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 29.300 KG / 51 CBM / 20 Pallet', dim_cm: '1156x229x250', net_kg: 29300, tare_kg: 51, max_per_pallet: 20 },
-  { fee_category: 'CONTAINER', fee_code: 'CONT-40RH', scope_or_cont_type: "40'RH", fee_name_vie: "Container 40' Lạnh Cao (40'RH)", contract_text_eng: '40ft High-Cube Reefer Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 29.000 KG / 59 CBM / 20 Pallet', dim_cm: '1158x229x255', net_kg: 29000, tare_kg: 59, max_per_pallet: 20 },
+  { fee_category: 'CONTAINER', fee_code: 'CONT-20GP', scope_or_cont_type: "20'DC", fee_name_vie: "Container 20' Khô tiêu chuẩn (20'DC / 20GP)", contract_text_eng: '20ft General Purpose Dry Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 28,200 KG / 28 CBM / 10 Pallet', dim_cm: '589x235x239', net_kg: 28200, tare_kg: 28, max_per_pallet: 10 },
+  { fee_category: 'CONTAINER', fee_code: 'CONT-40GP', scope_or_cont_type: "40'DC", fee_name_vie: "Container 40' Khô tiêu chuẩn (40'DC / 40GP)", contract_text_eng: '40ft General Purpose Dry Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 26,700 KG / 58 CBM / 20 Pallet', dim_cm: '1203x235x239', net_kg: 26700, tare_kg: 58, max_per_pallet: 20 },
+  { fee_category: 'CONTAINER', fee_code: 'CONT-40HC', scope_or_cont_type: "40'HC", fee_name_vie: "Container 40' Khô Cao (40'HC)", contract_text_eng: '40ft High-Cube Dry Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 26,500 KG / 67 CBM / 21 Pallet', dim_cm: '1203x235x269', net_kg: 26500, tare_kg: 67, max_per_pallet: 21 },
+  { fee_category: 'CONTAINER', fee_code: 'CONT-20RF', scope_or_cont_type: "20'RF", fee_name_vie: "Container 20' Lạnh (20'RF)", contract_text_eng: '20ft Reefer Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 27,400 KG / 24 CBM / 9 Pallet', dim_cm: '544x229x227', net_kg: 27400, tare_kg: 24, max_per_pallet: 9 },
+  { fee_category: 'CONTAINER', fee_code: 'CONT-40RF', scope_or_cont_type: "40'RF", fee_name_vie: "Container 40' Lạnh Tiêu Chuẩn (40'RF)", contract_text_eng: '40ft Standard Reefer Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 29,300 KG / 51 CBM / 20 Pallet', dim_cm: '1156x229x250', net_kg: 29300, tare_kg: 51, max_per_pallet: 20 },
+  { fee_category: 'CONTAINER', fee_code: 'CONT-40RH', scope_or_cont_type: "40'RH", fee_name_vie: "Container 40' Lạnh Cao (40'RH)", contract_text_eng: '40ft High-Cube Reefer Container', unit_basis: 'Container', standard_rate: 0, provider_or_rule: 'Max 29,000 KG / 59 CBM / 20 Pallet', dim_cm: '1158x229x255', net_kg: 29000, tare_kg: 59, max_per_pallet: 20 },
 ];
 
 export interface InsuranceCatalogItem {

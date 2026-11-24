@@ -40,10 +40,14 @@ import type {
 import {
   capitalizeWordsPreservingSpaces,
   computeFreightExpiryStatus,
+  deduplicatePortName,
   fmtDecimal,
   fmtNumber,
   fmtUSD,
+  formatDateDDMMYYYY,
   formatEditableNumber,
+  getShippingLineLogoUrl,
+  getShippingLineMonogram,
   normalizePlainText,
   parseLocaleNumber,
   todayIsoDate,
@@ -66,6 +70,7 @@ import {
 import {
   downloadTemplateDocx,
   openDocumentWithSignedUrl,
+  uploadShippingLineLogo,
   uploadTemplateDocx,
   upsertTemplatePlaceholders,
 } from '../services/supabaseService';
@@ -130,6 +135,7 @@ interface ScheduleDraft {
   thc_20_reefer: string;
   thc_40_reefer: string;
   bill_seal_fee_shipment: string;
+  logo_url: string;
 }
 
 interface RateDraft {
@@ -203,6 +209,7 @@ const createBlankScheduleDraft = (): ScheduleDraft => ({
   thc_20_reefer: '',
   thc_40_reefer: '',
   bill_seal_fee_shipment: '',
+  logo_url: '',
 });
 
 const scheduleToDraft = (s: ShippingSchedule): ScheduleDraft => ({
@@ -234,6 +241,7 @@ const scheduleToDraft = (s: ShippingSchedule): ScheduleDraft => ({
   thc_20_reefer: formatEditableNumber(s.thc_20_reefer),
   thc_40_reefer: formatEditableNumber(s.thc_40_reefer),
   bill_seal_fee_shipment: formatEditableNumber(s.bill_seal_fee_shipment),
+  logo_url: s.logo_url || '',
 });
 
 const createBlankRateDraft = (lockedCategory: string): RateDraft => ({
@@ -302,6 +310,57 @@ const ProductThumbnail: React.FC<{ url?: string; alt: string; sizeClass?: string
   );
 };
 
+const ShippingLineLogoBadge: React.FC<{
+  shippingLine: string;
+  logoUrl?: string;
+  cacheBust?: number;
+  onStatusChange?: (status: 'loading' | 'loaded' | 'missing') => void;
+}> = ({ shippingLine, logoUrl, cacheBust = 0, onStatusChange }) => {
+  const [failed, setFailed] = useState(false);
+  const resolvedBase = getShippingLineLogoUrl(shippingLine, logoUrl);
+  const finalSrc = resolvedBase
+    ? cacheBust > 0
+      ? `${resolvedBase}${resolvedBase.includes('?') ? '&' : '?'}v=${cacheBust}`
+      : resolvedBase
+    : '';
+  const monogram = getShippingLineMonogram(shippingLine);
+
+  useEffect(() => {
+    setFailed(false);
+    if (!finalSrc) {
+      onStatusChange?.('missing');
+    } else {
+      onStatusChange?.('loading');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalSrc]);
+
+  return (
+    <div
+      className="keep-hover-color w-9 h-9 bg-white rounded-lg p-1 border border-emerald-900/15 flex items-center justify-center overflow-hidden shrink-0 shadow-sm mx-auto"
+      title={shippingLine || 'Logo hãng tàu'}
+    >
+      {finalSrc && !failed ? (
+        <img
+          src={finalSrc}
+          alt={shippingLine || 'Shipping Line'}
+          loading="lazy"
+          onLoad={() => onStatusChange?.('loaded')}
+          onError={() => {
+            setFailed(true);
+            onStatusChange?.('missing');
+          }}
+          className="w-full h-full object-contain"
+        />
+      ) : (
+        <span className="keep-hover-color text-[11px] font-extrabold text-[#0f4a33] leading-none tracking-tight select-none">
+          {monogram}
+        </span>
+      )}
+    </div>
+  );
+};
+
 export const MasterDataView: React.FC<MasterDataViewProps> = ({
   activeView,
   data,
@@ -337,6 +396,9 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
     rows: ScheduleDraft[];
   }>({ open: false, isEdit: false, rows: [] });
   const [schSaving, setSchSaving] = useState(false);
+  const [schLogoStatusMap, setSchLogoStatusMap] = useState<Record<number, 'loading' | 'loaded' | 'missing'>>({});
+  const [schLogoUploadingIdx, setSchLogoUploadingIdx] = useState<number | null>(null);
+  const [schLogoCacheBust, setSchLogoCacheBust] = useState<number>(0);
 
   const [rateCat, setRateCat] = useState<string>('ALL');
   const [rateModal, setRateModal] = useState<{
@@ -427,7 +489,16 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
 
   const schedulePolOptions = useMemo(() => {
     const set = new Set<string>(['Cát Lái (HCMC)', 'Hải Phòng', 'Đà Nẵng', 'Cái Mép - Thị Vải']);
-    data.schedules.forEach((s) => s.pol && set.add(s.pol.trim()));
+    data.schedules.forEach((s) => s.pol && set.add(deduplicatePortName(s.pol)));
+    return Array.from(set).sort().map((v) => ({ value: v, label: v }));
+  }, [data.schedules]);
+
+  const scheduleShippingLineOptions = useMemo(() => {
+    const set = new Set<string>();
+    data.schedules.forEach((s) => {
+      const name = String(s.shipping_line || '').trim();
+      if (name) set.add(name);
+    });
     return Array.from(set).sort().map((v) => ({ value: v, label: v }));
   }, [data.schedules]);
 
@@ -816,7 +887,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.unit_price}
-                          placeholder="VD: 2,50"
+                          placeholder="VD: 2.50"
                           onChange={(e) =>
                             setProdModal((prev) => ({
                               ...prev,
@@ -927,9 +998,11 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
     const expiredSchedules = data.schedules.filter((s) => computeFreightExpiryStatus(s).state === 'EXPIRED');
 
     const handleSaveSchedules = async () => {
-      const activeRows = schModal.rows.filter(
-        (r) => r.schedule_id.trim() || r.shipping_line.trim() || r.pod.trim() || r.country.trim()
-      );
+      const activeRows = schModal.rows
+        .map((r, origIdx) => ({ r, origIdx }))
+        .filter(
+          ({ r }) => r.schedule_id.trim() || r.shipping_line.trim() || r.pod.trim() || r.country.trim()
+        );
       if (activeRows.length === 0) {
         onToast('warning', 'Vui lòng nhập ít nhất 1 tuyến lịch tàu.');
         return;
@@ -942,12 +1015,18 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
           return match ? Math.max(m, parseInt(match[1], 10)) : m;
         }, data.schedules.length);
 
-        for (const r of activeRows) {
+        for (let i = 0; i < activeRows.length; i++) {
+          const { r, origIdx } = activeRows[i];
           let sid = r.schedule_id.trim();
           if (!sid) {
             nextSeq += 1;
             sid = `SCH-${String(nextSeq).padStart(3, '0')}`;
           }
+          const resolvedLogoUrl =
+            r.logo_url.trim() ||
+            (r.shipping_line.trim() && schLogoStatusMap[origIdx] === 'loaded'
+              ? getShippingLineLogoUrl(r.shipping_line)
+              : '');
           const payload: ShippingSchedule = {
             schedule_id: sid,
             pol: r.pol.trim(),
@@ -977,6 +1056,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             thc_20_reefer: parseLocaleNumber(r.thc_20_reefer),
             thc_40_reefer: parseLocaleNumber(r.thc_40_reefer),
             bill_seal_fee_shipment: parseLocaleNumber(r.bill_seal_fee_shipment),
+            logo_url: resolvedLogoUrl,
           };
           await onUpsertSchedule(payload, schModal.isEdit, isBulk);
         }
@@ -988,6 +1068,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
           await onRefreshData?.();
         }
         setSchModal({ open: false, isEdit: false, rows: [] });
+        setSchLogoStatusMap({});
       } catch (err: any) {
         onToast('error', err?.message || 'Lưu lịch tàu thất bại.');
       } finally {
@@ -1000,6 +1081,27 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
         ...prev,
         rows: prev.rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)),
       }));
+    };
+
+    const handleUploadCarrierLogo = async (idx: number, shippingLineName: string, file: File | null) => {
+      if (!file) return;
+      const cleanName = shippingLineName.trim();
+      if (!cleanName) {
+        onToast('warning', 'Vui lòng nhập tên Hãng tàu trước khi tải logo.');
+        return;
+      }
+      setSchLogoUploadingIdx(idx);
+      try {
+        const publicUrl = await uploadShippingLineLogo(cleanName, file);
+        updateSchRow(idx, { logo_url: publicUrl });
+        setSchLogoCacheBust(Date.now());
+        setSchLogoStatusMap((prev) => ({ ...prev, [idx]: 'loaded' }));
+        onToast('success', `Đã tải lên logo hãng tàu ${cleanName} thành công.`);
+      } catch (err: any) {
+        onToast('error', err?.message || 'Tải logo hãng tàu thất bại.');
+      } finally {
+        setSchLogoUploadingIdx(null);
+      }
     };
 
     return (
@@ -1028,13 +1130,14 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
           )}
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              setSchLogoStatusMap({});
               setSchModal({
                 open: true,
                 isEdit: false,
                 rows: [createBlankScheduleDraft()],
-              })
-            }
+              });
+            }}
             className="agri-btn-gold flex items-center gap-1.5 ml-auto"
           >
             <Plus className="w-4 h-4" /> Thêm Lịch tàu &amp; Cước
@@ -1051,46 +1154,73 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             <table className="agri-table">
               <thead>
                 <tr>
-                  <th className="text-center">Mã lịch</th>
-                  <th className="text-left">Hãng tàu / Tàu</th>
-                  <th className="text-left">Tuyến (POL → POD · Quốc gia)</th>
-                  <th className="text-center">ETD / ETA</th>
-                  <th className="text-center">20'DC / 40'DC / 40'HC</th>
-                  <th className="text-center">20'RF / 40'RF / 40'RH</th>
-                  <th className="text-center">Hết hạn</th>
-                  <th className="text-center">Thao tác</th>
+                  <th className="text-center">MÃ LỊCH</th>
+                  <th className="text-center w-[64px]">LOGO</th>
+                  <th className="text-left">HÃNG TÀU / TÀU</th>
+                  <th className="text-left">TUYẾN (POL → POD · QUỐC GIA)</th>
+                  <th className="text-left">ETD / ETA</th>
+                  <th className="text-left">20'DC / 40'DC / 40'HC</th>
+                  <th className="text-left">20'RF / 40'RF / 40'RH</th>
+                  <th className="text-center">HẾT HẠN</th>
+                  <th className="text-center">THAO TÁC</th>
                 </tr>
               </thead>
               <tbody>
                 {list.map((s) => {
                   const exp = computeFreightExpiryStatus(s);
+                  const expiryColorClass =
+                    exp.state === 'EXPIRED'
+                      ? 'text-red-700 font-bold group-hover:text-red-300'
+                      : exp.state === 'EXPIRING'
+                      ? 'text-amber-700 font-bold group-hover:text-yellow-300'
+                      : 'text-emerald-950 font-semibold group-hover:text-white';
                   return (
-                    <tr key={s.schedule_id}>
+                    <tr key={s.schedule_id} className="group">
                       <td className="text-center font-mono font-bold whitespace-nowrap">{s.schedule_id}</td>
+                      <td className="text-center">
+                        <ShippingLineLogoBadge
+                          shippingLine={s.shipping_line}
+                          logoUrl={s.logo_url}
+                          cacheBust={schLogoCacheBust}
+                        />
+                      </td>
                       <td className="text-left">
                         <div className="font-bold">{s.shipping_line}</div>
                         <div className="text-[11px] opacity-80">{s.vessel} / {s.voyage}</div>
                       </td>
                       <td className="text-left">
-                        <div className="font-semibold">{s.pol} → {s.pod}</div>
+                        <div className="font-semibold">
+                          {deduplicatePortName(s.pol)} → {deduplicatePortName(s.pod)}
+                        </div>
                         <div className="text-[11px]">{s.country} {s.pot && s.pot !== '-' ? `· POT: ${s.pot}` : ''}</div>
                       </td>
-                      <td className="text-center font-mono text-xs whitespace-nowrap">{s.etd} → {s.eta}</td>
-                      <td className="text-center font-mono text-xs whitespace-nowrap">
-                        ${fmtNumber(s.rate_20_dc)} / ${fmtNumber(s.rate_40_dc)} / ${fmtNumber(s.rate_40_hc)}
+                      <td className="text-left font-mono text-xs whitespace-nowrap leading-5">
+                        <div>ETD: {formatDateDDMMYYYY(s.etd)}</div>
+                        <div>ETA: {formatDateDDMMYYYY(s.eta)}</div>
                       </td>
-                      <td className="text-center font-mono text-xs whitespace-nowrap">
-                        ${fmtNumber(s.rate_20_rf)} / ${fmtNumber(s.rate_40_rf)} / ${fmtNumber(s.rate_40_rh)}
+                      <td className="text-left font-mono text-xs whitespace-nowrap leading-5">
+                        <div>20'DC: {fmtUSD(s.rate_20_dc)}</div>
+                        <div>40'DC: {fmtUSD(s.rate_40_dc)}</div>
+                        <div>40'HC: {fmtUSD(s.rate_40_hc)}</div>
                       </td>
-                      <td className="text-center font-mono text-xs whitespace-nowrap">
-                        {s.expiry_date}
-                        <div className="text-[10px] font-bold">{exp.state}</div>
+                      <td className="text-left font-mono text-xs whitespace-nowrap leading-5">
+                        <div>20'RF: {fmtUSD(s.rate_20_rf)}</div>
+                        <div>40'RF: {fmtUSD(s.rate_40_rf)}</div>
+                        <div>40'RH: {fmtUSD(s.rate_40_rh)}</div>
+                      </td>
+                      <td className="keep-hover-color text-center whitespace-nowrap">
+                        <span className={`keep-hover-color font-mono text-xs ${expiryColorClass}`}>
+                          {formatDateDDMMYYYY(s.expiry_date)}
+                        </span>
                       </td>
                       <td className="text-center">
                         <div className="inline-flex flex-wrap items-center justify-center gap-1">
                           <button
                             type="button"
-                            onClick={() => setSchModal({ open: true, isEdit: true, rows: [scheduleToDraft(s)] })}
+                            onClick={() => {
+                              setSchLogoStatusMap({});
+                              setSchModal({ open: true, isEdit: true, rows: [scheduleToDraft(s)] });
+                            }}
                             className="keep-btn-style px-2 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold cursor-pointer"
                           >
                             Sửa
@@ -1148,12 +1278,13 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                         {schModal.rows.length > 1 && (
                           <button
                             type="button"
-                            onClick={() =>
+                            onClick={() => {
+                              setSchLogoStatusMap({});
                               setSchModal((prev) => ({
                                 ...prev,
                                 rows: prev.rows.filter((_, i) => i !== idx),
-                              }))
-                            }
+                              }));
+                            }}
                             className="px-2 py-0.5 rounded bg-[#8c3b3b] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
                           >
                             <Trash2 className="w-3 h-3" /> Xóa dòng
@@ -1173,14 +1304,59 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           className="agri-input font-mono"
                         />
                       </div>
-                      <div>
-                        <label className="block font-bold mb-1">Hãng tàu</label>
-                        <input
-                          value={row.shipping_line}
-                          placeholder="VD: Maersk / ONE / MSC"
-                          onChange={(e) => updateSchRow(idx, { shipping_line: e.target.value })}
-                          className="agri-input"
-                        />
+                      <div className="col-span-2 sm:col-span-2">
+                        <label className="block font-bold mb-1">Hãng tàu &amp; Logo tự động</label>
+                        <div className="flex items-center gap-2">
+                          <ShippingLineLogoBadge
+                            shippingLine={row.shipping_line}
+                            logoUrl={row.logo_url}
+                            cacheBust={schLogoCacheBust}
+                            onStatusChange={(st) => {
+                              setSchLogoStatusMap((prev) => (prev[idx] === st ? prev : { ...prev, [idx]: st }));
+                            }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <SearchableCombo
+                              value={row.shipping_line}
+                              onChange={(val) => {
+                                const matchedExisting = data.schedules.find(
+                                  (s) => s.shipping_line.trim().toLowerCase() === val.trim().toLowerCase() && s.logo_url
+                                );
+                                updateSchRow(idx, {
+                                  shipping_line: val,
+                                  logo_url: matchedExisting?.logo_url || '',
+                                });
+                              }}
+                              options={scheduleShippingLineOptions}
+                              allowCustom
+                              placeholder="VD: Maersk / ONE / CMA CGM"
+                            />
+                          </div>
+                          {row.shipping_line.trim() && schLogoStatusMap[idx] === 'missing' && (
+                            <label
+                              className="px-2.5 py-2 rounded-lg bg-[#f4d98a] text-[#07281c] border border-[#186635] font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer hover:brightness-105 shrink-0 whitespace-nowrap"
+                              title="Chưa có logo trong Storage — chọn ảnh để tải lên tự động"
+                            >
+                              {schLogoUploadingIdx === idx ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Upload className="w-3.5 h-3.5" />
+                              )}
+                              <span>{schLogoUploadingIdx === idx ? 'Đang tải...' : 'Tải logo'}</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                disabled={schLogoUploadingIdx === idx}
+                                className="hidden"
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0] || null;
+                                  void handleUploadCarrierLogo(idx, row.shipping_line, f);
+                                  e.target.value = '';
+                                }}
+                              />
+                            </label>
+                          )}
+                        </div>
                       </div>
                       <div>
                         <label className="block font-bold mb-1">Quốc gia đến</label>
@@ -1272,7 +1448,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.bill_seal_fee_shipment}
-                          placeholder="VD: 55,00"
+                          placeholder="VD: 55.00"
                           onChange={(e) => updateSchRow(idx, { bill_seal_fee_shipment: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1283,7 +1459,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.rate_20_dc}
-                          placeholder="VD: 1.200,00"
+                          placeholder="VD: 1,200.00"
                           onChange={(e) => updateSchRow(idx, { rate_20_dc: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1294,7 +1470,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.rate_40_dc}
-                          placeholder="VD: 2.100,00"
+                          placeholder="VD: 2,100.00"
                           onChange={(e) => updateSchRow(idx, { rate_40_dc: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1305,7 +1481,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.rate_40_hc}
-                          placeholder="VD: 2.250,00"
+                          placeholder="VD: 2,250.00"
                           onChange={(e) => updateSchRow(idx, { rate_40_hc: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1316,7 +1492,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.rate_20_rf}
-                          placeholder="VD: 1.850,00"
+                          placeholder="VD: 1,850.00"
                           onChange={(e) => updateSchRow(idx, { rate_20_rf: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1327,7 +1503,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.rate_40_rf}
-                          placeholder="VD: 3.100,00"
+                          placeholder="VD: 3,100.00"
                           onChange={(e) => updateSchRow(idx, { rate_40_rf: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1338,7 +1514,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.rate_40_rh}
-                          placeholder="VD: 3.300,00"
+                          placeholder="VD: 3,300.00"
                           onChange={(e) => updateSchRow(idx, { rate_40_rh: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1349,7 +1525,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.thc_20_dry}
-                          placeholder="VD: 135,00"
+                          placeholder="VD: 135.00"
                           onChange={(e) => updateSchRow(idx, { thc_20_dry: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1360,7 +1536,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.thc_40_dry}
-                          placeholder="VD: 210,00"
+                          placeholder="VD: 210.00"
                           onChange={(e) => updateSchRow(idx, { thc_40_dry: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1371,7 +1547,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.thc_20_reefer}
-                          placeholder="VD: 185,00"
+                          placeholder="VD: 185.00"
                           onChange={(e) => updateSchRow(idx, { thc_20_reefer: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1382,7 +1558,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.thc_40_reefer}
-                          placeholder="VD: 275,00"
+                          placeholder="VD: 275.00"
                           onChange={(e) => updateSchRow(idx, { thc_40_reefer: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1393,7 +1569,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.b_l_fee}
-                          placeholder="VD: 45,00"
+                          placeholder="VD: 45.00"
                           onChange={(e) => updateSchRow(idx, { b_l_fee: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1404,7 +1580,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.seal_fee}
-                          placeholder="VD: 10,00"
+                          placeholder="VD: 10.00"
                           onChange={(e) => updateSchRow(idx, { seal_fee: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1415,7 +1591,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.baf_fee}
-                          placeholder="VD: 150,00"
+                          placeholder="VD: 150.00"
                           onChange={(e) => updateSchRow(idx, { baf_fee: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1426,7 +1602,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.lss_fee}
-                          placeholder="VD: 40,00"
+                          placeholder="VD: 40.00"
                           onChange={(e) => updateSchRow(idx, { lss_fee: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1437,7 +1613,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           type="text"
                           inputMode="decimal"
                           value={row.pss_fee}
-                          placeholder="VD: 100,00"
+                          placeholder="VD: 100.00"
                           onChange={(e) => updateSchRow(idx, { pss_fee: e.target.value })}
                           className="agri-input font-mono"
                         />
@@ -1579,7 +1755,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
           eng: 'VD: Institute Frozen Food Clauses (A)',
           scope: 'VD: REEFER / ALL / ADD-ON',
           unit: 'VD: %_CIF_110',
-          rate: 'VD: 0,35',
+          rate: 'VD: 0.35',
           dim: 'VD: -',
         };
       }
@@ -1590,7 +1766,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
           eng: 'VD: 10kg 5-Ply Corrugated Carton',
           scope: 'VD: ALL / REEFER',
           unit: 'VD: Carton / Bag / Pallet',
-          rate: 'VD: 0,85',
+          rate: 'VD: 0.85',
           dim: 'VD: 40x30x25',
         };
       }
@@ -1601,7 +1777,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
           eng: "VD: 20' Reefer Container (20'RF)",
           scope: "VD: 20'RF",
           unit: 'VD: Container',
-          rate: 'VD: 0,00',
+          rate: 'VD: 0.00',
           dim: 'VD: 545x229x227',
         };
       }
@@ -1612,7 +1788,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
           eng: 'VD: Phytosanitary Certificate',
           scope: 'VD: ALL',
           unit: 'VD: Shipment / Set',
-          rate: 'VD: 35,00',
+          rate: 'VD: 35.00',
           dim: 'VD: -',
         };
       }
@@ -1622,7 +1798,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
         eng: 'VD: Terminal Handling Charge (THC)',
         scope: "VD: 20'DC / ALL",
         unit: 'VD: Container / Shipment',
-        rate: 'VD: 135,00',
+        rate: 'VD: 135.00',
         dim: 'VD: 40x30x25',
       };
     };
@@ -1896,7 +2072,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                             type="text"
                             inputMode="decimal"
                             value={row.net_kg}
-                            placeholder={activeCat.toUpperCase() === 'CONTAINER' ? 'VD: 27.400' : 'VD: 10,00'}
+                            placeholder={activeCat.toUpperCase() === 'CONTAINER' ? 'VD: 27,400' : 'VD: 10.00'}
                             onChange={(e) => updateRateRow(idx, { net_kg: e.target.value })}
                             className="agri-input font-mono"
                           />
@@ -1909,7 +2085,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                             type="text"
                             inputMode="decimal"
                             value={row.tare_kg}
-                            placeholder={activeCat.toUpperCase() === 'CONTAINER' ? 'VD: 24,00' : 'VD: 0,85'}
+                            placeholder={activeCat.toUpperCase() === 'CONTAINER' ? 'VD: 24.00' : 'VD: 0.85'}
                             onChange={(e) => updateRateRow(idx, { tare_kg: e.target.value })}
                             className="agri-input font-mono"
                           />

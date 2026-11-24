@@ -1040,7 +1040,7 @@ export function buildTemplateFieldContext(
     GOODS_DESC: sanitizeNoTba(prodNamesEng || firstProd?.product_name_eng, ''),
     HS_CODE: sanitizeNoTba(normalizePlainText(firstProd?.hs_code), '0810.90'),
     STORAGE_TEMP: sanitizeNoTba(firstProd?.storage_temperature, 'Ambient / Dry'),
-    UNIT_PRICE: avgUnitPrice > 0 ? `$${fmtDecimal(avgUnitPrice, 3)}` : '$0,000',
+    UNIT_PRICE: avgUnitPrice > 0 ? `$${fmtDecimal(avgUnitPrice, 3)}` : '$0.000',
     NW_KGS: fmtNumber(totalNw),
     TOTAL_NW: fmtNumber(totalNw),
     NET_WEIGHT: `${fmtNumber(totalNw)} KGS`,

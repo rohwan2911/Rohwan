@@ -972,7 +972,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
 
                   <label className="inline-flex items-center gap-2 font-bold text-[#07281c] cursor-pointer pt-1">
                     <input type="checkbox" checked={usePallet} onChange={(e) => setUsePallet(e.target.checked)} className="accent-[#0f4a33]" />
-                    <span>Đóng Pallet gỗ ISPM-15 (18 kg · 0,17 CBM/pallet · +5% hao hụt hàng hỗn hợp)</span>
+                    <span>Đóng Pallet gỗ ISPM-15 (18 kg · 0.17 CBM/pallet · +5% hao hụt hàng hỗn hợp)</span>
                   </label>
                 </div>
 

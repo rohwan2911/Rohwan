@@ -81,6 +81,7 @@ export interface ShippingSchedule {
   thc_20_reefer: number;
   thc_40_reefer: number;
   bill_seal_fee_shipment: number;
+  logo_url?: string;
 }
 
 export interface IncotermsHandbook {

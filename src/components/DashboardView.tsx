@@ -4,16 +4,17 @@ import type { AppDataState, OrderLogisticsMeta, ProposalExtraMeta, RoleType, Vie
 import {
   COMPLETED_ORDER_STATUS,
   computeFreightExpiryStatus,
+  deduplicatePortName,
   fmtNumber,
   fmtUSD,
   formatCutoffCountdown,
+  formatDateDDMMYYYY,
   getEffectiveFulfillmentStatus,
   getOrderStage6Number,
   isConfirmedStatus,
   isPricedReadyStatus,
   isSentWaitingCustomerStatus,
   isWaitingPricingStatus,
-  toNum,
   WORKFLOW_6_STAGES,
 } from '../utils/calculations';
 import { SearchableCombo } from './SearchableCombo';
@@ -215,27 +216,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const freightAlerts = useMemo(() => {
     return data.schedules
       .map((sch) => ({ sch, status: computeFreightExpiryStatus(sch) }))
+      .filter((item) => item.status.state === 'EXPIRED' || item.status.state === 'EXPIRING')
       .sort((a, b) => (a.status.daysLeft ?? 999) - (b.status.daysLeft ?? 999));
   }, [data.schedules]);
-
-  const xnkMetrics = useMemo(() => {
-    const existingContractIds = new Set(data.orders.map((o) => o.order_id));
-    const pendingContractCount = data.inquiries.filter(
-      (i) => isConfirmedStatus(i.inquiry_status) && !existingContractIds.has(i.order_id)
-    ).length;
-    const contractsActiveCount = (xnkMilestones[1]?.items.length || 0) + (xnkMilestones[2]?.items.length || 0);
-    const docsOnBoardCount = (xnkMilestones[3]?.items.length || 0) + (xnkMilestones[4]?.items.length || 0);
-    const freightAlertCount = freightAlerts.filter(
-      (f) => f.status.state === 'EXPIRED' || f.status.state === 'EXPIRING'
-    ).length;
-    return {
-      waitingPricingCount: salesMetrics.waiting.length,
-      pendingContractCount,
-      contractsActiveCount,
-      docsOnBoardCount,
-      freightAlertCount,
-    };
-  }, [data.inquiries, data.orders, salesMetrics.waiting.length, xnkMilestones, freightAlerts]);
 
   return (
     <div className="space-y-5">
@@ -373,35 +356,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       ) : (
         <div className="space-y-5">
-          {/* 5 XNK KPI Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            <div className="kpi kpi-1" onClick={() => onNavigate('xnk-pricing')}>
-              <div className="text-[11px] font-bold uppercase text-[#d2ebe0]">Chờ XNK Tính giá</div>
-              <div className="text-3xl font-extrabold mt-1 font-mono">{xnkMetrics.waitingPricingCount}</div>
-              <div className="text-[11px] text-[#f4d98a] mt-1">Mở Bảng tính giá XNK →</div>
-            </div>
-            <div className="kpi kpi-2" onClick={() => onNavigate('xnk-contract')}>
-              <div className="text-[11px] font-bold uppercase text-[#d2ebe0]">Chờ Khởi tạo HĐ</div>
-              <div className="text-3xl font-extrabold mt-1 font-mono">{xnkMetrics.pendingContractCount}</div>
-              <div className="text-[11px] text-[#f4d98a] mt-1">Lập nháp Hợp đồng →</div>
-            </div>
-            <div className="kpi kpi-3" onClick={() => onNavigate('xnk-contract')}>
-              <div className="text-[11px] font-bold uppercase text-[#fff5d6]">HĐ Chờ ký &amp; Booking</div>
-              <div className="text-3xl font-extrabold mt-1 font-mono">{xnkMetrics.contractsActiveCount}</div>
-              <div className="text-[11px] text-[#fff5d6] mt-1">Theo dõi Ký HĐ &amp; Đóng hàng →</div>
-            </div>
-            <div className="kpi kpi-4" onClick={() => onNavigate('xnk-documents')}>
-              <div className="text-[11px] font-bold uppercase text-[#d2ebe0]">Chứng từ &amp; On Board</div>
-              <div className="text-3xl font-extrabold mt-1 font-mono">{xnkMetrics.docsOnBoardCount}</div>
-              <div className="text-[11px] text-[#f4d98a] mt-1">Xuất CI / PL / C/O / B/L →</div>
-            </div>
-            <div className="kpi kpi-5" onClick={() => onNavigate('xnk-shipping')}>
-              <div className="text-[11px] font-bold uppercase text-[#fff5d6]">Cước tàu Cần lưu ý</div>
-              <div className="text-3xl font-extrabold mt-1 font-mono">{xnkMetrics.freightAlertCount}</div>
-              <div className="text-[11px] text-[#f4d98a] mt-1">Sắp hết hạn / Quá hạn →</div>
-            </div>
-          </div>
-
           {/* Tier 1: 35% Left 2x3 6-Milestone Grid + 65% Right All 6 Cut-offs Countdown Table */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
             <div className="lg:col-span-4 grid grid-cols-2 gap-3">
@@ -679,13 +633,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
 
-          {/* Tier 3: Full-width Dynamic Transit-Time Freight Expiry Tracker */}
+          {/* Tier 3: Full-width Dynamic Transit-Time Freight Expiry Tracker (Expired & Expiring Soon only) */}
           <div className="agri-table-wrap">
             <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <Ship className="w-4 h-4 text-[#f4d98a]" />
                 <h3 className="text-sm font-extrabold text-[#fff5d6]">
-                  Giám sát Hạn Giá Cước Tàu theo Transit-Time Động (Click Mã Lịch để cập nhật)
+                  Giám sát Hạn Giá Cước Tàu theo Transit-Time Động ({freightAlerts.length} tuyến cần lưu ý)
                 </h3>
               </div>
               <span className="text-[11px] text-[#9bccb8]">
@@ -715,37 +669,42 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       <td className="text-center font-mono font-bold underline whitespace-nowrap">{sch.schedule_id}</td>
                       <td className="text-left font-semibold">{sch.shipping_line}</td>
                       <td className="text-left">
-                        <div className="font-semibold">{sch.pol} → {sch.pod}</div>
+                        <div className="font-semibold">
+                          {deduplicatePortName(sch.pol)} → {deduplicatePortName(sch.pod)}
+                        </div>
                         {sch.pot && sch.pot !== '-' && (
                           <div className="text-[10.5px] opacity-80 flex items-center gap-1">
                             <Anchor className="w-3 h-3" /> POT: {sch.pot}
                           </div>
                         )}
                       </td>
-                      <td className="text-center font-mono text-xs whitespace-nowrap">{sch.etd} / {sch.eta}</td>
+                      <td className="text-center font-mono text-xs whitespace-nowrap">
+                        <div>ETD: {formatDateDDMMYYYY(sch.etd)}</div>
+                        <div>ETA: {formatDateDDMMYYYY(sch.eta)}</div>
+                      </td>
                       <td className="text-center font-mono whitespace-nowrap">{status.transitDays}d / ≤{status.threshold}d</td>
-                      <td className="text-center font-mono whitespace-nowrap">{sch.expiry_date || '-'}</td>
+                      <td className="text-center font-mono whitespace-nowrap">{formatDateDDMMYYYY(sch.expiry_date)}</td>
                       <td className="text-center whitespace-nowrap">
                         <span
                           className={`keep-badge-color inline-block px-2 py-0.5 rounded text-[11px] font-extrabold ${
                             status.state === 'EXPIRED'
                               ? 'bg-[#8c3b3b] text-white'
-                              : status.state === 'EXPIRING'
-                              ? 'bg-[#f4d98a] text-[#07281c]'
-                              : 'bg-[#0f4a33] text-[#fff5d6]'
+                              : 'bg-[#f4d98a] text-[#07281c]'
                           }`}
                         >
-                          {status.daysLeft === null
-                            ? 'Chưa đặt'
-                            : status.daysLeft < 0
+                          {status.daysLeft !== null && status.daysLeft < 0
                             ? `Quá hạn ${Math.abs(status.daysLeft)}d`
-                            : `Còn ${status.daysLeft} ngày`}
+                            : `Sắp hết hạn (${status.daysLeft}d)`}
                         </span>
                       </td>
                     </tr>
                   ))}
                   {freightAlerts.length === 0 && (
-                    <tr><td colSpan={7} className="text-center py-6 opacity-75">Chưa có lịch tàu nào.</td></tr>
+                    <tr>
+                      <td colSpan={7} className="text-center py-6 opacity-80">
+                        Tất cả biểu cước lịch tàu hiện đang còn hạn an toàn.
+                      </td>
+                    </tr>
                   )}
                 </tbody>
               </table>
