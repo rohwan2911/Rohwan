@@ -273,8 +273,9 @@ export const App: React.FC = () => {
               orderMetaMap={orderMetaMap}
               proposalMetaMap={proposalMetaMap}
               onSaveInquiry={async (params) => {
-                await saveInquiryRecord(data, params);
+                const saved = await saveInquiryRecord(data, params);
                 await syncData({ silent: true });
+                return saved;
               }}
               onDeletePreContract={async (orderId) => {
                 await deletePreContractOrder(data, orderId);

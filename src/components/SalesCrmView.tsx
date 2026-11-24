@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus,
   Zap,
@@ -13,6 +13,7 @@ import {
   Calendar,
   Languages,
   Loader2,
+  X,
 } from 'lucide-react';
 import type {
   AppDataState,
@@ -28,6 +29,7 @@ import {
   classifyCustomerByCount,
   cleanQuoteNoForCustomer,
   computeOrderPalletSummary,
+  deduplicatePortName,
   fmtDecimal,
   fmtNumber,
   fmtUSD,
@@ -61,6 +63,7 @@ interface SalesCrmViewProps {
   proposalMetaMap: Record<string, ProposalExtraMeta>;
   onSaveInquiry: (params: {
     existingOrderId?: string;
+    sourceQuickLogId?: string;
     saleRep: string;
     customerInput: {
       consignee_id?: string;
@@ -73,6 +76,8 @@ interface SalesCrmViewProps {
       email: string;
       fax: string;
       default_payment_term: string;
+      default_pod?: string;
+      warehouse_address?: string;
     };
     sku_code: string;
     product_name_vie: string;
@@ -84,7 +89,9 @@ interface SalesCrmViewProps {
     note: string;
     order_items: string;
     quotation_mode: string;
-  }) => Promise<void>;
+    pod?: string;
+    warehouse_address?: string;
+  }) => Promise<InquiryQuotation>;
   onDeletePreContract: (orderId: string) => Promise<void>;
   onConfirmOrder: (orderId: string) => Promise<void>;
   onRequestReprice: (orderId: string, reason: string) => Promise<void>;
@@ -126,18 +133,17 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
 }) => {
   // Quick Capture state
   const [quickCusName, setQuickCusName] = useState('');
-  const [quickCountry, setQuickCountry] = useState('');
+  const [quickAddress, setQuickAddress] = useState('');
   const [quickContact, setQuickContact] = useState('');
   const [quickEmail, setQuickEmail] = useState('');
-  const [quickPhone, setQuickPhone] = useState('');
   const [quickNote, setQuickNote] = useState('');
   const [quickSaving, setQuickSaving] = useState(false);
   const [quickFilterText, setQuickFilterText] = useState('');
-  const [quickFilterCountry, setQuickFilterCountry] = useState('');
 
   // Full RFQ Modal state
   const [rfqModalOpen, setRfqModalOpen] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState<string | undefined>(undefined);
+  const [selectedQuickLogId, setSelectedQuickLogId] = useState('');
   const [selectedConsigneeId, setSelectedConsigneeId] = useState('');
   const [cusName, setCusName] = useState('');
   const [cusCountry, setCusCountry] = useState('');
@@ -147,6 +153,9 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
   const [cusPhone, setCusPhone] = useState('');
   const [cusEmail, setCusEmail] = useState('');
   const [cusFax, setCusFax] = useState('');
+  const [cusPod, setCusPod] = useState('');
+  const [cusWarehouseAddress, setCusWarehouseAddress] = useState('');
+  const [companySuggestOpen, setCompanySuggestOpen] = useState(false);
   const [desiredDate, setDesiredDate] = useState('');
   const [desiredIncoterm, setDesiredIncoterm] = useState('');
   const [paymentTerm, setPaymentTerm] = useState('');
@@ -170,6 +179,17 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
   const [cusOrderCountStr, setCusOrderCountStr] = useState('');
   const [cusIsEdit, setCusIsEdit] = useState(false);
   const dateInputRef = useRef<HTMLInputElement>(null);
+  const companySuggestRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (companySuggestRef.current && !companySuggestRef.current.contains(e.target as Node)) {
+        setCompanySuggestOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
 
   const countryOptions = useMemo(() => {
     const set = new Set<string>();
@@ -178,16 +198,50 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     return Array.from(set).sort().map((c) => ({ value: c, label: c }));
   }, [data.schedules, data.consignees]);
 
-  const consigneeOptions = useMemo(() => {
-    const countryQ = cusCountry.trim().toLowerCase();
+  const podOptions = useMemo(() => {
+    const map = new Map<string, { value: string; label: string; subLabel?: string }>();
+    data.schedules.forEach((s) => {
+      const cleanPod = deduplicatePortName(s.pod);
+      if (!cleanPod) return;
+      const key = cleanPod.toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, {
+          value: cleanPod,
+          label: cleanPod,
+          subLabel: s.country ? s.country.trim() : undefined,
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [data.schedules]);
+
+  const allActiveQuickLogs = useMemo(() => {
+    return data.inquiries
+      .filter((i) => isQuickCaptureStatus(i.inquiry_status))
+      .slice()
+      .reverse();
+  }, [data.inquiries]);
+
+  const quickLogDropdownOptions = useMemo(() => {
+    return allActiveQuickLogs.map((q) => {
+      const cus = data.consignees.find((c) => c.consignee_id === q.consignee_id);
+      const company = cus?.consignee_name || q.consignee_id || 'Chưa rõ tên';
+      const subParts = [q.address || cus?.address, q.contact || cus?.contact_person, q.email || cus?.email].filter(Boolean);
+      return {
+        value: q.order_id,
+        label: `${q.order_id} — ${company}`,
+        subLabel: subParts.join(' · ') || undefined,
+      };
+    });
+  }, [allActiveQuickLogs, data.consignees]);
+
+  const companySuggestions = useMemo(() => {
+    const query = cusName.trim().toLowerCase();
+    if (!query) return [];
     return data.consignees
-      .filter((c) => !countryQ || c.country.trim().toLowerCase().includes(countryQ))
-      .map((c) => ({
-        value: c.consignee_id,
-        label: `${c.consignee_name} (${c.consignee_id})`,
-        subLabel: `${c.country} · ${c.email || c.phone || ''}`,
-      }));
-  }, [data.consignees, cusCountry]);
+      .filter((c) => c.consignee_name.trim().toLowerCase().includes(query))
+      .slice(0, 8);
+  }, [data.consignees, cusName]);
 
   const productOptions = useMemo(() => {
     return data.products.map((p) => ({
@@ -225,19 +279,88 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     return Array.from(map.values());
   }, [data.incoterms]);
 
+  const applyQuickLogLeadToForm = (lead: InquiryQuotation) => {
+    const cus = data.consignees.find((c) => c.consignee_id === lead.consignee_id);
+    setSelectedQuickLogId(lead.order_id);
+    setSelectedConsigneeId(cus?.consignee_id || lead.consignee_id || '');
+    setCusName(cus?.consignee_name || lead.consignee_id || '');
+    setCusCountry(cus?.country || '');
+    setCusAddress(lead.address || cus?.address || '');
+    setCusTax(normalizePlainText(cus?.tax || ''));
+    setCusContact(lead.contact || cus?.contact_person || '');
+    setCusPhone(normalizePlainText(lead.phone || cus?.phone || ''));
+    setCusEmail(lead.email || cus?.email || '');
+    setCusFax(normalizePlainText(cus?.fax || ''));
+    setCusPod(deduplicatePortName(lead.pod || cus?.default_pod || ''));
+    setCusWarehouseAddress(lead.warehouse_address || cus?.warehouse_address || '');
+    if (lead.proposed_payment_term || cus?.default_payment_term) {
+      setPaymentTerm(lead.proposed_payment_term || cus?.default_payment_term || '');
+    }
+    const cleanLeadNote = stripItemsTag(lead.note);
+    if (cleanLeadNote) {
+      setRfqNote(cleanLeadNote);
+    }
+    setCompanySuggestOpen(false);
+  };
+
+  const applyExistingConsigneeToForm = (cus: ConsigneeDirectory) => {
+    setSelectedConsigneeId(cus.consignee_id);
+    setCusName(cus.consignee_name);
+    setCusCountry(cus.country || '');
+    setCusAddress(cus.address || '');
+    setCusTax(normalizePlainText(cus.tax));
+    setCusContact(cus.contact_person || '');
+    setCusPhone(normalizePlainText(cus.phone));
+    setCusEmail(cus.email || '');
+    setCusFax(normalizePlainText(cus.fax));
+    setCusPod(deduplicatePortName(cus.default_pod || ''));
+    setCusWarehouseAddress(cus.warehouse_address || '');
+    if (cus.default_payment_term) setPaymentTerm(cus.default_payment_term);
+    setCompanySuggestOpen(false);
+  };
+
+  const handleSelectPodInRfq = (podValue: string) => {
+    const clean = deduplicatePortName(podValue);
+    setCusPod(clean || podValue);
+    if (clean) {
+      const matchedSch = data.schedules.find(
+        (s) => deduplicatePortName(s.pod).toLowerCase() === clean.toLowerCase()
+      );
+      if (matchedSch?.country) {
+        setCusCountry(matchedSch.country.trim());
+      }
+    }
+  };
+
   const openFullRfqModal = (fromInquiry?: InquiryQuotation) => {
-    if (fromInquiry) {
+    setCompanySuggestOpen(false);
+    if (fromInquiry && isQuickCaptureStatus(fromInquiry.inquiry_status)) {
+      // Converting a Quick-Log lead (INQ-YYYY-XXX) into a brand-new official Full RFQ (ORD-YYYY-XXX)
+      setEditingOrderId(undefined);
+      setDesiredDate('');
+      setDesiredIncoterm('');
+      setPaymentTerm('');
+      setQuoteMode('SINGLE');
+      setUsePallet(false);
+      setRfqNote('');
+      setLines([{ sku: '', name: '', name_eng: '', weightStr: '', packingCode: '' }]);
+      applyQuickLogLeadToForm(fromInquiry);
+    } else if (fromInquiry) {
+      // Editing an existing official Full RFQ (ORD-...)
       setEditingOrderId(fromInquiry.order_id);
+      setSelectedQuickLogId('');
       const cus = data.consignees.find((c) => c.consignee_id === fromInquiry.consignee_id);
       setSelectedConsigneeId(fromInquiry.consignee_id || '');
       setCusName(cus?.consignee_name || fromInquiry.consignee_id || '');
       setCusCountry(cus?.country || '');
       setCusAddress(fromInquiry.address || cus?.address || '');
-      setCusTax(cus?.tax || '');
+      setCusTax(normalizePlainText(cus?.tax || ''));
       setCusContact(fromInquiry.contact || cus?.contact_person || '');
-      setCusPhone(fromInquiry.phone || cus?.phone || '');
+      setCusPhone(normalizePlainText(fromInquiry.phone || cus?.phone || ''));
       setCusEmail(fromInquiry.email || cus?.email || '');
-      setCusFax(cus?.fax || '');
+      setCusFax(normalizePlainText(cus?.fax || ''));
+      setCusPod(deduplicatePortName(fromInquiry.pod || cus?.default_pod || ''));
+      setCusWarehouseAddress(fromInquiry.warehouse_address || cus?.warehouse_address || '');
       setDesiredDate(fromInquiry.desired_delivery_date || '');
       setDesiredIncoterm(fromInquiry.desired_incoterm || '');
       setPaymentTerm(fromInquiry.proposed_payment_term || cus?.default_payment_term || '');
@@ -258,6 +381,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
       );
     } else {
       setEditingOrderId(undefined);
+      setSelectedQuickLogId('');
       setSelectedConsigneeId('');
       setCusName('');
       setCusCountry('');
@@ -267,6 +391,8 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
       setCusPhone('');
       setCusEmail('');
       setCusFax('');
+      setCusPod('');
+      setCusWarehouseAddress('');
       setDesiredDate('');
       setDesiredIncoterm('');
       setPaymentTerm('');
@@ -286,37 +412,6 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     setRfqModalOpen(true);
   };
 
-  const handleSelectConsignee = (val: string) => {
-    const trimmed = val.trim();
-    if (!trimmed) {
-      setSelectedConsigneeId('');
-      setCusName('');
-      return;
-    }
-    const low = trimmed.toLowerCase();
-    const cus = data.consignees.find(
-      (c) =>
-        c.consignee_id.trim().toLowerCase() === low ||
-        c.consignee_name.trim().toLowerCase() === low ||
-        `${c.consignee_name} (${c.consignee_id})`.trim().toLowerCase() === low
-    );
-    if (cus) {
-      setSelectedConsigneeId(cus.consignee_id);
-      setCusName(cus.consignee_name);
-      setCusCountry(cus.country);
-      setCusAddress(cus.address);
-      setCusTax(normalizePlainText(cus.tax));
-      setCusContact(cus.contact_person);
-      setCusPhone(normalizePlainText(cus.phone));
-      setCusEmail(cus.email);
-      setCusFax(normalizePlainText(cus.fax));
-      if (cus.default_payment_term) setPaymentTerm(cus.default_payment_term);
-    } else {
-      setSelectedConsigneeId('');
-      setCusName(val);
-    }
-  };
-
   const handleSaveQuickCapture = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickCusName.trim()) {
@@ -332,16 +427,16 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     );
     setQuickSaving(true);
     try {
-      await onSaveInquiry({
+      const saved = await onSaveInquiry({
         saleRep: currentUser.full_name,
         customerInput: {
           consignee_id: matchedCus?.consignee_id,
           consignee_name: matchedCus?.consignee_name || quickCusName.trim(),
-          country: quickCountry.trim() || matchedCus?.country || '',
-          address: matchedCus?.address || '',
+          country: matchedCus?.country || '',
+          address: quickAddress.trim() || matchedCus?.address || '',
           tax: matchedCus?.tax || '',
           contact_person: quickContact.trim() || matchedCus?.contact_person || '',
-          phone: quickPhone.trim() || matchedCus?.phone || '',
+          phone: matchedCus?.phone || '',
           email: quickEmail.trim() || matchedCus?.email || '',
           fax: matchedCus?.fax || '',
           default_payment_term: matchedCus?.default_payment_term || 'T/T 30/70',
@@ -358,12 +453,11 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
         quotation_mode: 'SINGLE',
       });
       setQuickCusName('');
-      setQuickCountry('');
+      setQuickAddress('');
       setQuickContact('');
       setQuickEmail('');
-      setQuickPhone('');
       setQuickNote('');
-      onToast('success', 'Đã ghi nhận khách hàng nhanh.');
+      onToast('success', `Đã ghi nhận khách hàng nhanh (${saved.order_id}).`);
     } catch (err: any) {
       onToast('error', err?.message || 'Lỗi ghi nhận nhanh.');
     } finally {
@@ -374,7 +468,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
   const handleSubmitFullRfq = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!cusName.trim()) {
-      onToast('warning', 'Vui lòng chọn hoặc nhập tên khách hàng.');
+      onToast('warning', 'Vui lòng nhập Tên công ty / Khách hàng.');
       return;
     }
     const validLines = lines.filter((l) => l.sku && parseLocaleNumber(l.weightStr) > 0);
@@ -415,17 +509,25 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
           (cleanEmailLow && c.email.trim().toLowerCase() === cleanEmailLow) ||
           (cleanTaxLow && normalizePlainText(c.tax).toLowerCase() === cleanTaxLow)
       );
+    const cleanPod = deduplicatePortName(cusPod);
+    const matchedPodSchedule = cleanPod
+      ? data.schedules.find((s) => deduplicatePortName(s.pod).toLowerCase() === cleanPod.toLowerCase())
+      : undefined;
+    const resolvedCountry =
+      cusCountry.trim() || matchedPodSchedule?.country?.trim() || resolvedExisting?.country || '';
     const resolvedIncoterm = desiredIncoterm.trim().toUpperCase() || 'CIF';
     const resolvedPayment = paymentTerm.trim() || 'T/T 30% Deposit / 70% against B/L copy';
+
     setRfqSaving(true);
     try {
-      await onSaveInquiry({
+      const saved = await onSaveInquiry({
         existingOrderId: editingOrderId,
+        sourceQuickLogId: !editingOrderId && selectedQuickLogId ? selectedQuickLogId : undefined,
         saleRep: currentUser.full_name,
         customerInput: {
           consignee_id: resolvedExisting?.consignee_id || selectedConsigneeId || undefined,
           consignee_name: cusName.trim(),
-          country: cusCountry.trim(),
+          country: resolvedCountry,
           address: cusAddress.trim(),
           tax: cusTax.trim(),
           contact_person: cusContact.trim(),
@@ -433,6 +535,8 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
           email: cusEmail.trim(),
           fax: cusFax.trim(),
           default_payment_term: resolvedPayment,
+          default_pod: cleanPod,
+          warehouse_address: cusWarehouseAddress.trim(),
         },
         sku_code: orderItems.map((i) => i.sku).join(', '),
         product_name_vie: orderItems.map((i) => i.name).join(', '),
@@ -444,9 +548,16 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
         note: rfqNote.trim(),
         order_items: JSON.stringify(orderItems),
         quotation_mode: quoteMode,
+        pod: cleanPod,
+        warehouse_address: cusWarehouseAddress.trim(),
       });
       setRfqModalOpen(false);
-      onToast('success', editingOrderId ? `Đã cập nhật RFQ ${editingOrderId} và chuyển XNK.` : 'Đã tạo Yêu cầu Tính giá (RFQ) chuyển sang XNK.');
+      onToast(
+        'success',
+        editingOrderId
+          ? `Đã cập nhật RFQ ${saved.order_id} và chuyển XNK.`
+          : `Đã tạo Yêu cầu Tính giá ${saved.order_id} chuyển sang XNK.`
+      );
     } catch (err: any) {
       onToast('error', err?.message || 'Lỗi lưu RFQ.');
     } finally {
@@ -461,7 +572,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
       .filter((i) => {
         if (!quickSearchLower) return true;
         const cus = data.consignees.find((c) => c.consignee_id === i.consignee_id);
-        const hay = `${i.order_id} ${i.consignee_id} ${cus?.consignee_name || ''} ${i.sku_code} ${i.product_name_vie} ${i.inquiry_status}`.toLowerCase();
+        const hay = `${i.order_id} ${i.consignee_id} ${cus?.consignee_name || ''} ${i.address || cus?.address || ''} ${i.sku_code} ${i.product_name_vie} ${i.inquiry_status}`.toLowerCase();
         return hay.includes(quickSearchLower);
       })
       .slice()
@@ -470,17 +581,15 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
 
   const quickCaptures = useMemo(() => {
     const fLow = quickFilterText.trim().toLowerCase();
-    const cLow = quickFilterCountry.trim().toLowerCase();
     return filteredInquiries
       .filter((i) => isQuickCaptureStatus(i.inquiry_status))
       .filter((i) => {
-        const cus = data.consignees.find((c) => c.consignee_id === i.consignee_id);
-        if (cLow && !(cus?.country || '').toLowerCase().includes(cLow)) return false;
         if (!fLow) return true;
-        const hay = `${i.order_id} ${cus?.consignee_name || ''} ${cus?.country || ''} ${i.contact || cus?.contact_person || ''} ${i.email || cus?.email || ''} ${i.note || ''}`.toLowerCase();
+        const cus = data.consignees.find((c) => c.consignee_id === i.consignee_id);
+        const hay = `${i.order_id} ${cus?.consignee_name || ''} ${i.address || cus?.address || ''} ${cus?.country || ''} ${i.contact || cus?.contact_person || ''} ${i.email || cus?.email || ''} ${i.note || ''}`.toLowerCase();
         return hay.includes(fLow);
       });
-  }, [filteredInquiries, data.consignees, quickFilterText, quickFilterCountry]);
+  }, [filteredInquiries, data.consignees, quickFilterText]);
 
   const quotationRows = useMemo(() => {
     return filteredInquiries.filter((i) => !isQuickCaptureStatus(i.inquiry_status));
@@ -531,14 +640,8 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
               <input value={quickCusName} onChange={(e) => setQuickCusName(e.target.value)} className="agri-input text-xs" placeholder="VD: Fresh Asia Trading" />
             </div>
             <div>
-              <label className="block text-[11px] font-bold text-[#fff5d6] mb-1">Quốc gia</label>
-              <SearchableCombo
-                value={quickCountry}
-                onChange={setQuickCountry}
-                options={countryOptions}
-                allowCustom
-                placeholder="Chọn hoặc nhập Quốc gia..."
-              />
+              <label className="block text-[11px] font-bold text-[#fff5d6] mb-1">Địa chỉ</label>
+              <input value={quickAddress} onChange={(e) => setQuickAddress(e.target.value)} className="agri-input text-xs" placeholder="VD: 1-2-3 Minato-ku, Tokyo, Japan" />
             </div>
             <div>
               <label className="block text-[11px] font-bold text-[#fff5d6] mb-1">Người liên hệ</label>
@@ -568,27 +671,17 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
               <input
                 value={quickFilterText}
                 onChange={(e) => setQuickFilterText(e.target.value)}
-                placeholder="Lọc tên khách, liên hệ, ghi chú..."
-                className="px-2.5 py-1 rounded-lg bg-[#07281c] border border-[#186635] text-xs text-[#fff5d6] placeholder-[#9bccb8]/70 outline-none w-52"
+                placeholder="Lọc mã INQ, tên khách, địa chỉ, liên hệ..."
+                className="px-2.5 py-1 rounded-lg bg-[#07281c] border border-[#186635] text-xs text-[#fff5d6] placeholder-[#9bccb8]/70 outline-none w-64"
               />
-              <div className="w-44">
-                <SearchableCombo
-                  dark
-                  value={quickFilterCountry}
-                  onChange={setQuickFilterCountry}
-                  options={countryOptions}
-                  allowCustom
-                  placeholder="Lọc quốc gia..."
-                />
-              </div>
             </div>
           </div>
           <div className="agri-table-scroll">
             <table className="agri-table">
               <thead>
                 <tr>
-                  <th className="text-center">Mã đơn</th>
-                  <th className="text-left">Khách hàng / Quốc gia</th>
+                  <th className="text-center">Mã ghi nhận</th>
+                  <th className="text-left">Khách hàng / Địa chỉ</th>
                   <th className="text-left">Người liên hệ &amp; Email</th>
                   <th className="text-left">Ghi chú nhu cầu</th>
                   <th className="text-center">Trạng thái</th>
@@ -598,6 +691,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
               <tbody>
                 {quickCaptures.map((q) => {
                   const cus = data.consignees.find((c) => c.consignee_id === q.consignee_id);
+                  const displayAddress = q.address || cus?.address || cus?.country || '-';
                   return (
                     <tr key={q.order_id}>
                       <td className="text-center">
@@ -608,7 +702,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                       </td>
                       <td className="text-left">
                         <div className="font-bold">{cus?.consignee_name || q.consignee_id}</div>
-                        <div className="text-[11px] opacity-80">{cus?.country || '-'} · Sale: {q.sale_rep}</div>
+                        <div className="text-[11px] opacity-80">{displayAddress} · Sale: {q.sale_rep}</div>
                       </td>
                       <td className="text-left text-xs">
                         <div>{q.contact || cus?.contact_person || '-'}</div>
@@ -693,7 +787,9 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                       </td>
                       <td className="text-left">
                         <div className="font-bold">{cus?.consignee_name || inq.consignee_id}</div>
-                        <div className="text-[11px] opacity-80">{cus?.country || '-'} · Sale: {inq.sale_rep}</div>
+                        <div className="text-[11px] opacity-80">
+                          {inq.pod ? `POD: ${inq.pod}` : cus?.country || inq.address || cus?.address || '-'} · Sale: {inq.sale_rep}
+                        </div>
                       </td>
                       <td className="text-left">
                         {items.length > 0 ? (
@@ -769,7 +865,11 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
             <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-y-auto text-[#f4f8f5]">
               <div className="px-5 py-3.5 bg-[#0f4a33] border-b-2 border-[#186635] flex items-center justify-between">
                 <h3 className="text-base font-extrabold text-[#fff5d6]">
-                  {editingOrderId ? `Chuyển đổi / Sửa Yêu cầu Tính giá (${editingOrderId})` : 'Tạo Yêu cầu Tính giá Mới (Full RFQ)'}
+                  {editingOrderId
+                    ? `Chỉnh sửa Yêu cầu Tính giá (${editingOrderId})`
+                    : selectedQuickLogId
+                    ? `Tạo Yêu cầu Tính giá Mới (Full RFQ) · Từ ${selectedQuickLogId}`
+                    : 'Tạo Yêu cầu Tính giá Mới (Full RFQ)'}
                 </h3>
                 <button type="button" onClick={() => setRfqModalOpen(false)} className="px-2.5 py-1 rounded bg-[#8c3b3b] text-white text-xs font-bold cursor-pointer">
                   Đóng
@@ -777,75 +877,187 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
               </div>
 
               <form onSubmit={handleSubmitFullRfq} className="p-5 space-y-4 text-xs">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block font-bold text-[#fff5d6] mb-1">Lọc theo Quốc gia (Chọn hoặc nhập mới)</label>
+                {/* 1. Optional Quick-Log Lead Selector */}
+                {!editingOrderId && (
+                  <div className="rounded-xl bg-[#07281c]/35 border border-[#f4d98a]/40 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                      <label className="font-extrabold text-[#f4d98a] flex items-center gap-1.5">
+                        <Zap className="w-3.5 h-3.5" />
+                        <span>Khách hàng ghi nhận nhanh (Tùy chọn)</span>
+                      </label>
+                      {selectedQuickLogId && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedQuickLogId('')}
+                          className="px-2 py-0.5 rounded bg-[#07281c] text-[#fff5d6] text-[10.5px] font-bold inline-flex items-center gap-1 cursor-pointer hover:bg-[#0f4a33]"
+                        >
+                          <X className="w-3 h-3" /> Bỏ liên kết {selectedQuickLogId}
+                        </button>
+                      )}
+                    </div>
                     <SearchableCombo
-                      value={cusCountry}
-                      onChange={setCusCountry}
-                      options={countryOptions}
-                      allowCustom
-                      placeholder="Chọn hoặc nhập Quốc gia..."
+                      value={selectedQuickLogId}
+                      onChange={(leadId) => {
+                        if (!leadId) {
+                          setSelectedQuickLogId('');
+                          return;
+                        }
+                        const found = allActiveQuickLogs.find((q) => q.order_id === leadId);
+                        if (found) {
+                          applyQuickLogLeadToForm(found);
+                        }
+                      }}
+                      options={quickLogDropdownOptions}
+                      allowCustom={false}
+                      placeholder={
+                        quickLogDropdownOptions.length > 0
+                          ? 'Chọn từ danh sách Ghi nhận nhanh (INQ-...) để tự động điền thông tin...'
+                          : 'Chưa có khách hàng ghi nhận nhanh — nhập trực tiếp thông tin bên dưới'
+                      }
                     />
                   </div>
-                  <div className="sm:col-span-2">
-                    <label className="block font-bold text-[#fff5d6] mb-1">Chọn Khách hàng có sẵn (tùy chọn)</label>
-                    <SearchableCombo
-                      value={selectedConsigneeId || cusName}
-                      onChange={handleSelectConsignee}
-                      options={consigneeOptions}
-                      placeholder="Tìm khách hàng cũ hoặc nhập tên mới..."
-                      allowCustom
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-[#fff5d6] mb-1">Tên Khách hàng / Công ty *</label>
+                )}
+
+                {/* 2. Always-Editable Customer & Destination Fields + Live Auto-Suggest on Company Name */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div ref={companySuggestRef} className="relative sm:col-span-2 lg:col-span-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-bold text-[#fff5d6]">Tên công ty *</label>
+                      {cusName.trim() && (
+                        <span
+                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                            selectedConsigneeId
+                              ? 'bg-[#f4d98a] text-[#07281c]'
+                              : 'bg-[#07281c]/60 text-[#d2ebe0]'
+                          }`}
+                        >
+                          {selectedConsigneeId ? `KH có sẵn · ${selectedConsigneeId}` : 'Khách hàng mới'}
+                        </span>
+                      )}
+                    </div>
                     <input
                       value={cusName}
+                      onFocus={() => setCompanySuggestOpen(true)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setCompanySuggestOpen(false);
+                      }}
                       onChange={(e) => {
                         const val = e.target.value;
                         setCusName(val);
-                        const low = val.trim().toLowerCase();
-                        const matched = low
-                          ? data.consignees.find((c) => c.consignee_name.trim().toLowerCase() === low)
-                          : undefined;
-                        if (matched) {
-                          setSelectedConsigneeId(matched.consignee_id);
-                          if (!cusCountry) setCusCountry(matched.country);
-                          if (!cusAddress) setCusAddress(matched.address);
-                          if (!cusTax) setCusTax(normalizePlainText(matched.tax));
-                          if (!cusContact) setCusContact(matched.contact_person);
-                          if (!cusPhone) setCusPhone(normalizePlainText(matched.phone));
-                          if (!cusEmail) setCusEmail(matched.email);
-                          if (!cusFax) setCusFax(normalizePlainText(matched.fax));
-                        } else {
-                          setSelectedConsigneeId('');
+                        setCompanySuggestOpen(true);
+                        if (selectedConsigneeId) {
+                          const linked = data.consignees.find((c) => c.consignee_id === selectedConsigneeId);
+                          if (!linked || linked.consignee_name.trim().toLowerCase() !== val.trim().toLowerCase()) {
+                            setSelectedConsigneeId('');
+                          }
                         }
                       }}
-                      placeholder="Nhập tên khách hàng hoặc công ty mới..."
+                      placeholder="Gõ tên công ty để tìm khách có sẵn hoặc nhập mới..."
                       className="agri-input"
+                      autoComplete="off"
                       required
                     />
+                    {companySuggestOpen && companySuggestions.length > 0 && (
+                      <div className="absolute left-0 right-0 z-50 mt-1 max-h-56 overflow-y-auto rounded-xl bg-[#f5fbf7] border-2 border-[#186635] shadow-2xl text-[#07281c]">
+                        <div className="px-2.5 py-1 bg-[#d7eee4] border-b border-[#186635]/30 text-[10px] font-extrabold text-[#0f4a33] uppercase">
+                          Gợi ý Khách hàng có sẵn trong Danh bạ ({companySuggestions.length})
+                        </div>
+                        {companySuggestions.map((c) => (
+                          <button
+                            key={c.consignee_id}
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              applyExistingConsigneeToForm(c);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs border-b border-[#186635]/15 last:border-b-0 hover:bg-[#0f4a33] hover:text-[#fff5d6] cursor-pointer transition-colors group"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-bold truncate">{c.consignee_name}</span>
+                              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[#0f4a33]/10 text-[#0f4a33] group-hover:bg-[#f4d98a] group-hover:text-[#07281c] shrink-0">
+                                {c.consignee_id}
+                              </span>
+                            </div>
+                            <div className="text-[10.5px] opacity-80 truncate mt-0.5">
+                              {[c.address || c.country, c.contact_person, c.email, c.default_pod ? `POD: ${c.default_pod}` : '']
+                                .filter(Boolean)
+                                .join(' · ') || 'Chưa có thông tin bổ sung'}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
+
+                  <div>
+                    <label className="block font-bold text-[#fff5d6] mb-1">Tax / Mã số thuế</label>
+                    <input
+                      value={cusTax}
+                      placeholder="VD: JP-987654321"
+                      onChange={(e) => setCusTax(e.target.value)}
+                      className="agri-input font-mono"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2 lg:col-span-3">
+                    <label className="block font-bold text-[#fff5d6] mb-1">Địa chỉ</label>
+                    <input
+                      value={cusAddress}
+                      placeholder="VD: 1-2-3 Minato-ku, Tokyo, Japan"
+                      onChange={(e) => setCusAddress(e.target.value)}
+                      className="agri-input"
+                    />
+                  </div>
+
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Người liên hệ</label>
-                    <input value={cusContact} placeholder="VD: Mr. Kenji Tanaka" onChange={(e) => setCusContact(e.target.value)} className="agri-input" />
+                    <input
+                      value={cusContact}
+                      placeholder="VD: Mr. Kenji Tanaka"
+                      onChange={(e) => setCusContact(e.target.value)}
+                      className="agri-input"
+                    />
                   </div>
+
+                  <div>
+                    <label className="block font-bold text-[#fff5d6] mb-1">Số điện thoại</label>
+                    <input
+                      value={cusPhone}
+                      placeholder="VD: +81 3-1234-5678"
+                      onChange={(e) => setCusPhone(e.target.value)}
+                      className="agri-input font-mono"
+                    />
+                  </div>
+
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Email</label>
-                    <input value={cusEmail} placeholder="VD: buyer@company.com" onChange={(e) => setCusEmail(e.target.value)} className="agri-input" />
+                    <input
+                      value={cusEmail}
+                      placeholder="VD: buyer@company.com"
+                      onChange={(e) => setCusEmail(e.target.value)}
+                      className="agri-input"
+                    />
                   </div>
+
                   <div>
-                    <label className="block font-bold text-[#fff5d6] mb-1">Điện thoại (Plain Text)</label>
-                    <input value={cusPhone} placeholder="VD: +81 3-1234-5678" onChange={(e) => setCusPhone(e.target.value)} className="agri-input" />
+                    <label className="block font-bold text-[#fff5d6] mb-1">Cảng đến (POD)</label>
+                    <SearchableCombo
+                      value={cusPod}
+                      onChange={handleSelectPodInRfq}
+                      options={podOptions}
+                      allowCustom
+                      placeholder="Chọn hoặc nhập Cảng đến (POD)..."
+                    />
                   </div>
-                  <div>
-                    <label className="block font-bold text-[#fff5d6] mb-1">Tax ID / Mã số thuế</label>
-                    <input value={cusTax} placeholder="VD: JP-987654321" onChange={(e) => setCusTax(e.target.value)} className="agri-input" />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-[#fff5d6] mb-1">Địa chỉ</label>
-                    <input value={cusAddress} placeholder="VD: 1-2-3 Minato-ku, Tokyo, Japan" onChange={(e) => setCusAddress(e.target.value)} className="agri-input" />
+
+                  <div className="sm:col-span-1 lg:col-span-2">
+                    <label className="block font-bold text-[#fff5d6] mb-1">Địa chỉ kho</label>
+                    <input
+                      value={cusWarehouseAddress}
+                      placeholder="VD: Warehouse / Delivery Address (DAP/DPU/DDP)..."
+                      onChange={(e) => setCusWarehouseAddress(e.target.value)}
+                      className="agri-input"
+                    />
                   </div>
                 </div>
 
@@ -949,7 +1161,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                                 type="text"
                                 inputMode="decimal"
                                 value={ln.weightStr}
-                                placeholder="VD: 10.000"
+                                placeholder="VD: 10,000"
                                 onChange={(e) => setLines((prev) => prev.map((r, i) => (i === idx ? { ...r, weightStr: e.target.value } : r)))}
                                 className="agri-input text-xs font-mono font-bold"
                               />

@@ -25,6 +25,7 @@ import {
   getInsuranceCatalog,
   getPackingOptionsForProduct,
   INCOTERMS_2020_MATRIX,
+  isQuickCaptureStatus,
   isReeferProduct,
   isRepriceRequestedStatus,
   isWaitingPricingStatus,
@@ -144,7 +145,8 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
   const insuranceCatalog = useMemo(() => getInsuranceCatalog(data.pricingRates), [data.pricingRates]);
 
   const orderOptions = useMemo(() => {
-    const prioritized = data.inquiries.slice().reverse().sort((a, b) => {
+    const officialInquiries = data.inquiries.filter((i) => !isQuickCaptureStatus(i.inquiry_status));
+    const prioritized = officialInquiries.slice().reverse().sort((a, b) => {
       const aUrgent = isWaitingPricingStatus(a.inquiry_status) || isRepriceRequestedStatus(a.inquiry_status) ? 0 : 1;
       const bUrgent = isWaitingPricingStatus(b.inquiry_status) || isRepriceRequestedStatus(b.inquiry_status) ? 0 : 1;
       return aUrgent - bUrgent;
@@ -191,8 +193,12 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
         ? toNum(existingProp.pallet_fee) / toNum(existingProp.total_pallets)
         : stdPlt;
     setPalletRate(fmtDecimal(savedPltRate, 2));
-    setCountryFilter(cus?.country || '');
-    setPodFilter('');
+    const inqPodClean = deduplicatePortName(inq.pod || cus?.default_pod || '');
+    const matchedPodSch = inqPodClean
+      ? data.schedules.find((s) => deduplicatePortName(s.pod).toLowerCase() === inqPodClean.toLowerCase())
+      : undefined;
+    setCountryFilter(cus?.country || matchedPodSch?.country || '');
+    setPodFilter(inqPodClean);
 
     const optMix = solveOptimalContainerMix(parsed, pal, data.products, data.pricingRates);
     let nextQ20dc = optMix.qty20DC;
@@ -978,7 +984,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
           </div>
         </div>
         <div className="agri-table-wrap">
-          <div className="agri-table-scroll max-h-[360px] overflow-y-auto">
+          <div className="agri-table-scroll max-h-[260px] overflow-y-auto">
             <table className="agri-table">
               <thead className="sticky top-0 z-10">
                 <tr>

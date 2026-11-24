@@ -31,7 +31,65 @@ import type { DocumentKind } from '../utils/docxEngine';
 
 const ORDER_META_STORAGE_KEY = 'NSX_ORDER_LOGISTICS_META_V1';
 const PROPOSAL_META_STORAGE_KEY = 'NSX_PROPOSAL_EXTRA_META_V1';
+const CONSIGNEE_EXTRA_META_KEY = 'NSX_CONSIGNEE_EXTRA_META_V1';
+const INQUIRY_EXTRA_META_KEY = 'NSX_INQUIRY_EXTRA_META_V1';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+interface ConsigneeExtraMeta {
+  default_pod?: string;
+  warehouse_address?: string;
+}
+
+interface InquiryExtraMeta {
+  pod?: string;
+  warehouse_address?: string;
+}
+
+function readLocalMetaMap<T>(key: string): Record<string, T> {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalMetaMap<T>(key: string, map: Record<string, T>) {
+  try {
+    localStorage.setItem(key, JSON.stringify(map));
+  } catch {}
+}
+
+function saveConsigneeExtraMeta(consigneeId: string, patch: ConsigneeExtraMeta) {
+  if (!consigneeId) return;
+  const map = readLocalMetaMap<ConsigneeExtraMeta>(CONSIGNEE_EXTRA_META_KEY);
+  const prev = map[consigneeId] || {};
+  map[consigneeId] = {
+    default_pod: patch.default_pod !== undefined ? patch.default_pod : prev.default_pod,
+    warehouse_address: patch.warehouse_address !== undefined ? patch.warehouse_address : prev.warehouse_address,
+  };
+  writeLocalMetaMap(CONSIGNEE_EXTRA_META_KEY, map);
+}
+
+function saveInquiryExtraMeta(orderId: string, patch: InquiryExtraMeta) {
+  if (!orderId) return;
+  const map = readLocalMetaMap<InquiryExtraMeta>(INQUIRY_EXTRA_META_KEY);
+  const prev = map[orderId] || {};
+  map[orderId] = {
+    pod: patch.pod !== undefined ? patch.pod : prev.pod,
+    warehouse_address: patch.warehouse_address !== undefined ? patch.warehouse_address : prev.warehouse_address,
+  };
+  writeLocalMetaMap(INQUIRY_EXTRA_META_KEY, map);
+}
+
+function removeInquiryExtraMeta(orderId: string) {
+  if (!orderId) return;
+  const map = readLocalMetaMap<InquiryExtraMeta>(INQUIRY_EXTRA_META_KEY);
+  if (orderId in map) {
+    delete map[orderId];
+    writeLocalMetaMap(INQUIRY_EXTRA_META_KEY, map);
+  }
+}
 
 export function readOrderLogisticsMetaMap(): Record<string, OrderLogisticsMeta> {
   try {
@@ -120,7 +178,7 @@ export async function fetchAllAppData(): Promise<AppDataState> {
     ordersRes,
   ] = await Promise.all([
     supabase.from('sys_users').select('id, employee_id, full_name, department, role, email, status'),
-    supabase.from('consignee_directory').select('consignee_id, consignee_name, country, address, tax, contact_person, phone, email, fax, default_payment_term, customer_type, order_count, created_date'),
+    supabase.from('consignee_directory').select('*'),
     supabase.from('product_catalog').select('product_group, sku_code, product_name_vie, product_name_eng, unit_price, hs_code, container_type, storage_temperature, image_url').order('sku_code', { ascending: true }),
     supabase.from('pricing_rates').select('*'),
     supabase.from('shipping_schedule').select('*'),
@@ -128,7 +186,7 @@ export async function fetchAllAppData(): Promise<AppDataState> {
     supabase.from('system_lookups').select('category, code, scope, display_name_vie, contract_text_eng, extra_value'),
     supabase.from('template_manager').select('template_id, document_name, google_doc_file_id, target_department, status, supported_placeholders'),
     fetchTemplatePlaceholdersSafe(),
-    supabase.from('inquiry_quotation').select('order_id, timestamp, sale_rep, consignee_id, address, contact, email, phone, sku_code, product_name_vie, net_weight_kgs, desired_delivery_date, desired_incoterm, proposed_payment_term, inquiry_status, note, order_items, quotation_mode, customer_confirm_note, sent_mail_link'),
+    supabase.from('inquiry_quotation').select('*'),
     supabase.from('pricing_proposal').select('order_id, xnk_rep, schedule_id, container_type, container_qty, total_freight_local, insurance_cost, goods_cost, recommended_incoterm, final_selling_price, booking_date, booking_status, packing_pallet_cost, insurance_code, total_cartons, total_pallets, pallet_fee, total_gross_weight, total_cbm, proposed_incoterms'),
     supabase.from('order_master').select('order_id, contract_no, contract_date, in_charge_staff, consignee_id, sku_code, nw_confirmed_kgs, applied_incoterm, contract_value, payment_terms, pol, pod, fulfillment_status, co_form, contract_link'),
   ]);
@@ -151,10 +209,18 @@ export async function fetchAllAppData(): Promise<AppDataState> {
     throw new Error(errors[0]?.message || 'Lỗi tải dữ liệu từ Supabase.');
   }
 
-  const normalizedConsignees = (consigneesRes.data || []).map((c: any) => ({
-    ...c,
-    order_count: Math.max(0, Math.floor(parseLocaleNumber(c.order_count))),
-  })) as ConsigneeDirectory[];
+  const consigneeExtraMap = readLocalMetaMap<ConsigneeExtraMeta>(CONSIGNEE_EXTRA_META_KEY);
+  const inquiryExtraMap = readLocalMetaMap<InquiryExtraMeta>(INQUIRY_EXTRA_META_KEY);
+
+  const normalizedConsignees = (consigneesRes.data || []).map((c: any) => {
+    const extra = consigneeExtraMap[c.consignee_id] || {};
+    return {
+      ...c,
+      order_count: Math.max(0, Math.floor(parseLocaleNumber(c.order_count))),
+      default_pod: String(c.default_pod ?? c.pod ?? extra.default_pod ?? '').trim(),
+      warehouse_address: String(c.warehouse_address ?? extra.warehouse_address ?? '').trim(),
+    };
+  }) as ConsigneeDirectory[];
 
   const normalizedProducts = (productsRes.data || []).map((p: any) => ({
     ...p,
@@ -191,10 +257,15 @@ export async function fetchAllAppData(): Promise<AppDataState> {
     logo_url: typeof s.logo_url === 'string' ? s.logo_url.trim() : '',
   })) as ShippingSchedule[];
 
-  const normalizedInquiries = (inquiriesRes.data || []).map((i: any) => ({
-    ...i,
-    net_weight_kgs: parseLocaleNumber(i.net_weight_kgs),
-  })) as InquiryQuotation[];
+  const normalizedInquiries = (inquiriesRes.data || []).map((i: any) => {
+    const extra = inquiryExtraMap[i.order_id] || {};
+    return {
+      ...i,
+      net_weight_kgs: parseLocaleNumber(i.net_weight_kgs),
+      pod: String(i.pod ?? extra.pod ?? '').trim(),
+      warehouse_address: String(i.warehouse_address ?? extra.warehouse_address ?? '').trim(),
+    };
+  }) as InquiryQuotation[];
 
   const normalizedProposals = (proposalsRes.data || []).map((p: any) => ({
     ...p,
@@ -434,6 +505,8 @@ export async function resolveOrUpsertConsigneeForInquiry(
     email: string;
     fax: string;
     default_payment_term: string;
+    default_pod?: string;
+    warehouse_address?: string;
   },
   incrementOrderCount: boolean
 ): Promise<ConsigneeDirectory> {
@@ -454,7 +527,7 @@ export async function resolveOrUpsertConsigneeForInquiry(
   if (existing) {
     const baseline = Math.max(0, Math.floor(toNum(existing.order_count)));
     const nextCount = incrementOrderCount ? baseline + 1 : baseline;
-    const payload: ConsigneeDirectory = {
+    const basePayload = {
       consignee_id: existing.consignee_id,
       consignee_name: input.consignee_name || existing.consignee_name,
       country: input.country || existing.country,
@@ -469,12 +542,27 @@ export async function resolveOrUpsertConsigneeForInquiry(
       customer_type: classifyCustomerByCount(nextCount),
       created_date: existing.created_date || todayIsoDate(),
     };
-    const { error } = await supabase
+    const nextPod = (input.default_pod ?? '').trim() || existing.default_pod || '';
+    const nextWh = (input.warehouse_address ?? '').trim() || existing.warehouse_address || '';
+    saveConsigneeExtraMeta(existing.consignee_id, { default_pod: nextPod, warehouse_address: nextWh });
+
+    const withExtra = { ...basePayload, default_pod: nextPod, warehouse_address: nextWh };
+    const primary = await supabase
       .from('consignee_directory')
-      .update(payload)
+      .update(withExtra)
       .eq('consignee_id', existing.consignee_id);
-    if (error) throw new Error(`Lỗi cập nhật khách hàng: ${error.message}`);
-    return payload;
+    if (primary.error) {
+      if (/(default_pod|warehouse_address|column|schema cache)/i.test(primary.error.message || '')) {
+        const fb = await supabase
+          .from('consignee_directory')
+          .update(basePayload)
+          .eq('consignee_id', existing.consignee_id);
+        if (fb.error) throw new Error(`Lỗi cập nhật khách hàng: ${fb.error.message}`);
+      } else {
+        throw new Error(`Lỗi cập nhật khách hàng: ${primary.error.message}`);
+      }
+    }
+    return { ...basePayload, default_pod: nextPod, warehouse_address: nextWh };
   }
 
   const maxIdx = existingList.reduce((max, c) => {
@@ -483,7 +571,7 @@ export async function resolveOrUpsertConsigneeForInquiry(
   }, 0);
   const newId = `CON-${String(maxIdx + 1).padStart(3, '0')}`;
   const initCount = incrementOrderCount ? 1 : 0;
-  const newRow: ConsigneeDirectory = {
+  const baseRow = {
     consignee_id: newId,
     consignee_name: input.consignee_name,
     country: input.country,
@@ -498,15 +586,28 @@ export async function resolveOrUpsertConsigneeForInquiry(
     order_count: initCount,
     created_date: todayIsoDate(),
   };
-  const { error } = await supabase.from('consignee_directory').insert(newRow);
-  if (error) throw new Error(`Lỗi tạo khách hàng mới: ${error.message}`);
-  return newRow;
+  const nextPod = (input.default_pod ?? '').trim();
+  const nextWh = (input.warehouse_address ?? '').trim();
+  saveConsigneeExtraMeta(newId, { default_pod: nextPod, warehouse_address: nextWh });
+
+  const withExtra = { ...baseRow, default_pod: nextPod, warehouse_address: nextWh };
+  const primary = await supabase.from('consignee_directory').insert(withExtra);
+  if (primary.error) {
+    if (/(default_pod|warehouse_address|column|schema cache)/i.test(primary.error.message || '')) {
+      const fb = await supabase.from('consignee_directory').insert(baseRow);
+      if (fb.error) throw new Error(`Lỗi tạo khách hàng mới: ${fb.error.message}`);
+    } else {
+      throw new Error(`Lỗi tạo khách hàng mới: ${primary.error.message}`);
+    }
+  }
+  return { ...baseRow, default_pod: nextPod, warehouse_address: nextWh };
 }
 
 export async function saveInquiryRecord(
   state: AppDataState,
   params: {
     existingOrderId?: string;
+    sourceQuickLogId?: string;
     saleRep: string;
     customerInput: {
       consignee_id?: string;
@@ -519,6 +620,8 @@ export async function saveInquiryRecord(
       email: string;
       fax: string;
       default_payment_term: string;
+      default_pod?: string;
+      warehouse_address?: string;
     };
     sku_code: string;
     product_name_vie: string;
@@ -530,34 +633,92 @@ export async function saveInquiryRecord(
     note: string;
     order_items: string;
     quotation_mode: string;
+    pod?: string;
+    warehouse_address?: string;
   }
 ): Promise<InquiryQuotation> {
   assertConfigured();
   const existingInq = params.existingOrderId
     ? state.inquiries.find((i) => i.order_id === params.existingOrderId)
     : undefined;
+  const sourceQuickInq = params.sourceQuickLogId
+    ? state.inquiries.find((i) => i.order_id === params.sourceQuickLogId)
+    : undefined;
   const isQuickCapture = isQuickCaptureStatus(params.inquiry_status);
-  const wasQuickCapture = existingInq ? isQuickCaptureStatus(existingInq.inquiry_status) : false;
+  const wasQuickCapture = existingInq
+    ? isQuickCaptureStatus(existingInq.inquiry_status)
+    : Boolean(sourceQuickInq && isQuickCaptureStatus(sourceQuickInq.inquiry_status));
   const shouldIncrementOrderCount = !isQuickCapture && (!existingInq || wasQuickCapture);
+
+  const resolvedPod = (params.pod ?? params.customerInput.default_pod ?? '').trim();
+  const resolvedWarehouse = (params.warehouse_address ?? params.customerInput.warehouse_address ?? '').trim();
+
   const consignee = await resolveOrUpsertConsigneeForInquiry(
     state.consignees,
-    params.customerInput,
+    {
+      ...params.customerInput,
+      default_pod: resolvedPod || params.customerInput.default_pod,
+      warehouse_address: resolvedWarehouse || params.customerInput.warehouse_address,
+    },
     shouldIncrementOrderCount
   );
 
   const now = new Date();
-  const yyMmDd = `${String(now.getFullYear()).slice(-2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-  let orderId = params.existingOrderId || '';
-  if (!orderId) {
-    const seq = state.inquiries.filter((i) => String(i.order_id || '').startsWith(`ORD-${yyMmDd}`)).length + 1;
-    orderId = `ORD-${yyMmDd}-${String(seq).padStart(3, '0')}`;
-    while (state.inquiries.some((i) => i.order_id === orderId)) {
-      orderId = `ORD-${yyMmDd}-${String(Math.floor(Math.random() * 900) + 100)}`;
+  const yyyy = String(now.getFullYear());
+
+  let orderId = '';
+  let isUpdateInPlace = false;
+  let quickLogIdToRetire = '';
+
+  if (isQuickCapture) {
+    if (existingInq && /^INQ-/i.test(existingInq.order_id)) {
+      orderId = existingInq.order_id;
+      isUpdateInPlace = true;
+    } else {
+      const inqRegex = new RegExp(`^INQ-${yyyy}-(\\d+)$`, 'i');
+      const maxInqSeq = state.inquiries.reduce((max, item) => {
+        const m = String(item.order_id || '').match(inqRegex);
+        return m ? Math.max(max, parseInt(m[1], 10)) : max;
+      }, 0);
+      let nextSeq = maxInqSeq + 1;
+      orderId = `INQ-${yyyy}-${String(nextSeq).padStart(3, '0')}`;
+      while (state.inquiries.some((i) => i.order_id === orderId)) {
+        nextSeq += 1;
+        orderId = `INQ-${yyyy}-${String(nextSeq).padStart(3, '0')}`;
+      }
+    }
+  } else {
+    // Official Full RFQ -> MUST use official ORD-YYYY-XXX ID (never reuse INQ-YYYY-XXX)
+    if (existingInq && !wasQuickCapture && /^ORD-/i.test(existingInq.order_id)) {
+      orderId = existingInq.order_id;
+      isUpdateInPlace = true;
+    } else {
+      const ordRegex = new RegExp(`^ORD-${yyyy}-(\\d+)$`, 'i');
+      const allOfficialIds = [
+        ...state.inquiries.map((i) => i.order_id),
+        ...state.orders.map((o) => o.order_id),
+      ];
+      const maxOrdSeq = allOfficialIds.reduce((max, id) => {
+        const m = String(id || '').match(ordRegex);
+        return m ? Math.max(max, parseInt(m[1], 10)) : max;
+      }, 0);
+      let nextSeq = maxOrdSeq + 1;
+      orderId = `ORD-${yyyy}-${String(nextSeq).padStart(3, '0')}`;
+      while (allOfficialIds.includes(orderId)) {
+        nextSeq += 1;
+        orderId = `ORD-${yyyy}-${String(nextSeq).padStart(3, '0')}`;
+      }
+      if (params.sourceQuickLogId) {
+        quickLogIdToRetire = params.sourceQuickLogId;
+      } else if (existingInq && wasQuickCapture) {
+        quickLogIdToRetire = existingInq.order_id;
+      }
     }
   }
-  const row: InquiryQuotation = {
+
+  const baseRow = {
     order_id: orderId,
-    timestamp: existingInq?.timestamp || now.toISOString().replace('T', ' ').slice(0, 19),
+    timestamp: (isUpdateInPlace ? existingInq?.timestamp : undefined) || now.toISOString().replace('T', ' ').slice(0, 19),
     sale_rep: params.saleRep,
     consignee_id: consignee.consignee_id,
     address: params.customerInput.address || consignee.address,
@@ -574,18 +735,39 @@ export async function saveInquiryRecord(
     note: params.note,
     order_items: params.order_items,
     quotation_mode: params.quotation_mode,
-    customer_confirm_note: existingInq?.customer_confirm_note || '',
-    sent_mail_link: existingInq?.sent_mail_link || '',
+    customer_confirm_note: (isUpdateInPlace ? existingInq?.customer_confirm_note : '') || '',
+    sent_mail_link: (isUpdateInPlace ? existingInq?.sent_mail_link : '') || '',
   };
 
-  if (existingInq) {
-    const { error } = await supabase.from('inquiry_quotation').update(row).eq('order_id', orderId);
-    if (error) throw new Error(`Lỗi cập nhật RFQ: ${error.message}`);
+  saveInquiryExtraMeta(orderId, { pod: resolvedPod, warehouse_address: resolvedWarehouse });
+  const rowWithExtra = { ...baseRow, pod: resolvedPod, warehouse_address: resolvedWarehouse };
+
+  if (isUpdateInPlace) {
+    const primary = await supabase.from('inquiry_quotation').update(rowWithExtra).eq('order_id', orderId);
+    if (primary.error) {
+      if (/(pod|warehouse_address|column|schema cache)/i.test(primary.error.message || '')) {
+        const fb = await supabase.from('inquiry_quotation').update(baseRow).eq('order_id', orderId);
+        if (fb.error) throw new Error(`Lỗi cập nhật RFQ: ${fb.error.message}`);
+      } else {
+        throw new Error(`Lỗi cập nhật RFQ: ${primary.error.message}`);
+      }
+    }
   } else {
-    const { error } = await supabase.from('inquiry_quotation').insert(row);
-    if (error) throw new Error(`Lỗi lưu RFQ mới: ${error.message}`);
+    const primary = await supabase.from('inquiry_quotation').insert(rowWithExtra);
+    if (primary.error) {
+      if (/(pod|warehouse_address|column|schema cache)/i.test(primary.error.message || '')) {
+        const fb = await supabase.from('inquiry_quotation').insert(baseRow);
+        if (fb.error) throw new Error(`Lỗi lưu RFQ mới: ${fb.error.message}`);
+      } else {
+        throw new Error(`Lỗi lưu RFQ mới: ${primary.error.message}`);
+      }
+    }
+    if (quickLogIdToRetire && quickLogIdToRetire !== orderId) {
+      await supabase.from('inquiry_quotation').delete().eq('order_id', quickLogIdToRetire);
+      removeInquiryExtraMeta(quickLogIdToRetire);
+    }
   }
-  return row;
+  return { ...baseRow, pod: resolvedPod, warehouse_address: resolvedWarehouse };
 }
 
 export async function deletePreContractOrder(state: AppDataState, orderId: string): Promise<void> {
@@ -603,6 +785,7 @@ export async function deletePreContractOrder(state: AppDataState, orderId: strin
   await supabase.from('pricing_proposal').delete().eq('order_id', orderId);
   const { error } = await supabase.from('inquiry_quotation').delete().eq('order_id', orderId);
   if (error) throw new Error(`Lỗi xóa yêu cầu báo giá: ${error.message}`);
+  removeInquiryExtraMeta(orderId);
 
   const wasQuickCapture = inq ? isQuickCaptureStatus(inq.inquiry_status) : false;
   if (inq?.consignee_id && !wasQuickCapture) {

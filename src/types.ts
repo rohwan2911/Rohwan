@@ -22,6 +22,8 @@ export interface ConsigneeDirectory {
   customer_type: string;
   order_count: number;
   created_date: string;
+  default_pod?: string;
+  warehouse_address?: string;
 }
 
 export interface ProductCatalog {
@@ -151,6 +153,8 @@ export interface InquiryQuotation {
   quotation_mode: string;
   customer_confirm_note: string;
   sent_mail_link: string;
+  pod?: string;
+  warehouse_address?: string;
 }
 
 export interface PricingProposal {
