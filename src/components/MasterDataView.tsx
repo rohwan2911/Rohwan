@@ -59,8 +59,11 @@ import {
   DocxParagraphBlock,
   extractDocxParagraphBlocks,
   extractPlaceholdersFromDocx,
+  formatPlaceholderListWrapped,
   formatTemplateDepartmentLabel,
   getVietnamesePlaceholderLabel,
+  normalizePlaceholderKey,
+  normalizePlaceholderTag,
   normalizeTemplateDepartment,
   parsePlaceholderKeyList,
   resolveCleanVietnameseLabel,
@@ -417,6 +420,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
   const [tplDetectedTags, setTplDetectedTags] = useState<string[]>([]);
   const [tplBusy, setTplBusy] = useState(false);
   const [tplFieldSearch, setTplFieldSearch] = useState('');
+  const [tplCustomKeyInput, setTplCustomKeyInput] = useState('');
 
   // Interactive #-Marker Smart-Fill & Manual Tag Review Modal state
   const [tagEditor, setTagEditor] = useState<{
@@ -445,6 +449,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
     form: null,
     initialPassword: '',
   });
+  const [usrSaving, setUsrSaving] = useState(false);
 
   const normalizedPlaceholders = useMemo(() => {
     const seen = new Set<string>();
@@ -2212,7 +2217,9 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
           target_department: nextDept,
           google_doc_file_id: `templates/${cleanAutoId}.docx`,
           supported_placeholders:
-            tags.length > 0 ? tags.join(', ') : tplModal.form.supported_placeholders,
+            tags.length > 0
+              ? formatPlaceholderListWrapped(tags)
+              : formatPlaceholderListWrapped(tplModal.form.supported_placeholders),
         };
         setTplModal({
           ...tplModal,
@@ -2250,7 +2257,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             tplModal.form.document_name
           ),
           google_doc_file_id: storagePath,
-          supported_placeholders: mergedKeys.join(', '),
+          supported_placeholders: formatPlaceholderListWrapped(mergedKeys),
         };
         await onUpsertTemplate(nextRow, tplModal.isEdit);
         setTplModal({ open: false, isEdit: false, form: null });
@@ -2305,6 +2312,11 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
       const block = tagEditor.blocks.find((b) => b.id === targetId);
       if (!block) return;
 
+      const normalizedSnippet =
+        /^\{\{[^}]+\}\}$/.test(snippet.trim()) || /^[A-Za-z0-9_.\-\s]+$/.test(snippet.trim())
+          ? normalizePlaceholderTag(snippet) || snippet
+          : snippet;
+
       const cursor =
         activeCursorRef.current && activeCursorRef.current.blockId === targetId
           ? activeCursorRef.current
@@ -2312,8 +2324,8 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
 
       const before = block.text.slice(0, cursor.start);
       const after = block.text.slice(cursor.end);
-      const nextText = `${before}${snippet}${after}`;
-      const nextCaret = cursor.start + snippet.length;
+      const nextText = `${before}${normalizedSnippet}${after}`;
+      const nextCaret = cursor.start + normalizedSnippet.length;
 
       handleUpdateTagBlockText(targetId, nextText);
       setActiveBlockId(targetId);
@@ -2482,7 +2494,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             tagEditor.templateForm.document_name
           ),
           google_doc_file_id: storagePath,
-          supported_placeholders: finalTags.join(', '),
+          supported_placeholders: formatPlaceholderListWrapped(finalTags),
         };
 
         await onUpsertTemplate(nextTemplateRow, tagEditor.isEdit);
@@ -2505,16 +2517,17 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
     const toggleModalPlaceholder = (key: string) => {
       if (!tplModal.form) return;
       const currentKeys = parsePlaceholderKeyList(tplModal.form.supported_placeholders);
-      const upper = key.toUpperCase();
+      const upper = normalizePlaceholderKey(key);
+      if (!upper) return;
       const exists = currentKeys.some((k) => k.toUpperCase() === upper);
       const nextKeys = exists
         ? currentKeys.filter((k) => k.toUpperCase() !== upper)
-        : [...currentKeys, key];
+        : [...currentKeys, upper];
       setTplModal({
         ...tplModal,
         form: {
           ...tplModal.form,
-          supported_placeholders: nextKeys.join(', '),
+          supported_placeholders: formatPlaceholderListWrapped(nextKeys),
         },
       });
     };
@@ -2921,6 +2934,75 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                       </div>
                     )}
                   </div>
+
+                  <div className="pt-1.5 space-y-1">
+                    <label className="block text-[11px] font-bold text-[#f4d98a]">
+                      Thêm / Chỉnh sửa biến tùy chỉnh (tự động bọc chuẩn &#123;&#123;UPPER_SNAKE_CASE&#125;&#125;)
+                    </label>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        placeholder="VD: buyer_bank, port_of_discharge..."
+                        value={tplCustomKeyInput}
+                        onChange={(e) => setTplCustomKeyInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (!tplCustomKeyInput.trim()) return;
+                            const merged = formatPlaceholderListWrapped([
+                              ...parsePlaceholderKeyList(tplModal.form!.supported_placeholders),
+                              ...parsePlaceholderKeyList(tplCustomKeyInput),
+                            ]);
+                            setTplModal({
+                              ...tplModal,
+                              form: { ...tplModal.form!, supported_placeholders: merged },
+                            });
+                            setTplCustomKeyInput('');
+                          }
+                        }}
+                        className="agri-input font-mono text-[11px] py-1 flex-1"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!tplCustomKeyInput.trim()) return;
+                          const merged = formatPlaceholderListWrapped([
+                            ...parsePlaceholderKeyList(tplModal.form!.supported_placeholders),
+                            ...parsePlaceholderKeyList(tplCustomKeyInput),
+                          ]);
+                          setTplModal({
+                            ...tplModal,
+                            form: { ...tplModal.form!, supported_placeholders: merged },
+                          });
+                          setTplCustomKeyInput('');
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-[#0f4a33] border border-[#f4d98a]/60 text-[#f4d98a] text-[11px] font-bold cursor-pointer shrink-0"
+                      >
+                        + Thêm biến
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Danh sách biến {{KEY}} đã chọn..."
+                      value={tplModal.form.supported_placeholders}
+                      onChange={(e) =>
+                        setTplModal({
+                          ...tplModal,
+                          form: { ...tplModal.form!, supported_placeholders: e.target.value },
+                        })
+                      }
+                      onBlur={(e) =>
+                        setTplModal({
+                          ...tplModal,
+                          form: {
+                            ...tplModal.form!,
+                            supported_placeholders: formatPlaceholderListWrapped(e.target.value),
+                          },
+                        })
+                      }
+                      className="agri-input font-mono text-[11px] py-1"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -2963,6 +3045,10 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           onToast('warning', 'Vui lòng nhập Template ID.');
                           return;
                         }
+                        const mergedKeys = formatPlaceholderListWrapped([
+                          ...parsePlaceholderKeyList(tplModal.form!.supported_placeholders),
+                          ...parsePlaceholderKeyList(tplCustomKeyInput),
+                        ]);
                         await onUpsertTemplate(
                           {
                             ...tplModal.form!,
@@ -2971,9 +3057,11 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                               tplModal.form!.template_id,
                               tplModal.form!.document_name
                             ),
+                            supported_placeholders: mergedKeys,
                           },
                           tplModal.isEdit
                         );
+                        setTplCustomKeyInput('');
                         setTplModal({ open: false, isEdit: false, form: null });
                       }}
                       className="agri-btn-gold"
@@ -3491,18 +3579,32 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
       </div>
       {usrModal.open && usrModal.form && (
         <div className="fixed inset-0 z-50 bg-[#07281c]/75 flex items-center justify-center p-4">
-          <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl w-full max-w-lg p-5 text-[#f4f8f5] space-y-3 text-xs">
+          <div className="relative bg-[#547d59] border-2 border-[#186635] rounded-2xl w-full max-w-lg p-5 text-[#f4f8f5] space-y-3 text-xs overflow-hidden">
+            {usrSaving && (
+              <div className="absolute inset-0 z-30 bg-[#07281c]/85 backdrop-blur-sm flex flex-col items-center justify-center gap-3 p-6 text-center">
+                <div className="p-3.5 rounded-2xl bg-[#0f4a33] border-2 border-[#f4d98a]/70 shadow-2xl flex flex-col items-center gap-2.5">
+                  <Loader2 className="w-8 h-8 animate-spin text-[#f4d98a]" />
+                  <div className="text-sm font-extrabold text-[#fff5d6]">
+                    {usrModal.isEdit ? 'Đang cập nhật thông tin nhân sự...' : 'Đang tạo tài khoản nhân sự...'}
+                  </div>
+                  <div className="text-[11px] text-[#9bccb8]">
+                    Vui lòng chờ hệ thống đồng bộ tài khoản...
+                  </div>
+                </div>
+              </div>
+            )}
             <h4 className="text-base font-extrabold text-[#fff5d6]">
               {usrModal.isEdit ? `Cập nhật Nhân sự (${usrModal.form.employee_id})` : 'Thêm Nhân sự Mới'}
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
                 <label className="block font-bold mb-1">Mã NV</label>
-                <input disabled={usrModal.isEdit} placeholder="Mã NV" value={usrModal.form.employee_id} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, employee_id: e.target.value } })} className="agri-input font-mono" />
+                <input disabled={usrModal.isEdit || usrSaving} placeholder="Mã NV" value={usrModal.form.employee_id} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, employee_id: e.target.value } })} className="agri-input font-mono" />
               </div>
               <div>
                 <label className="block font-bold mb-1">Họ tên *</label>
                 <input
+                  disabled={usrSaving}
                   placeholder="Họ tên"
                   value={usrModal.form.full_name}
                   onChange={(e) => {
@@ -3524,12 +3626,13 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
               </div>
               <div className="sm:col-span-2">
                 <label className="block font-bold mb-1">Email đăng nhập *</label>
-                <input type="email" placeholder="name@greenagri-vn.com" value={usrModal.form.email} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, email: e.target.value } })} className="agri-input" />
+                <input disabled={usrSaving} type="email" placeholder="name@greenagri-vn.com" value={usrModal.form.email} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, email: e.target.value } })} className="agri-input" />
               </div>
               {!usrModal.isEdit && (
                 <div className="sm:col-span-2">
                   <label className="block font-bold mb-1">Mật khẩu khởi tạo (tùy chọn, ≥ 6 ký tự)</label>
                   <input
+                    disabled={usrSaving}
                     type="password"
                     placeholder="Bỏ trống nếu nhân sự đã có tài khoản"
                     value={usrModal.initialPassword}
@@ -3541,6 +3644,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
               <div>
                 <label className="block font-bold mb-1">Phòng ban</label>
                 <select
+                  disabled={usrSaving}
                   value={usrModal.form.department}
                   onChange={(e) => {
                     const dept = e.target.value;
@@ -3563,6 +3667,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
               <div>
                 <label className="block font-bold mb-1">Vai trò</label>
                 <select
+                  disabled={usrSaving}
                   value={usrModal.form.role}
                   onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, role: e.target.value } })}
                   className="agri-input"
@@ -3577,7 +3682,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
               </div>
               <div className="sm:col-span-2">
                 <label className="block font-bold mb-1">Trạng thái</label>
-                <select value={usrModal.form.status} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, status: e.target.value } })} className="agri-input">
+                <select disabled={usrSaving} value={usrModal.form.status} onChange={(e) => setUsrModal({ ...usrModal, form: { ...usrModal.form!, status: e.target.value } })} className="agri-input">
                   <option value="Active">Active (Đang hoạt động)</option>
                   <option value="PENDING">PENDING (Chờ duyệt)</option>
                   <option value="Inactive">Inactive (Tạm khóa)</option>
@@ -3585,9 +3690,17 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setUsrModal({ open: false, isEdit: false, form: null, initialPassword: '' })} className="px-3 py-1.5 rounded bg-[#07281c] text-white font-bold cursor-pointer">Hủy</button>
               <button
                 type="button"
+                disabled={usrSaving}
+                onClick={() => setUsrModal({ open: false, isEdit: false, form: null, initialPassword: '' })}
+                className="px-3 py-1.5 rounded bg-[#07281c] text-white font-bold cursor-pointer disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={usrSaving}
                 onClick={async () => {
                   if (!usrModal.form!.full_name.trim() || !usrModal.form!.email.trim()) {
                     onToast('warning', 'Vui lòng nhập đầy đủ Họ tên và Email.');
@@ -3597,12 +3710,20 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                     onToast('warning', 'Mật khẩu khởi tạo phải có ít nhất 6 ký tự.');
                     return;
                   }
-                  await onUpsertUser(usrModal.form!, usrModal.isEdit, usrModal.initialPassword || undefined);
-                  setUsrModal({ open: false, isEdit: false, form: null, initialPassword: '' });
+                  setUsrSaving(true);
+                  try {
+                    await onUpsertUser(usrModal.form!, usrModal.isEdit, usrModal.initialPassword || undefined);
+                    setUsrModal({ open: false, isEdit: false, form: null, initialPassword: '' });
+                  } catch (err: any) {
+                    onToast('error', err?.message || 'Lỗi lưu tài khoản nhân sự.');
+                  } finally {
+                    setUsrSaving(false);
+                  }
                 }}
-                className="agri-btn-gold"
+                className="agri-btn-gold inline-flex items-center gap-1.5 disabled:opacity-50"
               >
-                Lưu Nhân sự
+                {usrSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>Lưu Nhân sự</span>
               </button>
             </div>
           </div>

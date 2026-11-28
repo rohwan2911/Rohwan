@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Sparkles, Send, Calculator, Check, Ship, Layers, ShieldCheck, Save } from 'lucide-react';
+import { Sparkles, Send, Calculator, Check, Ship, Layers, ShieldCheck, Save, Eye } from 'lucide-react';
 import type {
   AppDataState,
   OrderItem,
@@ -10,6 +10,7 @@ import type {
 import {
   buildCombinedInsuranceClauseEng,
   buildContainerMixState,
+  cleanQuoteNoForCustomer,
   computeCustomsSplit,
   computeDomesticTruckingForMix,
   computeInsurancePremiumExact,
@@ -41,12 +42,14 @@ import {
   WORKFLOW_STATUS,
 } from '../utils/calculations';
 import { SearchableCombo } from './SearchableCombo';
+import type { PreviewModalTarget } from './Modals';
 
 interface XnkCostingViewProps {
   data: AppDataState;
   currentUser: SysUser;
   proposalMetaMap: Record<string, ProposalExtraMeta>;
   onSaveProposal: (proposal: PricingProposal, extraMeta: ProposalExtraMeta, updatedItemsJson: string) => Promise<void>;
+  onOpenPreview?: (target: PreviewModalTarget) => void;
   onOpenTimeline: (orderId: string) => void;
   onToast: (type: 'success' | 'error' | 'info' | 'warning', title: string) => void;
 }
@@ -67,6 +70,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
   currentUser,
   proposalMetaMap,
   onSaveProposal,
+  onOpenPreview,
   onOpenTimeline,
   onToast,
 }) => {
@@ -731,7 +735,10 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
       };
       const extraMeta: ProposalExtraMeta = {
         order_id: selectedOrderId,
-        quotation_no: `QT-${selectedOrderId}`,
+        quotation_no: cleanQuoteNoForCustomer(
+          proposalMetaMap[selectedOrderId]?.quotation_no || '',
+          selectedOrderId
+        ),
         floor_price_usd: Math.round(costing.floorPrice * 100) / 100,
         min_margin_pct: minMarginPct,
         margin_pct: marginPct,
@@ -984,7 +991,10 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
           </div>
         </div>
         <div className="agri-table-wrap">
-          <div className="agri-table-scroll max-h-[260px] overflow-y-auto">
+          <div
+            className="agri-table-scroll"
+            style={{ maxHeight: '280px', overflowY: 'auto' }}
+          >
             <table className="agri-table">
               <thead className="sticky top-0 z-10">
                 <tr>
@@ -1618,19 +1628,34 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                 <th className="text-center">Cước + BB + BH</th>
                 <th className="text-center">Incoterm</th>
                 <th className="text-center">Giá chào chốt</th>
-                <th className="text-center">Trạng thái</th>
+                <th className="text-center">Trạng thái &amp; Chứng từ</th>
               </tr>
             </thead>
             <tbody>
               {data.proposals.slice().reverse().map((p) => {
                 const extra = proposalMetaMap[p.order_id];
+                const inq = data.inquiries.find((i) => i.order_id === p.order_id);
+                const cleanQuoteNo = cleanQuoteNoForCustomer(extra?.quotation_no || '', p.order_id);
+                const sendCount =
+                  typeof extra?.send_count === 'number' && extra.send_count > 0
+                    ? extra.send_count
+                    : inq?.sent_mail_link
+                    ? 1
+                    : 0;
                 return (
                   <tr key={p.order_id}>
                     <td className="text-center">
-                      <div className="font-mono font-bold">{extra?.quotation_no || `QT-${p.order_id}`}</div>
+                      <div className="font-mono font-bold">{cleanQuoteNo}</div>
                       <button type="button" onClick={() => onOpenTimeline(p.order_id)} className="font-mono text-[11px] hover:underline cursor-pointer">
                         {p.order_id}
                       </button>
+                      {sendCount > 0 && (
+                        <div className="mt-0.5">
+                          <span className="keep-badge-color inline-block px-1.5 py-0.5 rounded-full bg-[#f4d98a] text-[#07281c] text-[10px] font-extrabold">
+                            Lần {sendCount}
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td className="text-left">
                       <div className="font-semibold">{p.xnk_rep}</div>
@@ -1657,10 +1682,42 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                     </td>
                     <td className="text-center font-mono font-bold">{p.recommended_incoterm}</td>
                     <td className="text-center font-mono font-extrabold">{fmtUSD(p.final_selling_price)}</td>
-                    <td className="text-center">
-                      <span className="keep-badge-color inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
-                        <Check className="w-3 h-3" /> {p.booking_status}
-                      </span>
+                    <td className="text-center space-y-1">
+                      <div>
+                        <span className="keep-badge-color inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
+                          <Check className="w-3 h-3" /> {p.booking_status}
+                        </span>
+                      </div>
+                      {onOpenPreview && (
+                        <div className="inline-flex flex-wrap justify-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onOpenPreview({
+                                kind: 'QUOTATION',
+                                orderId: p.order_id,
+                                initialQuotationTemplate: 'INTERNAL_COSTING_SHEET',
+                              })
+                            }
+                            className="keep-btn-style px-2 py-0.5 rounded bg-[#07281c] text-[#f4d98a] text-[10.5px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye className="w-3 h-3" /> Nội bộ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onOpenPreview({
+                                kind: 'QUOTATION',
+                                orderId: p.order_id,
+                                initialQuotationTemplate: 'TMP_QUOTATION_01',
+                              })
+                            }
+                            className="keep-btn-style px-2 py-0.5 rounded bg-[#f4d98a] text-[#07281c] text-[10.5px] font-extrabold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye className="w-3 h-3" /> Báo giá
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );

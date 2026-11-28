@@ -295,8 +295,8 @@ export const SearchableCombo: React.FC<SearchableComboProps> = ({
           }}
           className={`w-full ${value && !disabled ? 'pr-14' : 'pr-8'} pl-3 py-1.5 text-xs sm:text-[13px] font-semibold rounded-lg border-[1.5px] outline-none transition-colors ${
             dark
-              ? 'bg-[#0b3324] border-[#2f7d3e] text-[#fff5d6] placeholder-[#9bccb8]/70 focus:border-[#f4d98a]'
-              : 'bg-[#d7eee4] border-[#186635] text-[#0b2418] placeholder-[#1e4231]/65 focus:bg-white'
+              ? 'bg-[#0b3324] border-[#2f7d3e] text-[#fff5d6] placeholder:text-[#9bccb8]/55 placeholder:italic placeholder:font-normal focus:border-[#f4d98a]'
+              : 'bg-[#d7eee4] border-[#186635] text-[#0b2418] placeholder:text-[#0b2418]/44 placeholder:italic placeholder:font-normal focus:bg-white'
           } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
         />
         {value && !disabled && (

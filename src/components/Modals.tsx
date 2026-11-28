@@ -15,6 +15,7 @@ import {
   Save,
   PenLine,
   ListChecks,
+  ZoomIn,
 } from 'lucide-react';
 import type {
   AppDataState,
@@ -63,7 +64,14 @@ import {
 export interface PreviewModalTarget {
   kind: 'QUOTATION' | 'CONTRACT' | 'INVOICE' | 'PACKING_LIST' | 'CO' | 'BL';
   orderId: string;
+  initialQuotationTemplate?: 'TMP_QUOTATION_01' | 'INTERNAL_COSTING_SHEET';
 }
+
+type PreviewZoomPreset = 'FIT' | '75' | '85' | '100';
+type QuotationTemplateKind = 'TMP_QUOTATION_01' | 'INTERNAL_COSTING_SHEET';
+
+const INTERNAL_ONLY_FIELD_PATTERN =
+  /(GOODS_COST|MARGIN|FLOOR|INTERNAL|PROFIT|SELF_TRUCK|FWD_|PACKING_COST|PALLET_FEE|LOCAL_CHARGE)/i;
 
 interface DocumentPreviewModalProps {
   target: PreviewModalTarget | null;
@@ -72,6 +80,7 @@ interface DocumentPreviewModalProps {
   orderMetaMap: Record<string, OrderLogisticsMeta>;
   proposalMetaMap: Record<string, ProposalExtraMeta>;
   allowQuickAdjust: boolean;
+  allowInternalView?: boolean;
   onClose: () => void;
   onConfirmQuickAdjust?: (orderId: string, newIncoterm: string, newPrice: number, templateMode: 'STANDARD' | 'COMPARISON') => Promise<void>;
   onMarkQuotationSent?: (orderId: string, linkOrSubject: string) => Promise<void>;
@@ -87,6 +96,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   orderMetaMap,
   proposalMetaMap,
   allowQuickAdjust,
+  allowInternalView = false,
   onClose,
   onConfirmQuickAdjust,
   onMarkQuotationSent,
@@ -95,10 +105,12 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   onToast,
 }) => {
   const docxBodyRef = useRef<HTMLDivElement>(null);
+  const internalSheetRef = useRef<HTMLDivElement>(null);
   const docxStyleRef = useRef<HTMLDivElement>(null);
   const printFrameRef = useRef<HTMLIFrameElement>(null);
+  const previewScrollRef = useRef<HTMLDivElement>(null);
 
-  const [templateMode, setTemplateMode] = useState<'STANDARD' | 'COMPARISON'>('STANDARD');
+  const [quotationTemplateKind, setQuotationTemplateKind] = useState<QuotationTemplateKind>('TMP_QUOTATION_01');
   const [adjIncoterm, setAdjIncoterm] = useState('CIF');
   const [adjPrice, setAdjPrice] = useState('');
   const [emailTo, setEmailTo] = useState('');
@@ -117,6 +129,12 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
   const [showFieldEditor, setShowFieldEditor] = useState(false);
   const [directEditMode, setDirectEditMode] = useState(false);
+  const [zoomPreset, setZoomPreset] = useState<PreviewZoomPreset>('FIT');
+  const [previewFrameWidth, setPreviewFrameWidth] = useState<number>(960);
+  const [naturalDocSize, setNaturalDocSize] = useState<{ width: number; height: number }>({
+    width: 820,
+    height: 1120,
+  });
 
   const [docLoading, setDocLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -154,16 +172,18 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     return selectMatchingTemplates(data.templates, target.kind, ctx.items, data.products);
   }, [target, ctx, data.templates, data.products]);
 
+  const isInternalCostingView =
+    target?.kind === 'QUOTATION' && allowInternalView && quotationTemplateKind === 'INTERNAL_COSTING_SHEET';
+
   // Initialize metadata & auto-pick active .docx template whenever target changes
   useEffect(() => {
     if (!target || !ctx) return;
     if (target.kind === 'QUOTATION' && ctx.inq) {
-      const mode =
-        String(ctx.inq.quotation_mode || '').toUpperCase().includes('COMP') ||
-        (ctx.prop?.proposed_incoterms || '').split(',').filter(Boolean).length >= 2
-          ? 'COMPARISON'
-          : 'STANDARD';
-      setTemplateMode(mode);
+      const nextKind: QuotationTemplateKind =
+        allowInternalView && target.initialQuotationTemplate === 'INTERNAL_COSTING_SHEET'
+          ? 'INTERNAL_COSTING_SHEET'
+          : 'TMP_QUOTATION_01';
+      setQuotationTemplateKind(nextKind);
       const inc = ctx.prop?.recommended_incoterm || ctx.inq.desired_incoterm || 'CIF';
       const price = toNum(ctx.prop?.final_selling_price);
       setAdjIncoterm(inc);
@@ -172,6 +192,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       setEmailSubject(buildQuotationEmailSubject(ctx.inq, ctx.prop, ctx.extraMeta, data.products));
       setEmailBodyHtml(buildQuotationEmailHtml(ctx.inq, ctx.cus, ctx.prop, ctx.extraMeta, ctx.sch, data.products, inc, price));
     } else if (ctx.order) {
+      setQuotationTemplateKind('TMP_QUOTATION_01');
       setEmailTo(ctx.cus?.email || ctx.inq?.email || '');
       const rawLabel = target.kind === 'CONTRACT' ? `Sales Contract ${ctx.order.contract_no}` : `${target.kind} – ${ctx.order.contract_no}`;
       const label = stripInternalCodesForCustomer(rawLabel) || rawLabel;
@@ -182,6 +203,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     setShowEmailPane(false);
     setShowFieldEditor(false);
     setDirectEditMode(false);
+    setZoomPreset('FIT');
     setLoadError('');
     setRenderedDocxBytes(null);
     setTemplateBuffer(null);
@@ -189,26 +211,11 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     let bestTpl = '';
     if (ctx.meta?.template_id && matchingTemplates.some((t) => t.template_id === ctx.meta?.template_id)) {
       bestTpl = ctx.meta.template_id;
-    } else if (target.kind === 'QUOTATION' && matchingTemplates.length > 0) {
-      const wantComp =
-        String(ctx.inq?.quotation_mode || '').toUpperCase().includes('COMP') ||
-        (ctx.prop?.proposed_incoterms || '').split(',').filter(Boolean).length >= 2;
-      const compTpl = matchingTemplates.find((t) =>
-        /tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
-      );
-      const stdTpl =
-        matchingTemplates.find(
-          (t) =>
-            !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`) &&
-            /01|standard|chuan/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
-        ) ||
-        matchingTemplates.find((t) => !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`));
-      bestTpl = (wantComp ? compTpl : stdTpl)?.template_id || matchingTemplates[0]?.template_id || '';
     } else {
       bestTpl = matchingTemplates[0]?.template_id || '';
     }
     setSelectedTemplateId(bestTpl);
-  }, [target?.orderId, target?.kind]);
+  }, [target?.orderId, target?.kind, target?.initialQuotationTemplate, allowInternalView]);
 
   // Download & populate selected .docx template from Supabase Storage "documents" bucket
   useEffect(() => {
@@ -342,6 +349,16 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       .then(() => {
         if (cancelled || !docxBodyRef.current) return;
         docxBodyRef.current.contentEditable = directEditMode ? 'true' : 'false';
+        const measureDoc = () => {
+          const el = docxBodyRef.current;
+          if (!el) return;
+          const pageEl = el.querySelector('.docx-preview-page') as HTMLElement | null;
+          const w = Math.max(pageEl?.offsetWidth || 0, el.scrollWidth || 0, 794);
+          const h = Math.max(el.scrollHeight || 0, pageEl?.offsetHeight || 0, 560);
+          setNaturalDocSize({ width: w, height: h });
+        };
+        requestAnimationFrame(measureDoc);
+        window.setTimeout(measureDoc, 120);
       })
       .catch(() => {
         // Ignore transient unmount during render
@@ -351,6 +368,34 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       cancelled = true;
     };
   }, [renderedDocxBytes, docLoading]);
+
+  useEffect(() => {
+    const el = previewScrollRef.current;
+    if (!el) return;
+    const updateWidth = () => {
+      if (el.clientWidth > 0) setPreviewFrameWidth(el.clientWidth);
+    };
+    updateWidth();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(updateWidth);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', updateWidth);
+    return () => window.removeEventListener('resize', updateWidth);
+  }, [target?.orderId, target?.kind, showFieldEditor, showEmailPane]);
+
+  const effectiveZoomScale = useMemo(() => {
+    if (zoomPreset === '75') return 0.75;
+    if (zoomPreset === '85') return 0.85;
+    if (zoomPreset === '100') return 1;
+    const availW = Math.max(320, previewFrameWidth - 36);
+    const docW = Math.max(600, naturalDocSize.width);
+    const fitRatio = availW / docW;
+    // Default Fit overview: ~75-85% on desktop viewports, or narrower if pane is tight
+    const maxDesktopFit = previewFrameWidth >= 640 ? 0.82 : 0.96;
+    return Math.round(Math.min(maxDesktopFit, Math.max(0.42, fitRatio)) * 100) / 100;
+  }, [zoomPreset, previewFrameWidth, naturalDocSize.width]);
 
   useEffect(() => {
     if (docxBodyRef.current) {
@@ -448,16 +493,31 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
   if (!target || !ctx) return null;
 
+  const cleanQuoteNo = cleanQuoteNoForCustomer(ctx.extraMeta?.quotation_no || '', target.orderId);
+  const sendCount =
+    typeof ctx.extraMeta?.send_count === 'number' && ctx.extraMeta.send_count > 0
+      ? ctx.extraMeta.send_count
+      : ctx.inq?.sent_mail_link
+      ? 1
+      : 0;
+
   const cleanQuoteTitle =
     target.kind === 'QUOTATION'
-      ? `Báo giá ${cleanQuoteNoForCustomer(ctx.extraMeta?.quotation_no || '', target.orderId)}`
+      ? isInternalCostingView
+        ? `INTERNAL_COSTING_SHEET · ${target.orderId} (${cleanQuoteNo})`
+        : `Báo giá ${cleanQuoteNo}`
       : `${target.kind} · ${ctx.order?.contract_no || target.orderId}`;
 
-  const safeDocFileName = `${(
-    target.kind === 'CONTRACT' && ctx.order?.contract_no
-      ? ctx.order.contract_no
-      : cleanQuoteTitle
-  )
+  const rawFileBase =
+    target.kind === 'QUOTATION'
+      ? isInternalCostingView
+        ? `INTERNAL_COSTING_SHEET_${target.orderId}`
+        : `Official_Quotation_${cleanQuoteNo}`
+      : target.kind === 'CONTRACT' && ctx.order?.contract_no
+      ? stripInternalCodesForCustomer(ctx.order.contract_no) || ctx.order.contract_no
+      : stripInternalCodesForCustomer(cleanQuoteTitle) || cleanQuoteTitle;
+
+  const safeDocFileName = `${rawFileBase
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[đĐ]/g, 'd')
@@ -465,8 +525,12 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     .replace(/^_+|_+$/g, '')}.docx`;
 
   const handlePrint = () => {
-    const bodyHtml = docxBodyRef.current?.innerHTML || '';
-    const styleHtml = docxStyleRef.current?.innerHTML || '';
+    const bodyHtml = isInternalCostingView
+      ? internalSheetRef.current?.innerHTML || ''
+      : docxBodyRef.current?.innerHTML || '';
+    const styleHtml = isInternalCostingView
+      ? `<style>body{font-family:Inter,Arial,sans-serif;color:#0b2418;padding:18px;font-size:12px;} table{width:100%;border-collapse:collapse;margin-top:8px;} th,td{border:1px solid #cbd5e1;padding:6px 8px;text-align:left;} th{background:#0f4a33;color:#fff;} .num{text-align:right;font-family:monospace;}</style>`
+      : docxStyleRef.current?.innerHTML || '';
     const frame = printFrameRef.current;
     if (!frame || !bodyHtml) return;
     const doc = frame.contentDocument || frame.contentWindow?.document;
@@ -618,29 +682,79 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 bg-[#07281c]/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
       <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden text-[#f4f8f5]">
-        <div className="px-4 py-3 bg-[#0f4a33] border-b-2 border-[#186635] flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm sm:text-base font-extrabold text-[#fff5d6]">{cleanQuoteTitle}</h3>
-            <p className="text-[11px] text-[#9bccb8]">
-              Khách hàng: {ctx.cus?.consignee_name || ctx.inq?.consignee_id || ctx.order?.consignee_id}
-            </p>
+        <div className="px-4 py-3 bg-[#0f4a33] border-b-2 border-[#186635] space-y-2.5">
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: '16px',
+            }}
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm sm:text-base font-extrabold text-[#fff5d6] leading-snug break-words">
+                  {cleanQuoteTitle}
+                </h3>
+                {target.kind === 'QUOTATION' && sendCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-[#f4d98a] text-[#07281c] text-[10.5px] font-extrabold">
+                    Đã gửi · Lần {sendCount}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-[#9bccb8] mt-0.5 truncate">
+                Khách hàng: {ctx.cus?.consignee_name || ctx.inq?.consignee_id || ctx.order?.consignee_id}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              title="Đóng"
+              aria-label="Đóng"
+              className="shrink-0 p-1.5 rounded-lg bg-[#8c3b3b] text-white hover:bg-[#6e2b2b] cursor-pointer transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {matchingTemplates.length > 0 && (
+            {target.kind === 'QUOTATION' && allowInternalView && (
+              <div className="flex items-center bg-[#07281c] rounded-lg p-0.5 border border-[#f4d98a]/50">
+                <button
+                  type="button"
+                  onClick={() => setQuotationTemplateKind('TMP_QUOTATION_01')}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-bold cursor-pointer ${
+                    quotationTemplateKind === 'TMP_QUOTATION_01'
+                      ? 'bg-[#f4d98a] text-[#07281c]'
+                      : 'text-[#d2ebe0]'
+                  }`}
+                >
+                  TMP_QUOTATION_01 · Báo giá Khách
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuotationTemplateKind('INTERNAL_COSTING_SHEET');
+                    setShowEmailPane(false);
+                    setShowFieldEditor(false);
+                    setDirectEditMode(false);
+                  }}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-bold cursor-pointer ${
+                    quotationTemplateKind === 'INTERNAL_COSTING_SHEET'
+                      ? 'bg-[#f4d98a] text-[#07281c]'
+                      : 'text-[#d2ebe0]'
+                  }`}
+                >
+                  INTERNAL_COSTING_SHEET · Nội bộ
+                </button>
+              </div>
+            )}
+
+            {target.kind !== 'QUOTATION' && matchingTemplates.length > 1 && (
               <select
                 value={selectedTemplateId}
-                onChange={(e) => {
-                  const nextId = e.target.value;
-                  setSelectedTemplateId(nextId);
-                  if (target.kind === 'QUOTATION' && nextId) {
-                    const tpl = matchingTemplates.find((t) => t.template_id === nextId);
-                    if (tpl) {
-                      const txt = `${tpl.template_id} ${tpl.document_name} ${tpl.google_doc_file_id}`;
-                      setTemplateMode(/tuvan|comp|so_sanh/i.test(txt) ? 'COMPARISON' : 'STANDARD');
-                    }
-                  }
-                }}
+                onChange={(e) => setSelectedTemplateId(e.target.value)}
                 className="px-2.5 py-1.5 rounded-lg bg-[#07281c] border border-[#f4d98a]/60 text-[#fff5d6] text-xs font-bold max-w-[240px]"
               >
                 {matchingTemplates.map((t) => (
@@ -651,97 +765,66 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               </select>
             )}
 
-            {target.kind === 'QUOTATION' && matchingTemplates.length > 1 && (
-              <div className="flex items-center bg-[#07281c] rounded-lg p-0.5 border border-[#186635]">
+            {!isInternalCostingView && (
+              <>
                 <button
                   type="button"
-                  onClick={() => {
-                    setTemplateMode('STANDARD');
-                    const stdTpl =
-                      matchingTemplates.find(
-                        (t) =>
-                          !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`) &&
-                          /01|standard|chuan/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
-                      ) ||
-                      matchingTemplates.find((t) => !/tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`));
-                    if (stdTpl) setSelectedTemplateId(stdTpl.template_id);
-                  }}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-bold cursor-pointer ${templateMode === 'STANDARD' ? 'bg-[#f4d98a] text-[#07281c]' : 'text-[#d2ebe0]'}`}
+                  onClick={() => setShowFieldEditor((s) => !s)}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer border ${
+                    showFieldEditor ? 'bg-[#f4d98a] text-[#07281c] border-[#f4d98a]' : 'bg-[#07281c] text-[#fff5d6] border-[#186635]'
+                  }`}
                 >
-                  Mẫu Chuẩn
+                  <ListChecks className="w-3.5 h-3.5" />
+                  <span>Chỉnh dữ liệu</span>
                 </button>
+
                 <button
                   type="button"
-                  onClick={() => {
-                    setTemplateMode('COMPARISON');
-                    const compTpl = matchingTemplates.find((t) =>
-                      /tuvan|comp|so_sanh/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
-                    );
-                    if (compTpl) setSelectedTemplateId(compTpl.template_id);
-                  }}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-bold cursor-pointer ${templateMode === 'COMPARISON' ? 'bg-[#f4d98a] text-[#07281c]' : 'text-[#d2ebe0]'}`}
+                  onClick={() => setDirectEditMode((s) => !s)}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer border ${
+                    directEditMode ? 'bg-[#f4d98a] text-[#07281c] border-[#f4d98a]' : 'bg-[#07281c] text-[#fff5d6] border-[#186635]'
+                  }`}
                 >
-                  Mẫu So sánh ĐK
+                  <PenLine className="w-3.5 h-3.5" />
+                  <span>{directEditMode ? 'Xong sửa văn bản' : 'Sửa nội dung'}</span>
                 </button>
-              </div>
+
+                <button
+                  type="button"
+                  disabled={busy || !renderedDocxBytes}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      const savedPath = await handleSaveGeneratedToStorage(false);
+                      if (savedPath) {
+                        onToast('success', 'Đã lưu chứng từ vào hồ sơ đơn hàng.');
+                      }
+                    } catch (err: any) {
+                      onToast('error', err?.message || 'Lỗi lưu chứng từ.');
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-[#16977f] hover:bg-[#117865] disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Lưu chứng từ</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowEmailPane((s) => !s)}
+                  className="px-3 py-1.5 rounded-lg bg-[#0f4a33] border border-[#f4d98a]/60 hover:bg-[#07281c] text-[#fff5d6] text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  <span>{showEmailPane ? 'Ẩn Email' : 'Soạn Email'}</span>
+                </button>
+              </>
             )}
 
             <button
               type="button"
-              onClick={() => setShowFieldEditor((s) => !s)}
-              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer border ${
-                showFieldEditor ? 'bg-[#f4d98a] text-[#07281c] border-[#f4d98a]' : 'bg-[#07281c] text-[#fff5d6] border-[#186635]'
-              }`}
-            >
-              <ListChecks className="w-3.5 h-3.5" />
-              <span>Chỉnh dữ liệu</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setDirectEditMode((s) => !s)}
-              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer border ${
-                directEditMode ? 'bg-[#f4d98a] text-[#07281c] border-[#f4d98a]' : 'bg-[#07281c] text-[#fff5d6] border-[#186635]'
-              }`}
-            >
-              <PenLine className="w-3.5 h-3.5" />
-              <span>{directEditMode ? 'Xong sửa văn bản' : 'Sửa nội dung'}</span>
-            </button>
-
-            <button
-              type="button"
-              disabled={busy || !renderedDocxBytes}
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  const savedPath = await handleSaveGeneratedToStorage(false);
-                  if (savedPath) {
-                    onToast('success', 'Đã lưu chứng từ vào hồ sơ đơn hàng.');
-                  }
-                } catch (err: any) {
-                  onToast('error', err?.message || 'Lỗi lưu chứng từ.');
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              className="px-3 py-1.5 rounded-lg bg-[#16977f] hover:bg-[#117865] disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>Lưu chứng từ</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setShowEmailPane((s) => !s)}
-              className="px-3 py-1.5 rounded-lg bg-[#0f4a33] border border-[#f4d98a]/60 hover:bg-[#07281c] text-[#fff5d6] text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-            >
-              <Mail className="w-3.5 h-3.5" />
-              <span>{showEmailPane ? 'Ẩn Email' : 'Soạn Email'}</span>
-            </button>
-
-            <button
-              type="button"
-              disabled={!renderedDocxBytes}
+              disabled={!isInternalCostingView && !renderedDocxBytes}
               onClick={handlePrint}
               className="px-3 py-1.5 rounded-lg bg-[#f4d98a] text-[#07281c] text-xs font-extrabold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
@@ -749,27 +832,21 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               <span>In / PDF</span>
             </button>
 
-            <button
-              type="button"
-              disabled={!renderedDocxBytes}
-              onClick={handleDownloadDocx}
-              className="px-2.5 py-1.5 rounded-lg bg-[#07281c] text-[#fff5d6] border border-[#186635] text-xs font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
-            >
-              <FileDown className="w-3.5 h-3.5" />
-              <span>Tải .docx</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-1.5 rounded-lg bg-[#8c3b3b] text-white hover:bg-[#6e2b2b] cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            {!isInternalCostingView && (
+              <button
+                type="button"
+                disabled={!renderedDocxBytes}
+                onClick={handleDownloadDocx}
+                className="px-2.5 py-1.5 rounded-lg bg-[#07281c] text-[#fff5d6] border border-[#186635] text-xs font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                <span>Tải .docx</span>
+              </button>
+            )}
           </div>
         </div>
 
-        {target.kind === 'QUOTATION' && allowQuickAdjust && ctx.prop && (
+        {target.kind === 'QUOTATION' && !isInternalCostingView && allowQuickAdjust && ctx.prop && (
           <div className="px-4 py-2.5 bg-[#07281c] border-b border-[#186635] flex flex-wrap items-center justify-between gap-3 text-xs">
             <div className="flex flex-wrap items-center gap-2.5">
               <span className="inline-flex items-center gap-1 font-bold text-[#f4d98a]">
@@ -848,7 +925,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                     if (!onConfirmQuickAdjust) return;
                     setBusy(true);
                     try {
-                      await onConfirmQuickAdjust(target.orderId, adjIncoterm, numericAdjPrice, templateMode);
+                      await onConfirmQuickAdjust(target.orderId, adjIncoterm, numericAdjPrice, 'STANDARD');
                     } finally {
                       setBusy(false);
                     }
@@ -863,12 +940,18 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
         )}
 
         <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12">
-          {showFieldEditor && (
+          {showFieldEditor && !isInternalCostingView && (
             <div className="lg:col-span-4 bg-[#0b3a27] border-r-2 border-[#186635] p-3.5 overflow-y-auto space-y-2.5 max-h-[600px]">
               <div className="text-xs font-extrabold text-[#f4d98a] uppercase tracking-wider">
                 CHỈNH DỮ LIỆU
               </div>
-              {descriptors.map((d) => (
+              {descriptors
+                .filter((d) =>
+                  target.kind === 'QUOTATION'
+                    ? !INTERNAL_ONLY_FIELD_PATTERN.test(d.key)
+                    : true
+                )
+                .map((d) => (
                 <div key={d.key} className="space-y-1">
                   <label className="block text-[11px] font-bold text-[#fff5d6]">
                     {d.description}
@@ -890,36 +973,260 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
           )}
 
           <div
+            ref={previewScrollRef}
             className={`${
-              showFieldEditor && showEmailPane
+              showFieldEditor && showEmailPane && !isInternalCostingView
                 ? 'lg:col-span-4'
-                : showFieldEditor || showEmailPane
+                : (showFieldEditor || showEmailPane) && !isInternalCostingView
                 ? 'lg:col-span-8'
                 : 'lg:col-span-12'
-            } relative bg-[#cbd5d1] min-h-[480px] max-h-[600px] overflow-auto`}
+            } relative bg-[#cbd5d1] min-h-[480px] max-h-[600px] overflow-auto flex flex-col`}
           >
             <div ref={docxStyleRef} className="hidden" />
             <iframe ref={printFrameRef} title="print-docx" className="hidden" />
 
-            {docLoading ? (
-              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2.5 bg-[#d7eee4] text-[#07281c]">
+            <div className="sticky top-0 z-20 px-3 py-1.5 bg-[#0b3a27]/95 backdrop-blur-sm border-b border-[#186635] flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#fff5d6] shrink-0">
+              <span className="inline-flex items-center gap-1.5 font-bold text-[#9bccb8]">
+                <ZoomIn className="w-3.5 h-3.5 text-[#f4d98a]" />
+                <span>Thu phóng xem tổng quan:</span>
+                <span className="font-mono text-[#f4d98a] font-extrabold">
+                  {Math.round(effectiveZoomScale * 100)}%
+                </span>
+              </span>
+              <div className="inline-flex items-center bg-[#07281c] rounded-lg p-0.5 border border-[#186635]">
+                {(
+                  [
+                    { id: 'FIT', label: 'Fit' },
+                    { id: '75', label: '75%' },
+                    { id: '85', label: '85%' },
+                    { id: '100', label: '100%' },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setZoomPreset(opt.id)}
+                    className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold cursor-pointer transition-colors ${
+                      zoomPreset === opt.id
+                        ? 'bg-[#f4d98a] text-[#07281c]'
+                        : 'text-[#d2ebe0] hover:text-[#fff5d6]'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {isInternalCostingView ? (
+              <div className="p-3 sm:p-4 flex-1">
+                <div
+                  style={{
+                    width: `${Math.round(820 * effectiveZoomScale)}px`,
+                    margin: '0 auto',
+                    position: 'relative',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '820px',
+                      transform: `scale(${effectiveZoomScale})`,
+                      transformOrigin: 'top left',
+                    }}
+                  >
+                    <div
+                      ref={internalSheetRef}
+                      className="bg-white text-[#0b2418] rounded-xl shadow-xl border-2 border-[#186635] p-6 space-y-5 text-xs"
+                    >
+                      <div className="flex items-start justify-between border-b-2 border-[#0f4a33] pb-3">
+                        <div>
+                          <div className="text-[10px] font-extrabold uppercase tracking-wider text-[#8c3b3b]">
+                            TÀI LIỆU NỘI BỘ · CHỈ DÀNH CHO PHÒNG XNK &amp; BAN GIÁM ĐỐC (KHÔNG GỬI KHÁCH)
+                          </div>
+                          <h2 className="text-lg font-black text-[#0f4a33] mt-0.5">
+                            INTERNAL_COSTING_SHEET — PHIẾU TÍNH GIÁ &amp; SO SÁNH PHƯƠNG ÁN
+                          </h2>
+                          <div className="text-[11px] text-slate-600 mt-0.5">
+                            Đơn hàng: <strong className="font-mono text-[#07281c]">{target.orderId}</strong> · Số Báo giá:{' '}
+                            <strong className="font-mono text-[#07281c]">{cleanQuoteNo}</strong> · NV XNK:{' '}
+                            <strong>{ctx.prop?.xnk_rep || '-'}</strong>
+                          </div>
+                        </div>
+                        <div className="text-right text-[11px]">
+                          <div className="font-bold text-[#0f4a33]">GREEN AGRI-EXPORTS CO., LTD</div>
+                          <div>Ngày lập: {ctx.prop?.booking_date || '-'}</div>
+                          {sendCount > 0 && (
+                            <div className="font-bold text-[#8c3b3b]">Đã gửi khách: Lần {sendCount}</div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 bg-[#f4fbf7] border border-[#186635]/30 rounded-lg p-3">
+                        <div>
+                          <div><strong>Khách hàng:</strong> {ctx.cus?.consignee_name || ctx.inq?.consignee_id || '-'}</div>
+                          <div><strong>Quốc gia / POD:</strong> {ctx.cus?.country || '-'} · {ctx.sch?.pod || ctx.inq?.pod || '-'}</div>
+                          <div><strong>Tuyến &amp; Lịch tàu:</strong> {ctx.prop?.schedule_id || '-'} · {ctx.sch?.shipping_line || '-'}</div>
+                        </div>
+                        <div>
+                          <div><strong>Container:</strong> {ctx.prop?.container_type || '-'} ({ctx.prop?.container_qty || 0} cont)</div>
+                          <div><strong>Đóng gói:</strong> {fmtNumber(ctx.prop?.total_cartons || 0)} thùng · {fmtNumber(ctx.prop?.total_pallets || 0)} pallet · {fmtNumber(ctx.prop?.total_cbm || 0)} CBM</div>
+                          <div><strong>Khối lượng:</strong> NW {fmtNumber(ctx.inq?.net_weight_kgs || 0)} KG · GW {fmtNumber(ctx.prop?.total_gross_weight || 0)} KG</div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="font-extrabold text-[#0f4a33] uppercase text-[11px] mb-1.5">
+                          1. Cơ cấu Giá vốn, Bao bì, Biên lợi nhuận &amp; Giá sàn
+                        </h4>
+                        <table className="w-full border-collapse text-xs">
+                          <thead>
+                            <tr className="bg-[#0f4a33] text-[#fff5d6]">
+                              <th className="p-2 text-left border border-[#186635]">Hạng mục chi phí / chỉ tiêu</th>
+                              <th className="p-2 text-right border border-[#186635]">Giá trị (USD)</th>
+                              <th className="p-2 text-left border border-[#186635]">Ghi chú nội bộ</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td className="p-2 border border-slate-300 font-semibold">Giá vốn hàng hóa (Base Goods Cost)</td>
+                              <td className="p-2 border border-slate-300 text-right font-mono font-bold">{fmtUSD(ctx.prop?.goods_cost || 0)}</td>
+                              <td className="p-2 border border-slate-300">Phân bổ ẩn vào Đơn giá FOB trên Báo giá khách</td>
+                            </tr>
+                            <tr className="bg-slate-50">
+                              <td className="p-2 border border-slate-300 font-semibold">Chi phí Bao bì &amp; Pallet (Packing + Pallet)</td>
+                              <td className="p-2 border border-slate-300 text-right font-mono">{fmtUSD(ctx.prop?.packing_pallet_cost || 0)}</td>
+                              <td className="p-2 border border-slate-300">Pallet fee: {fmtUSD(ctx.prop?.pallet_fee || 0)}</td>
+                            </tr>
+                            <tr>
+                              <td className="p-2 border border-slate-300 font-semibold">Cước biển + Local Charges + Hải quan</td>
+                              <td className="p-2 border border-slate-300 text-right font-mono">{fmtUSD(ctx.prop?.total_freight_local || 0)}</td>
+                              <td className="p-2 border border-slate-300">Phương án thực hiện: {ctx.extraMeta?.freight_exec_option || 'SELF'}</td>
+                            </tr>
+                            <tr className="bg-slate-50">
+                              <td className="p-2 border border-slate-300 font-semibold">Bảo hiểm hàng hải ({ctx.prop?.insurance_code || 'INS-NONE'})</td>
+                              <td className="p-2 border border-slate-300 text-right font-mono">{fmtUSD(ctx.prop?.insurance_cost || 0)}</td>
+                              <td className="p-2 border border-slate-300">Áp dụng cho CIF / CIP</td>
+                            </tr>
+                            <tr>
+                              <td className="p-2 border border-slate-300 font-semibold">Biên lợi nhuận mục tiêu / tối thiểu</td>
+                              <td className="p-2 border border-slate-300 text-right font-mono font-bold text-[#0f4a33]">
+                                {fmtDecimal(ctx.extraMeta?.margin_pct || 0, 1)}% (Min {fmtDecimal(ctx.extraMeta?.min_margin_pct || 0, 1)}%)
+                              </td>
+                              <td className="p-2 border border-slate-300">Lợi nhuận nội bộ dự kiến: {fmtUSD(ctx.extraMeta?.internal_profit_usd || 0)}</td>
+                            </tr>
+                            <tr className="bg-[#fff5d6]">
+                              <td className="p-2 border border-slate-300 font-extrabold">Giá sàn tối thiểu (Floor Price)</td>
+                              <td className="p-2 border border-slate-300 text-right font-mono font-extrabold text-[#8c3b3b]">{fmtUSD(ctx.extraMeta?.floor_price_usd || 0)}</td>
+                              <td className="p-2 border border-slate-300">Sales không được chào thấp hơn mức sàn</td>
+                            </tr>
+                            <tr className="bg-[#d7eee4]">
+                              <td className="p-2 border border-slate-300 font-extrabold">Giá chào đề xuất ({ctx.prop?.recommended_incoterm || 'CIF'})</td>
+                              <td className="p-2 border border-slate-300 text-right font-mono font-extrabold text-[#0f4a33]">{fmtUSD(ctx.prop?.final_selling_price || 0)}</td>
+                              <td className="p-2 border border-slate-300">Khớp tổng thanh toán trên TMP_QUOTATION_01</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <h4 className="font-extrabold text-[#0f4a33] uppercase text-[11px] mb-1.5">
+                            2. So sánh Phương án Thực hiện (Self vs. Hybrid vs. FWD)
+                          </h4>
+                          <table className="w-full border-collapse text-xs">
+                            <tbody>
+                              <tr>
+                                <td className="p-1.5 border border-slate-300">Phương án đang chọn</td>
+                                <td className="p-1.5 border border-slate-300 text-right font-mono font-bold">{ctx.extraMeta?.freight_exec_option || 'SELF'}</td>
+                              </tr>
+                              <tr className="bg-slate-50">
+                                <td className="p-1.5 border border-slate-300">Trucking tự chạy (Self)</td>
+                                <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(ctx.extraMeta?.self_trucking || 0)}</td>
+                              </tr>
+                              <tr>
+                                <td className="p-1.5 border border-slate-300">FWD Ocean / Trucking</td>
+                                <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(ctx.extraMeta?.fwd_ocean || 0)} / {fmtUSD(ctx.extraMeta?.fwd_trucking || 0)}</td>
+                              </tr>
+                              <tr className="bg-slate-50">
+                                <td className="p-1.5 border border-slate-300">FWD Hải quan / Giấy phép</td>
+                                <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(ctx.extraMeta?.fwd_customs || 0)} / {fmtUSD(ctx.extraMeta?.fwd_permits || 0)}</td>
+                              </tr>
+                              <tr>
+                                <td className="p-1.5 border border-slate-300 font-bold">Tổng chi phí nội bộ / Thu khách</td>
+                                <td className="p-1.5 border border-slate-300 text-right font-mono font-bold">
+                                  {fmtUSD(ctx.extraMeta?.internal_cost_usd || 0)} / {fmtUSD(ctx.extraMeta?.buyer_charge_usd || 0)}
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div>
+                          <h4 className="font-extrabold text-[#0f4a33] uppercase text-[11px] mb-1.5">
+                            3. Bảng so sánh Incoterms 2020 (Giá chào vs. Giá sàn)
+                          </h4>
+                          <table className="w-full border-collapse text-xs">
+                            <thead>
+                              <tr className="bg-[#0f4a33] text-[#fff5d6]">
+                                <th className="p-1.5 text-left border border-[#186635]">Incoterm</th>
+                                <th className="p-1.5 text-right border border-[#186635]">Giá sàn</th>
+                                <th className="p-1.5 text-right border border-[#186635]">Giá chào</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {['EXW', 'FOB', 'CFR', 'CIF', 'CIP', 'DAP', 'DDP'].map((code) => (
+                                <tr key={code} className={code === ctx.prop?.recommended_incoterm ? 'bg-[#fff5d6] font-bold' : ''}>
+                                  <td className="p-1.5 border border-slate-300 font-mono font-bold">{code}</td>
+                                  <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(computeFloorPriceScaled(ctx.prop, ctx.extraMeta, code))}</td>
+                                  <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(computeSellingPriceScaled(ctx.prop, ctx.extraMeta, code))}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : docLoading ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-2.5 bg-[#d7eee4] text-[#07281c] min-h-[440px]">
                 <Loader2 className="w-6 h-6 animate-spin text-[#0f4a33]" />
                 <span className="text-xs font-bold">Loading...</span>
               </div>
             ) : loadError && !renderedDocxBytes ? (
-              <div className="flex flex-col items-center justify-center h-full min-h-[460px] p-6 text-center text-[#07281c] bg-[#d7eee4]">
+              <div className="flex flex-col items-center justify-center flex-1 min-h-[440px] p-6 text-center text-[#07281c] bg-[#d7eee4]">
                 <AlertTriangle className="w-7 h-7 text-[#8c3b3b] mb-2" />
                 <div className="text-xs font-bold max-w-md">{loadError}</div>
               </div>
             ) : (
-              <div
-                ref={docxBodyRef}
-                className="w-full min-h-[480px] p-3 sm:p-4 outline-none"
-              />
+              <div className="p-3 sm:p-4 flex-1">
+                <div
+                  style={{
+                    width: `${Math.round(naturalDocSize.width * effectiveZoomScale)}px`,
+                    minHeight: `${Math.round(naturalDocSize.height * effectiveZoomScale)}px`,
+                    margin: '0 auto',
+                    position: 'relative',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${naturalDocSize.width}px`,
+                      transform: `scale(${effectiveZoomScale})`,
+                      transformOrigin: 'top left',
+                    }}
+                  >
+                    <div
+                      ref={docxBodyRef}
+                      className="w-full min-h-[460px] outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
             )}
           </div>
 
-          {showEmailPane && (
+          {showEmailPane && !isInternalCostingView && (
             <div className="lg:col-span-4 bg-[#0b3a27] border-l-2 border-[#186635] p-4 flex flex-col gap-3 overflow-y-auto max-h-[600px]">
               <div className="text-xs font-extrabold text-[#f4d98a] uppercase tracking-wider">
                 Email Gửi Khách Hàng (Chuẩn Quốc Tế)
@@ -983,7 +1290,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                     className="flex-1 agri-btn-gold flex items-center justify-center gap-1.5 text-xs"
                   >
                     <Send className="w-3.5 h-3.5" />
-                    <span>Xác nhận Đã gửi Báo giá cho Khách</span>
+                    <span>Xác nhận Đã gửi Báo giá (Lần {sendCount + 1})</span>
                   </button>
                 )}
                 {target.kind !== 'QUOTATION' && renderedDocxBytes && (

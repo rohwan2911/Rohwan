@@ -270,6 +270,8 @@ export interface ProposalExtraMeta {
   lcl_rate?: number;
   import_duty_usd?: number;
   note?: string;
+  send_count?: number;
+  last_sent_at?: string;
 }
 
 export interface AppDataState {

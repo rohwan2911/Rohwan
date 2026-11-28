@@ -16,6 +16,7 @@ import {
   deleteProductDirect,
   deleteScheduleDirect,
   fetchAllAppData,
+  incrementQuotationSendCount,
   readOrderLogisticsMetaMap,
   readProposalExtraMetaMap,
   saveInquiryRecord,
@@ -329,9 +330,11 @@ export const App: React.FC = () => {
               proposalMetaMap={proposalMetaMap}
               onSaveProposal={async (proposal, extraMeta, itemsJson) => {
                 await savePricingProposalRecord(data, proposal, extraMeta, itemsJson);
+                setProposalMetaMap(readProposalExtraMetaMap());
                 pushToast('success', `Đã lưu phương án giá ${extraMeta.quotation_no} và gửi Sales.`);
                 await syncData({ silent: true });
               }}
+              onOpenPreview={setPreviewTarget}
               onOpenTimeline={setTimelineOrderId}
               onToast={pushToast}
             />
@@ -345,6 +348,7 @@ export const App: React.FC = () => {
               quickSearch={quickSearch}
               highlightedOrderId={highlightedId}
               orderMetaMap={orderMetaMap}
+              proposalMetaMap={proposalMetaMap}
               onCreateContractDraft={async (orderId) => {
                 const ord = await createOrOverwriteContractDraft(data, orderId, currentUser.full_name);
                 pushToast('success', `Đã khởi tạo Hợp đồng ${ord.contract_no}.`);
@@ -443,8 +447,32 @@ export const App: React.FC = () => {
                   });
                 }
                 await upsertSysUserDirect(row, isEdit);
-                pushToast('success', 'Đã lưu thông tin nhân sự.');
-                await syncData({ silent: true });
+                const normalizedRow: SysUser = {
+                  ...row,
+                  employee_id: row.employee_id.trim(),
+                  full_name: row.full_name.trim(),
+                  department: row.department.trim(),
+                  role: row.role.trim(),
+                  email: row.email.trim().toLowerCase(),
+                  status: row.status.trim(),
+                };
+                setData((prev) => {
+                  const idx = prev.users.findIndex(
+                    (u) => u.employee_id.trim().toLowerCase() === normalizedRow.employee_id.toLowerCase()
+                  );
+                  const nextUsers =
+                    idx >= 0
+                      ? prev.users.map((u, i) => (i === idx ? { ...u, ...normalizedRow } : u))
+                      : [...prev.users, normalizedRow];
+                  return { ...prev, users: nextUsers };
+                });
+                pushToast(
+                  'success',
+                  isEdit
+                    ? `Đã cập nhật nhân sự ${normalizedRow.full_name}.`
+                    : `Đã tạo tài khoản nhân sự ${normalizedRow.full_name} thành công.`
+                );
+                void syncData({ silent: true });
               }}
               onRequestConfirm={(title, message, onConfirm, danger) =>
                 setConfirmState({ open: true, title, message, onConfirm, danger })
@@ -463,6 +491,7 @@ export const App: React.FC = () => {
         orderMetaMap={orderMetaMap}
         proposalMetaMap={proposalMetaMap}
         allowQuickAdjust={role === 'SALES' || role === 'ADMIN'}
+        allowInternalView={role === 'XNK' || role === 'ADMIN'}
         onClose={() => setPreviewTarget(null)}
         onConfirmQuickAdjust={async (orderId, newInc, newPrice, tplMode) => {
           await updateQuotationWorkflow(
@@ -474,11 +503,17 @@ export const App: React.FC = () => {
           await syncData({ silent: true });
         }}
         onMarkQuotationSent={async (orderId, linkOrSubject) => {
+          const existingInq = data.inquiries.find((i) => i.order_id === orderId);
           await updateQuotationWorkflow(orderId, {
             inquiry_status: WORKFLOW_STATUS.SENT_WAITING_CUST,
             sent_mail_link: linkOrSubject,
           });
-          pushToast('success', 'Đã đánh dấu Đã gửi Báo giá cho Khách.');
+          const nextSendCount = incrementQuotationSendCount(
+            orderId,
+            Boolean(existingInq?.sent_mail_link)
+          );
+          setProposalMetaMap(readProposalExtraMetaMap());
+          pushToast('success', `Đã đánh dấu Đã gửi Báo giá cho Khách (Lần ${nextSendCount}).`);
           await syncData({ silent: true });
         }}
         onDocumentSaved={async () => {

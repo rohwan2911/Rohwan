@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Plus,
   Zap,
@@ -14,6 +15,10 @@ import {
   Languages,
   Loader2,
   X,
+  ChevronDown,
+  Search,
+  Package,
+  Check,
 } from 'lucide-react';
 import type {
   AppDataState,
@@ -28,8 +33,9 @@ import type {
 import {
   classifyCustomerByCount,
   cleanQuoteNoForCustomer,
-  computeOrderPalletSummary,
+  countriesMatch,
   deduplicatePortName,
+  detectCountryFromAddress,
   fmtDecimal,
   fmtNumber,
   fmtUSD,
@@ -41,12 +47,13 @@ import {
   isPricedReadyStatus,
   isQuickCaptureStatus,
   isSentWaitingCustomerStatus,
+  normalizeCountryName,
   normalizePlainText,
   parseLocaleNumber,
   parseOrderItems,
+  resolvePackingSpec,
   stripItemsTag,
   todayIsoDate,
-  toNum,
   translateVIEtoENGSmart,
   WORKFLOW_STATUS,
 } from '../utils/calculations';
@@ -133,10 +140,16 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
 }) => {
   // Quick Capture state
   const [quickCusName, setQuickCusName] = useState('');
+  const [quickSelectedConsigneeId, setQuickSelectedConsigneeId] = useState('');
+  const [quickCompanySuggestOpen, setQuickCompanySuggestOpen] = useState(false);
   const [quickAddress, setQuickAddress] = useState('');
   const [quickContact, setQuickContact] = useState('');
   const [quickEmail, setQuickEmail] = useState('');
   const [quickNote, setQuickNote] = useState('');
+  const [quickSelections, setQuickSelections] = useState<Record<string, string[]>>({});
+  const [quickPickerOpen, setQuickPickerOpen] = useState(false);
+  const [quickPickerSearch, setQuickPickerSearch] = useState('');
+  const [quickPickerStyle, setQuickPickerStyle] = useState<React.CSSProperties>({});
   const [quickSaving, setQuickSaving] = useState(false);
   const [quickFilterText, setQuickFilterText] = useState('');
 
@@ -180,16 +193,69 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
   const [cusIsEdit, setCusIsEdit] = useState(false);
   const dateInputRef = useRef<HTMLInputElement>(null);
   const companySuggestRef = useRef<HTMLDivElement>(null);
+  const quickCompanySuggestRef = useRef<HTMLDivElement>(null);
+  const quickPickerWrapRef = useRef<HTMLDivElement>(null);
+  const quickPickerMenuRef = useRef<HTMLDivElement>(null);
+  const quickLastAutoNoteRef = useRef<string>('');
+
+  const updateQuickPickerPosition = useCallback(() => {
+    const anchor = quickPickerWrapRef.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const viewportH = window.innerHeight;
+    const viewportW = window.innerWidth;
+    const maxMenuH = 360;
+    const spaceBelow = viewportH - rect.bottom - 12;
+    const spaceAbove = rect.top - 12;
+    const openUpward = spaceBelow < 220 && spaceAbove > spaceBelow;
+    const computedMaxH = Math.max(180, Math.min(maxMenuH, openUpward ? spaceAbove : spaceBelow));
+    const menuWidth = Math.min(Math.max(rect.width, 360), viewportW - 16);
+    const left = Math.min(Math.max(8, rect.left), Math.max(8, viewportW - menuWidth - 8));
+
+    setQuickPickerStyle({
+      position: 'fixed',
+      left: `${left}px`,
+      width: `${menuWidth}px`,
+      maxHeight: `${computedMaxH}px`,
+      zIndex: 9999,
+      ...(openUpward
+        ? { bottom: `${Math.max(8, viewportH - rect.top + 4)}px`, top: 'auto' }
+        : { top: `${rect.bottom + 4}px`, bottom: 'auto' }),
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!quickPickerOpen) return;
+    updateQuickPickerPosition();
+    const onScrollOrResize = () => updateQuickPickerPosition();
+    window.addEventListener('scroll', onScrollOrResize, true);
+    window.addEventListener('resize', onScrollOrResize);
+    return () => {
+      window.removeEventListener('scroll', onScrollOrResize, true);
+      window.removeEventListener('resize', onScrollOrResize);
+    };
+  }, [quickPickerOpen, updateQuickPickerPosition]);
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
-      if (companySuggestRef.current && !companySuggestRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (companySuggestRef.current && !companySuggestRef.current.contains(target)) {
         setCompanySuggestOpen(false);
       }
+      if (quickCompanySuggestRef.current && !quickCompanySuggestRef.current.contains(target)) {
+        setQuickCompanySuggestOpen(false);
+      }
+      if (
+        quickPickerOpen &&
+        !quickPickerWrapRef.current?.contains(target) &&
+        !quickPickerMenuRef.current?.contains(target)
+      ) {
+        setQuickPickerOpen(false);
+      }
     };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, []);
+    document.addEventListener('mousedown', onDocClick, true);
+    return () => document.removeEventListener('mousedown', onDocClick, true);
+  }, [quickPickerOpen]);
 
   const countryOptions = useMemo(() => {
     const set = new Set<string>();
@@ -198,9 +264,15 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     return Array.from(set).sort().map((c) => ({ value: c, label: c }));
   }, [data.schedules, data.consignees]);
 
+  const knownCountries = useMemo(() => countryOptions.map((c) => c.value), [countryOptions]);
+
   const podOptions = useMemo(() => {
+    const countryFilter = cusCountry.trim();
+    const pool = countryFilter
+      ? data.schedules.filter((s) => countriesMatch(s.country, countryFilter))
+      : data.schedules;
     const map = new Map<string, { value: string; label: string; subLabel?: string }>();
-    data.schedules.forEach((s) => {
+    pool.forEach((s) => {
       const cleanPod = deduplicatePortName(s.pod);
       if (!cleanPod) return;
       const key = cleanPod.toLowerCase();
@@ -213,7 +285,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
       }
     });
     return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
-  }, [data.schedules]);
+  }, [data.schedules, cusCountry]);
 
   const allActiveQuickLogs = useMemo(() => {
     return data.inquiries
@@ -235,6 +307,14 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     });
   }, [allActiveQuickLogs, data.consignees]);
 
+  const quickCompanySuggestions = useMemo(() => {
+    const query = quickCusName.trim().toLowerCase();
+    if (!query) return [];
+    return data.consignees
+      .filter((c) => c.consignee_name.trim().toLowerCase().includes(query))
+      .slice(0, 8);
+  }, [data.consignees, quickCusName]);
+
   const companySuggestions = useMemo(() => {
     const query = cusName.trim().toLowerCase();
     if (!query) return [];
@@ -250,6 +330,136 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
       subLabel: `${p.product_name_eng} · $${fmtDecimal(p.unit_price, 2)}/kg`,
     }));
   }, [data.products]);
+
+  const formatQuickSelectionsText = useCallback(
+    (sel: Record<string, string[]>): string => {
+      const entries: string[] = [];
+      Object.entries(sel).forEach(([sku, packCodes]) => {
+        const prod = data.products.find((p) => p.sku_code === sku);
+        const prodLabel = prod?.product_name_vie || sku;
+        if (!packCodes || packCodes.length === 0) {
+          entries.push(prodLabel);
+          return;
+        }
+        const packOpts = getPackingOptionsForProduct(prod, data.pricingRates, data.lookups);
+        packCodes.forEach((code) => {
+          const pk = packOpts.find((o) => o.code === code);
+          const pkName = pk?.name || resolvePackingSpec(code, data.pricingRates).nameVie || code;
+          entries.push(`${prodLabel} - ${pkName}`);
+        });
+      });
+      return entries.join(', ');
+    },
+    [data.products, data.pricingRates, data.lookups]
+  );
+
+  const syncQuickNoteFromSelections = useCallback(
+    (nextSel: Record<string, string[]>) => {
+      const nextAuto = formatQuickSelectionsText(nextSel);
+      const prevAuto = quickLastAutoNoteRef.current;
+      setQuickNote((prevNote) => {
+        const trimmedPrev = prevNote.trim();
+        let extraTail = '';
+        if (prevAuto && trimmedPrev.startsWith(prevAuto)) {
+          extraTail = trimmedPrev.slice(prevAuto.length).replace(/^[\s,;·-]+/, '').trim();
+        } else if (!prevAuto && trimmedPrev) {
+          extraTail = trimmedPrev;
+        }
+        if (nextAuto && extraTail) return `${nextAuto}, ${extraTail}`;
+        return nextAuto || extraTail;
+      });
+      quickLastAutoNoteRef.current = nextAuto;
+    },
+    [formatQuickSelectionsText]
+  );
+
+  const toggleQuickProduct = (sku: string) => {
+    setQuickSelections((prev) => {
+      const next = { ...prev };
+      if (next[sku] !== undefined) {
+        delete next[sku];
+      } else {
+        next[sku] = [];
+      }
+      syncQuickNoteFromSelections(next);
+      return next;
+    });
+  };
+
+  const toggleQuickPackaging = (sku: string, packingCode: string) => {
+    setQuickSelections((prev) => {
+      const current = prev[sku] || [];
+      const exists = current.includes(packingCode);
+      const nextCodes = exists
+        ? current.filter((c) => c !== packingCode)
+        : [...current, packingCode];
+      const next = { ...prev, [sku]: nextCodes };
+      syncQuickNoteFromSelections(next);
+      return next;
+    });
+  };
+
+  const buildQuickSelectionOrderItems = useCallback(
+    (sel: Record<string, string[]>): OrderItem[] => {
+      const result: OrderItem[] = [];
+      Object.entries(sel).forEach(([sku, packCodes]) => {
+        const prod = data.products.find((p) => p.sku_code === sku);
+        if (!prod) return;
+        const packOpts = getPackingOptionsForProduct(prod, data.pricingRates, data.lookups);
+        if (!packCodes || packCodes.length === 0) {
+          result.push({
+            sku: prod.sku_code,
+            name: prod.product_name_vie,
+            name_eng: prod.product_name_eng || prod.product_name_vie,
+            weight: 0,
+            packingCode: '',
+            packingName: '',
+            packingExtra: 0,
+            palletCode: 'PKG-PLT-NO',
+            cartons: 0,
+            pallets: 0,
+            packingCost: 0,
+          });
+          return;
+        }
+        packCodes.forEach((code) => {
+          const pk = packOpts.find((o) => o.code === code);
+          const spec = resolvePackingSpec(code, data.pricingRates);
+          result.push({
+            sku: prod.sku_code,
+            name: prod.product_name_vie,
+            name_eng: prod.product_name_eng || prod.product_name_vie,
+            weight: 0,
+            packingCode: code,
+            packingName: pk?.name || spec.nameVie || code,
+            packingExtra: pk?.rate ?? spec.rate ?? 0,
+            palletCode: 'PKG-PLT-NO',
+            cartons: 0,
+            pallets: 0,
+            packingCost: 0,
+          });
+        });
+      });
+      return result;
+    },
+    [data.products, data.pricingRates, data.lookups]
+  );
+
+  const filteredQuickPickerProducts = useMemo(() => {
+    const q = quickPickerSearch.trim().toLowerCase();
+    if (!q) return data.products;
+    return data.products.filter((p) => {
+      if (
+        `${p.sku_code} ${p.product_name_vie} ${p.product_name_eng} ${p.product_group}`
+          .toLowerCase()
+          .includes(q)
+      ) {
+        return true;
+      }
+      const packOpts = getPackingOptionsForProduct(p, data.pricingRates, data.lookups);
+      return packOpts.some((pk) => `${pk.code} ${pk.name} ${pk.engText}`.toLowerCase().includes(q));
+    });
+  }, [data.products, data.pricingRates, data.lookups, quickPickerSearch]);
 
   const paymentOptions = useMemo(() => {
     const lks = data.lookups.filter((l) => String(l.category).toUpperCase().includes('PAYMENT'));
@@ -279,13 +489,88 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     return Array.from(map.values());
   }, [data.incoterms]);
 
+  const extractDraftLinesFromQuickLead = (lead: InquiryQuotation): DraftLine[] => {
+    const rawItems = String(lead.order_items || '').trim();
+    if (rawItems.startsWith('[')) {
+      try {
+        const arr = JSON.parse(rawItems);
+        if (Array.isArray(arr) && arr.length > 0) {
+          const mapped = arr
+            .map((it: Partial<OrderItem>) => {
+              const sku = String(it.sku || '').trim();
+              const prod = data.products.find((p) => p.sku_code.toLowerCase() === sku.toLowerCase());
+              if (!sku && !prod) return null;
+              const resolvedSku = prod?.sku_code || sku;
+              return {
+                sku: resolvedSku,
+                name: String(it.name || prod?.product_name_vie || resolvedSku),
+                name_eng: String(it.name_eng || prod?.product_name_eng || prod?.product_name_vie || ''),
+                weightStr: it.weight && Number(it.weight) > 0 ? formatEditableNumber(it.weight) : '',
+                packingCode: String(it.packingCode || '').trim(),
+              };
+            })
+            .filter((x): x is DraftLine => Boolean(x));
+          if (mapped.length > 0) return mapped;
+        }
+      } catch {
+        // Fall through to fallback parser
+      }
+    }
+
+    // Fallback: parse "Product A - Packaging 1, Product B - Packaging 2" from lead.note
+    const cleanNote = stripItemsTag(lead.note);
+    if (cleanNote) {
+      const segments = cleanNote.split(/\s*,\s*/).map((s) => s.trim()).filter(Boolean);
+      const fromNote: DraftLine[] = [];
+      segments.forEach((seg) => {
+        const dashIdx = seg.indexOf(' - ');
+        const prodPart = (dashIdx >= 0 ? seg.slice(0, dashIdx) : seg).trim().toLowerCase();
+        const packPart = (dashIdx >= 0 ? seg.slice(dashIdx + 3) : '').trim().toLowerCase();
+        const prod = data.products.find(
+          (p) =>
+            p.product_name_vie.trim().toLowerCase() === prodPart ||
+            p.product_name_eng.trim().toLowerCase() === prodPart ||
+            p.sku_code.trim().toLowerCase() === prodPart
+        );
+        if (!prod) return;
+        let packingCode = '';
+        if (packPart) {
+          const packOpts = getPackingOptionsForProduct(prod, data.pricingRates, data.lookups);
+          const matchedPk = packOpts.find(
+            (pk) =>
+              pk.name.trim().toLowerCase() === packPart ||
+              pk.code.trim().toLowerCase() === packPart ||
+              pk.name.trim().toLowerCase().includes(packPart) ||
+              packPart.includes(pk.code.trim().toLowerCase())
+          );
+          if (matchedPk) packingCode = matchedPk.code;
+        }
+        fromNote.push({
+          sku: prod.sku_code,
+          name: prod.product_name_vie,
+          name_eng: prod.product_name_eng || prod.product_name_vie,
+          weightStr: '',
+          packingCode,
+        });
+      });
+      if (fromNote.length > 0) return fromNote;
+    }
+
+    return [{ sku: '', name: '', name_eng: '', weightStr: '', packingCode: '' }];
+  };
+
   const applyQuickLogLeadToForm = (lead: InquiryQuotation) => {
     const cus = data.consignees.find((c) => c.consignee_id === lead.consignee_id);
+    const resolvedAddress = lead.address || cus?.address || '';
+    const detectedCountry = detectCountryFromAddress(resolvedAddress, knownCountries);
+    const resolvedCountry =
+      normalizeCountryName(cus?.country, knownCountries) || detectedCountry || '';
+
     setSelectedQuickLogId(lead.order_id);
     setSelectedConsigneeId(cus?.consignee_id || lead.consignee_id || '');
     setCusName(cus?.consignee_name || lead.consignee_id || '');
-    setCusCountry(cus?.country || '');
-    setCusAddress(lead.address || cus?.address || '');
+    setCusAddress(resolvedAddress);
+    setCusCountry(resolvedCountry);
     setCusTax(normalizePlainText(cus?.tax || ''));
     setCusContact(lead.contact || cus?.contact_person || '');
     setCusPhone(normalizePlainText(lead.phone || cus?.phone || ''));
@@ -293,21 +578,22 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     setCusFax(normalizePlainText(cus?.fax || ''));
     setCusPod(deduplicatePortName(lead.pod || cus?.default_pod || ''));
     setCusWarehouseAddress(lead.warehouse_address || cus?.warehouse_address || '');
-    if (lead.proposed_payment_term || cus?.default_payment_term) {
-      setPaymentTerm(lead.proposed_payment_term || cus?.default_payment_term || '');
-    }
-    const cleanLeadNote = stripItemsTag(lead.note);
-    if (cleanLeadNote) {
-      setRfqNote(cleanLeadNote);
-    }
+    setPaymentTerm(lead.proposed_payment_term || cus?.default_payment_term || '');
+    setRfqNote(stripItemsTag(lead.note));
+    setLines(extractDraftLinesFromQuickLead(lead));
     setCompanySuggestOpen(false);
   };
 
   const applyExistingConsigneeToForm = (cus: ConsigneeDirectory) => {
+    const resolvedAddress = cus.address || '';
+    const resolvedCountry =
+      normalizeCountryName(cus.country, knownCountries) ||
+      detectCountryFromAddress(resolvedAddress, knownCountries) ||
+      '';
     setSelectedConsigneeId(cus.consignee_id);
     setCusName(cus.consignee_name);
-    setCusCountry(cus.country || '');
-    setCusAddress(cus.address || '');
+    setCusCountry(resolvedCountry);
+    setCusAddress(resolvedAddress);
     setCusTax(normalizePlainText(cus.tax));
     setCusContact(cus.contact_person || '');
     setCusPhone(normalizePlainText(cus.phone));
@@ -319,6 +605,14 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     setCompanySuggestOpen(false);
   };
 
+  const handleAddressChangeInRfq = (nextAddress: string) => {
+    setCusAddress(nextAddress);
+    const detected = detectCountryFromAddress(nextAddress, knownCountries);
+    if (detected) {
+      setCusCountry(detected);
+    }
+  };
+
   const handleSelectPodInRfq = (podValue: string) => {
     const clean = deduplicatePortName(podValue);
     setCusPod(clean || podValue);
@@ -327,7 +621,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
         (s) => deduplicatePortName(s.pod).toLowerCase() === clean.toLowerCase()
       );
       if (matchedSch?.country) {
-        setCusCountry(matchedSch.country.trim());
+        setCusCountry(normalizeCountryName(matchedSch.country, knownCountries));
       }
     }
   };
@@ -343,17 +637,21 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
       setQuoteMode('SINGLE');
       setUsePallet(false);
       setRfqNote('');
-      setLines([{ sku: '', name: '', name_eng: '', weightStr: '', packingCode: '' }]);
       applyQuickLogLeadToForm(fromInquiry);
     } else if (fromInquiry) {
       // Editing an existing official Full RFQ (ORD-...)
       setEditingOrderId(fromInquiry.order_id);
       setSelectedQuickLogId('');
       const cus = data.consignees.find((c) => c.consignee_id === fromInquiry.consignee_id);
+      const resolvedAddress = fromInquiry.address || cus?.address || '';
+      const resolvedCountry =
+        normalizeCountryName(cus?.country, knownCountries) ||
+        detectCountryFromAddress(resolvedAddress, knownCountries) ||
+        '';
       setSelectedConsigneeId(fromInquiry.consignee_id || '');
       setCusName(cus?.consignee_name || fromInquiry.consignee_id || '');
-      setCusCountry(cus?.country || '');
-      setCusAddress(fromInquiry.address || cus?.address || '');
+      setCusCountry(resolvedCountry);
+      setCusAddress(resolvedAddress);
       setCusTax(normalizePlainText(cus?.tax || ''));
       setCusContact(fromInquiry.contact || cus?.contact_person || '');
       setCusPhone(normalizePlainText(fromInquiry.phone || cus?.phone || ''));
@@ -420,11 +718,23 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     }
     const cleanQuickName = quickCusName.trim().toLowerCase();
     const cleanQuickEmail = quickEmail.trim().toLowerCase();
-    const matchedCus = data.consignees.find(
-      (c) =>
-        c.consignee_name.trim().toLowerCase() === cleanQuickName ||
-        (cleanQuickEmail && c.email.trim().toLowerCase() === cleanQuickEmail)
-    );
+    const matchedCus =
+      (quickSelectedConsigneeId &&
+        data.consignees.find((c) => c.consignee_id === quickSelectedConsigneeId)) ||
+      data.consignees.find(
+        (c) =>
+          c.consignee_name.trim().toLowerCase() === cleanQuickName ||
+          (cleanQuickEmail && c.email.trim().toLowerCase() === cleanQuickEmail)
+      );
+    const resolvedAddress = quickAddress.trim() || matchedCus?.address || '';
+    const resolvedCountry =
+      normalizeCountryName(matchedCus?.country, knownCountries) ||
+      detectCountryFromAddress(resolvedAddress, knownCountries) ||
+      '';
+    const structuredItems = buildQuickSelectionOrderItems(quickSelections);
+    const uniqueSkus = Array.from(new Set(structuredItems.map((it) => it.sku).filter(Boolean)));
+    const uniqueNames = Array.from(new Set(structuredItems.map((it) => it.name).filter(Boolean)));
+
     setQuickSaving(true);
     try {
       const saved = await onSaveInquiry({
@@ -432,8 +742,8 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
         customerInput: {
           consignee_id: matchedCus?.consignee_id,
           consignee_name: matchedCus?.consignee_name || quickCusName.trim(),
-          country: matchedCus?.country || '',
-          address: quickAddress.trim() || matchedCus?.address || '',
+          country: resolvedCountry,
+          address: resolvedAddress,
           tax: matchedCus?.tax || '',
           contact_person: quickContact.trim() || matchedCus?.contact_person || '',
           phone: matchedCus?.phone || '',
@@ -441,22 +751,28 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
           fax: matchedCus?.fax || '',
           default_payment_term: matchedCus?.default_payment_term || 'T/T 30/70',
         },
-        sku_code: '',
-        product_name_vie: '',
+        sku_code: uniqueSkus.join(', '),
+        product_name_vie: uniqueNames.join(', '),
         net_weight_kgs: 0,
         desired_delivery_date: '',
         desired_incoterm: 'CIF',
-        proposed_payment_term: 'T/T 30/70',
+        proposed_payment_term: matchedCus?.default_payment_term || 'T/T 30/70',
         inquiry_status: WORKFLOW_STATUS.QUICK_CAPTURE,
         note: quickNote.trim(),
-        order_items: '[]',
+        order_items: JSON.stringify(structuredItems),
         quotation_mode: 'SINGLE',
       });
       setQuickCusName('');
+      setQuickSelectedConsigneeId('');
+      setQuickCompanySuggestOpen(false);
       setQuickAddress('');
       setQuickContact('');
       setQuickEmail('');
       setQuickNote('');
+      setQuickSelections({});
+      quickLastAutoNoteRef.current = '';
+      setQuickPickerOpen(false);
+      setQuickPickerSearch('');
       onToast('success', `Đã ghi nhận khách hàng nhanh (${saved.order_id}).`);
     } catch (err: any) {
       onToast('error', err?.message || 'Lỗi ghi nhận nhanh.');
@@ -635,9 +951,57 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
           </div>
 
           <form onSubmit={handleSaveQuickCapture} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 items-end">
-            <div>
+            <div ref={quickCompanySuggestRef} className="relative">
               <label className="block text-[11px] font-bold text-[#fff5d6] mb-1">Tên công ty / Khách *</label>
-              <input value={quickCusName} onChange={(e) => setQuickCusName(e.target.value)} className="agri-input text-xs" placeholder="VD: Fresh Asia Trading" />
+              <input
+                value={quickCusName}
+                onFocus={() => setQuickCompanySuggestOpen(true)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setQuickCompanySuggestOpen(false);
+                }}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setQuickCusName(val);
+                  setQuickCompanySuggestOpen(true);
+                  if (quickSelectedConsigneeId) {
+                    const linked = data.consignees.find((c) => c.consignee_id === quickSelectedConsigneeId);
+                    if (!linked || linked.consignee_name.trim().toLowerCase() !== val.trim().toLowerCase()) {
+                      setQuickSelectedConsigneeId('');
+                    }
+                  }
+                }}
+                className="agri-input text-xs"
+                placeholder="VD: Fresh Asia Trading"
+                autoComplete="off"
+              />
+              {quickCompanySuggestOpen && quickCompanySuggestions.length > 0 && (
+                <div className="absolute left-0 right-0 z-50 mt-1 max-h-52 overflow-y-auto rounded-xl bg-[#f5fbf7] border-2 border-[#186635] shadow-2xl text-[#07281c]">
+                  <div className="px-2.5 py-1 bg-[#d7eee4] border-b border-[#186635]/30 text-[10px] font-extrabold text-[#0f4a33] uppercase">
+                    Gợi ý KH có sẵn ({quickCompanySuggestions.length})
+                  </div>
+                  {quickCompanySuggestions.map((c) => (
+                    <button
+                      key={c.consignee_id}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setQuickSelectedConsigneeId(c.consignee_id);
+                        setQuickCusName(c.consignee_name);
+                        setQuickAddress(c.address || '');
+                        setQuickContact(c.contact_person || '');
+                        setQuickEmail(c.email || '');
+                        setQuickCompanySuggestOpen(false);
+                      }}
+                      className="w-full text-left px-2.5 py-1.5 text-xs border-b border-[#186635]/15 last:border-b-0 hover:bg-[#0f4a33] hover:text-[#fff5d6] cursor-pointer transition-colors"
+                    >
+                      <div className="font-bold truncate">{c.consignee_name}</div>
+                      <div className="text-[10px] opacity-80 truncate">
+                        {[c.address || c.country, c.contact_person, c.email].filter(Boolean).join(' · ')}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-[11px] font-bold text-[#fff5d6] mb-1">Địa chỉ</label>
@@ -645,20 +1009,199 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
             </div>
             <div>
               <label className="block text-[11px] font-bold text-[#fff5d6] mb-1">Người liên hệ</label>
-              <input value={quickContact} onChange={(e) => setQuickContact(e.target.value)} className="agri-input text-xs" placeholder="Mr./Ms." />
+              <input value={quickContact} onChange={(e) => setQuickContact(e.target.value)} className="agri-input text-xs" placeholder="VD: Mr. Kenji Tanaka" />
             </div>
             <div>
               <label className="block text-[11px] font-bold text-[#fff5d6] mb-1">Email</label>
-              <input value={quickEmail} onChange={(e) => setQuickEmail(e.target.value)} className="agri-input text-xs" placeholder="buyer@company.com" />
+              <input value={quickEmail} onChange={(e) => setQuickEmail(e.target.value)} className="agri-input text-xs" placeholder="VD: buyer@company.com" />
             </div>
-            <div>
-              <label className="block text-[11px] font-bold text-[#fff5d6] mb-1">Ghi chú nhu cầu</label>
-              <input value={quickNote} onChange={(e) => setQuickNote(e.target.value)} className="agri-input text-xs" placeholder="Sản phẩm quan tâm..." />
+            <div ref={quickPickerWrapRef} className="relative">
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[11px] font-bold text-[#fff5d6]">Ghi chú nhu cầu</label>
+                {Object.keys(quickSelections).length > 0 && (
+                  <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-[#f4d98a] text-[#07281c]">
+                    {Object.keys(quickSelections).length} SP
+                  </span>
+                )}
+              </div>
+              <div className="relative flex items-center">
+                <input
+                  value={quickNote}
+                  onFocus={() => setQuickPickerOpen(true)}
+                  onClick={() => setQuickPickerOpen(true)}
+                  onChange={(e) => setQuickNote(e.target.value)}
+                  className="agri-input text-xs pr-12"
+                  placeholder="VD: Chọn SP, quy cách hoặc ghi chú..."
+                  autoComplete="off"
+                />
+                {quickNote && (
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    title="Xóa ghi chú & lựa chọn"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setQuickNote('');
+                      setQuickSelections({});
+                      quickLastAutoNoteRef.current = '';
+                    }}
+                    className="absolute right-6 p-1 text-[#0f4a33] hover:text-[#8c3b3b] cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  title="Mở danh sách Sản phẩm & Quy cách đóng gói"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setQuickPickerOpen((o) => !o);
+                  }}
+                  className="absolute right-1.5 p-1 text-[#0f4a33] cursor-pointer"
+                >
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${quickPickerOpen ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
             </div>
             <button type="submit" disabled={quickSaving} className="agri-btn-primary py-2">
               {quickSaving ? 'Loading...' : 'Lưu Ghi nhận nhanh'}
             </button>
           </form>
+
+          {quickPickerOpen &&
+            typeof document !== 'undefined' &&
+            createPortal(
+              <div
+                ref={quickPickerMenuRef}
+                style={quickPickerStyle}
+                className="flex flex-col rounded-xl bg-[#f4fbf7] border-2 border-[#0f4a33] shadow-2xl text-[#07281c] overflow-hidden"
+              >
+                <div className="p-2 bg-[#d7eee4] border-b border-[#186635]/30 space-y-1.5 shrink-0">
+                  <div className="flex items-center justify-between text-[11px] font-extrabold text-[#0f4a33]">
+                    <span className="inline-flex items-center gap-1">
+                      <Package className="w-3.5 h-3.5" /> Chọn Sản phẩm &amp; Quy cách đóng gói
+                    </span>
+                    <span className="text-[10px] font-bold opacity-80">
+                      {Object.keys(quickSelections).length} SP đã chọn
+                    </span>
+                  </div>
+                  <div className="relative flex items-center">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 text-[#0f4a33]/70 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={quickPickerSearch}
+                      onChange={(e) => setQuickPickerSearch(e.target.value)}
+                      placeholder="VD: Tìm tên sản phẩm, SKU hoặc quy cách..."
+                      className="w-full pl-8 pr-7 py-1.5 text-xs rounded-lg bg-white border border-[#186635]/50 text-[#07281c] placeholder:text-[#0b2418]/45 placeholder:italic outline-none focus:border-[#0f4a33]"
+                    />
+                    {quickPickerSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setQuickPickerSearch('')}
+                        className="absolute right-2 text-[#0f4a33] hover:text-[#8c3b3b] cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto overscroll-contain divide-y divide-[#186635]/15">
+                  {filteredQuickPickerProducts.map((p) => {
+                    const isProdSelected = quickSelections[p.sku_code] !== undefined;
+                    const selectedPacks = quickSelections[p.sku_code] || [];
+                    const packOpts = getPackingOptionsForProduct(p, data.pricingRates, data.lookups);
+                    return (
+                      <div key={p.sku_code} className={isProdSelected ? 'bg-[#e6f5ee]' : ''}>
+                        <label className="flex items-start gap-2.5 px-3 py-2 cursor-pointer hover:bg-[#d7eee4]/70 transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={isProdSelected}
+                            onChange={() => toggleQuickProduct(p.sku_code)}
+                            className="mt-0.5 accent-[#0f4a33] w-3.5 h-3.5 cursor-pointer shrink-0"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-bold text-[#07281c] leading-snug">
+                                {p.product_name_vie}
+                              </span>
+                              <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#0f4a33]/10 text-[#0f4a33] shrink-0">
+                                {p.sku_code}
+                              </span>
+                            </div>
+                            <div className="text-[10.5px] text-[#0f4a33]/80 truncate">
+                              {p.product_name_eng}
+                              {p.container_type ? ` · ${p.container_type}` : ''}
+                            </div>
+                          </div>
+                        </label>
+
+                        {isProdSelected && (
+                          <div className="ml-6 mr-2.5 mb-2 pl-2.5 py-1.5 border-l-2 border-[#16977f] bg-white/80 rounded-r-lg space-y-1">
+                            <div className="text-[10px] font-extrabold text-[#0f4a33] uppercase tracking-wide">
+                              Quy cách đóng gói cho {p.product_name_vie}:
+                            </div>
+                            {packOpts.map((pk) => {
+                              const pkChecked = selectedPacks.includes(pk.code);
+                              return (
+                                <label
+                                  key={pk.code}
+                                  className={`flex items-start gap-2 px-2 py-1 rounded-md cursor-pointer text-[11px] transition-colors ${
+                                    pkChecked
+                                      ? 'bg-[#0f4a33] text-[#fff5d6] font-bold'
+                                      : 'hover:bg-[#d7eee4] text-[#07281c]'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={pkChecked}
+                                    onChange={() => toggleQuickPackaging(p.sku_code, pk.code)}
+                                    className="mt-0.5 accent-[#f4d98a] w-3.5 h-3.5 cursor-pointer shrink-0"
+                                  />
+                                  <span className="leading-snug flex-1">
+                                    {pk.name}{' '}
+                                    <span className={`font-mono text-[10px] ${pkChecked ? 'text-[#f4d98a]' : 'opacity-70'}`}>
+                                      ({pk.code})
+                                    </span>
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {filteredQuickPickerProducts.length === 0 && (
+                    <div className="px-3 py-5 text-center text-xs text-[#0f4a33]/70 italic">
+                      Không tìm thấy sản phẩm hoặc quy cách phù hợp.
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-3 py-2 bg-[#d7eee4] border-t border-[#186635]/30 flex items-center justify-between gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuickSelections({});
+                      syncQuickNoteFromSelections({});
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-white border border-[#186635]/40 text-[#8c3b3b] text-[11px] font-bold hover:bg-[#fee2e2] cursor-pointer"
+                  >
+                    Bỏ chọn hết
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQuickPickerOpen(false)}
+                    className="px-3 py-1 rounded-lg bg-[#0f4a33] text-[#f4d98a] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer hover:bg-[#07281c]"
+                  >
+                    <Check className="w-3.5 h-3.5" /> Xong
+                  </button>
+                </div>
+              </div>,
+              document.body
+            )}
         </div>
 
         {/* Dedicated Quick-Log Table with Filter */}
@@ -952,7 +1495,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                           }
                         }
                       }}
-                      placeholder="Gõ tên công ty để tìm khách có sẵn hoặc nhập mới..."
+                      placeholder="VD: Fresh Asia Trading (gõ để tìm KH có sẵn hoặc nhập mới)"
                       className="agri-input"
                       autoComplete="off"
                       required
@@ -999,13 +1542,35 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                     />
                   </div>
 
-                  <div className="sm:col-span-2 lg:col-span-3">
+                  <div className="sm:col-span-1 lg:col-span-2">
                     <label className="block font-bold text-[#fff5d6] mb-1">Địa chỉ</label>
                     <input
                       value={cusAddress}
                       placeholder="VD: 1-2-3 Minato-ku, Tokyo, Japan"
-                      onChange={(e) => setCusAddress(e.target.value)}
+                      onChange={(e) => handleAddressChangeInRfq(e.target.value)}
                       className="agri-input"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-[#fff5d6] mb-1">Quốc gia</label>
+                    <SearchableCombo
+                      value={cusCountry}
+                      onChange={(val) => {
+                        const normalized = normalizeCountryName(val, knownCountries);
+                        setCusCountry(normalized);
+                        if (cusPod && normalized) {
+                          const matchedPod = data.schedules.find(
+                            (s) => deduplicatePortName(s.pod).toLowerCase() === deduplicatePortName(cusPod).toLowerCase()
+                          );
+                          if (matchedPod && !countriesMatch(matchedPod.country, normalized)) {
+                            setCusPod('');
+                          }
+                        }
+                      }}
+                      options={countryOptions}
+                      allowCustom
+                      placeholder="VD: Japan, USA, Germany..."
                     />
                   </div>
 
@@ -1040,13 +1605,19 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="block font-bold text-[#fff5d6] mb-1">Cảng đến (POD)</label>
+                    <label className="block font-bold text-[#fff5d6] mb-1">
+                      Cảng đến (POD){cusCountry ? ` · ${cusCountry}` : ''}
+                    </label>
                     <SearchableCombo
                       value={cusPod}
                       onChange={handleSelectPodInRfq}
                       options={podOptions}
                       allowCustom
-                      placeholder="Chọn hoặc nhập Cảng đến (POD)..."
+                      placeholder={
+                        cusCountry
+                          ? `VD: Chọn hoặc nhập cảng tại ${cusCountry}...`
+                          : 'VD: Tokyo Port, Los Angeles, Hamburg...'
+                      }
                     />
                   </div>
 
@@ -1313,6 +1884,12 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   const prop = data.proposals.find((p) => p.order_id === inq.order_id);
                   const extra = proposalMetaMap[inq.order_id];
                   const cleanRef = cleanQuoteNoForCustomer(extra?.quotation_no || '', inq.order_id);
+                  const sendCount =
+                    typeof extra?.send_count === 'number' && extra.send_count > 0
+                      ? extra.send_count
+                      : inq.sent_mail_link
+                      ? 1
+                      : 0;
                   const readyOrSent = isPricedReadyStatus(inq.inquiry_status) || isSentWaitingCustomerStatus(inq.inquiry_status);
                   const canConfirm = readyOrSent && Boolean(prop);
                   const canDelete = !isContractCreatedStatus(inq.inquiry_status) && !data.orders.some((o) => o.order_id === inq.order_id && orderMetaMap[o.order_id]?.is_locked);
@@ -1323,6 +1900,13 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                         <button type="button" onClick={() => onOpenTimeline(inq.order_id)} className="text-[11px] font-mono hover:underline cursor-pointer">
                           {inq.order_id}
                         </button>
+                        {sendCount > 0 && (
+                          <div className="mt-0.5">
+                            <span className="keep-badge-color inline-block px-1.5 py-0.5 rounded-full bg-[#f4d98a] text-[#07281c] text-[10px] font-extrabold">
+                              Lần {sendCount}
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td className="text-left">
                         <div className="font-bold">{cus?.consignee_name || inq.consignee_id}</div>
@@ -1345,10 +1929,10 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                           {prop && (
                             <button
                               type="button"
-                              onClick={() => onOpenPreview({ kind: 'QUOTATION', orderId: inq.order_id })}
+                              onClick={() => onOpenPreview({ kind: 'QUOTATION', orderId: inq.order_id, initialQuotationTemplate: 'TMP_QUOTATION_01' })}
                               className="keep-btn-style px-2.5 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold cursor-pointer"
                             >
-                              Xem &amp; Gửi Báo giá
+                              {sendCount > 0 ? `Xem & Gửi lại (Lần ${sendCount + 1})` : 'Xem & Gửi Báo giá'}
                             </button>
                           )}
                           {isStoredDocumentPath(inq.sent_mail_link) && (
@@ -1805,7 +2389,15 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                 <input
                   value={cusForm.address}
                   placeholder="VD: 1-2-3 Minato-ku, Tokyo, Japan"
-                  onChange={(e) => setCusForm({ ...cusForm, address: e.target.value })}
+                  onChange={(e) => {
+                    const nextAddr = e.target.value;
+                    const detected = detectCountryFromAddress(nextAddr, knownCountries);
+                    setCusForm({
+                      ...cusForm,
+                      address: nextAddr,
+                      country: detected || cusForm.country,
+                    });
+                  }}
                   className="agri-input"
                 />
               </div>

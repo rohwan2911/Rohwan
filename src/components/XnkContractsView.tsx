@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { FileCheck2, Send, ArrowRightCircle, Ship, FolderOpen, Edit3, Eye, FileDown } from 'lucide-react';
-import type { AppDataState, OrderLogisticsMeta, OrderMaster, SysUser, ViewId } from '../types';
+import type { AppDataState, OrderLogisticsMeta, OrderMaster, ProposalExtraMeta, SysUser, ViewId } from '../types';
 import {
   COMPLETED_ORDER_STATUS,
   fmtNumber,
@@ -24,6 +24,7 @@ interface XnkContractsViewProps {
   quickSearch: string;
   highlightedOrderId?: string;
   orderMetaMap: Record<string, OrderLogisticsMeta>;
+  proposalMetaMap?: Record<string, ProposalExtraMeta>;
   onCreateContractDraft: (orderId: string) => Promise<void>;
   onUpdateContractAndMeta: (order: OrderMaster, metaPatch: Partial<OrderLogisticsMeta>) => Promise<void>;
   onSendContractToSales: (order: OrderMaster) => Promise<void>;
@@ -40,6 +41,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
   quickSearch,
   highlightedOrderId,
   orderMetaMap,
+  proposalMetaMap,
   onCreateContractDraft,
   onUpdateContractAndMeta,
   onSendContractToSales,
@@ -309,7 +311,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                 <th className="text-center">Incoterm / TT</th>
                 <th className="text-left">POL → POD / Booking</th>
                 <th className="text-center">Giá trị HĐ</th>
-                <th className="text-center">Trạng thái 6 Mốc</th>
+                <th className="text-center">Trạng thái</th>
                 <th className="text-center">Thao tác</th>
               </tr>
             </thead>
@@ -317,10 +319,20 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
               {filteredOrders.map((ord) => {
                 const cus = data.consignees.find((c) => c.consignee_id === ord.consignee_id);
                 const meta = orderMetaMap[ord.order_id];
+                const propExtra = proposalMetaMap?.[ord.order_id];
+                const sendCount =
+                  typeof propExtra?.send_count === 'number' && propExtra.send_count > 0
+                    ? propExtra.send_count
+                    : 0;
                 const isLocked = Boolean(meta?.is_locked);
                 const stageNum = getOrderStage6Number(ord, meta);
                 const nextM = getNextContractMilestone(stageNum);
                 const statusTxt = getEffectiveFulfillmentStatus(ord, meta);
+                const displayStatus = !isLocked
+                  ? 'Chờ ký'
+                  : stageNum >= 7
+                  ? COMPLETED_ORDER_STATUS
+                  : statusTxt;
                 return (
                   <tr key={ord.order_id}>
                     <td className="text-center">
@@ -329,9 +341,16 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                       </button>
                       <div className="font-mono font-bold">{ord.contract_no}</div>
                       <div className="text-[10.5px] opacity-80">{ord.contract_date}</div>
-                      <span className={`keep-badge-color mt-1 inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${isLocked ? 'bg-[#0f4a33] text-[#fff5d6]' : 'bg-[#f4d98a] text-[#07281c]'}`}>
-                        {isLocked ? `Đã ký (${meta?.signed_date || 'OK'})` : meta?.sent_to_sales ? 'Đã gửi Sales ký' : 'Bản nháp XNK'}
-                      </span>
+                      <div className="mt-1 flex items-center justify-center flex-wrap gap-1">
+                        <span className={`keep-badge-color inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${isLocked ? 'bg-[#0f4a33] text-[#fff5d6]' : 'bg-[#f4d98a] text-[#07281c]'}`}>
+                          {isLocked ? `Đã ký (${meta?.signed_date || 'OK'})` : meta?.sent_to_sales ? 'Đã gửi Sales ký' : 'Bản nháp XNK'}
+                        </span>
+                        {sendCount > 0 && (
+                          <span className="keep-badge-color inline-block px-1.5 py-0.5 rounded-full bg-[#16977f] text-white text-[10px] font-extrabold">
+                            Lần {sendCount}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="text-left">
                       <div className="font-bold">{cus?.consignee_name || ord.consignee_id}</div>
@@ -352,7 +371,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                     <td className="text-center font-mono font-extrabold">{fmtUSD(ord.contract_value)}</td>
                     <td className="text-center">
                       <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
-                        {stageNum >= 7 ? COMPLETED_ORDER_STATUS : statusTxt}
+                        {displayStatus}
                       </span>
                     </td>
                     <td className="text-center space-y-1">
@@ -374,7 +393,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                           </button>
                         )}
                         <button type="button" onClick={() => openEditContractModal(ord)} className="keep-btn-style px-2 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer">
-                          <Edit3 className="w-3 h-3" /> Sửa / Booking
+                          <Edit3 className="w-3 h-3" /> Sửa
                         </button>
                       </div>
                       <div className="flex justify-center flex-wrap gap-1">
@@ -390,7 +409,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                             }
                             className="keep-btn-style px-2.5 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer"
                           >
-                            <Send className="w-3 h-3" /> Gửi Sales đưa ký
+                            <Send className="w-3 h-3" /> Gửi sale
                           </button>
                         )}
                         {isLocked && nextM && (

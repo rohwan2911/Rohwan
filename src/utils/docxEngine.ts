@@ -62,19 +62,59 @@ export function stripPlaceholderBraces(raw: string | null | undefined): string {
     .trim();
 }
 
+export function normalizePlaceholderKey(raw: string | null | undefined): string {
+  return stripPlaceholderBraces(raw)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'D')
+    .replace(/[^A-Za-z0-9_]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+}
+
+export function normalizePlaceholderTag(raw: string | null | undefined): string {
+  const key = normalizePlaceholderKey(raw);
+  return key ? `{{${key}}}` : '';
+}
+
 export function parsePlaceholderKeyList(raw: string | null | undefined): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   String(raw || '')
     .split(/[,;\n]+/)
     .forEach((part) => {
-      const key = stripPlaceholderBraces(part);
-      if (!key) return;
-      const upper = key.toUpperCase();
-      if (seen.has(upper)) return;
-      seen.add(upper);
+      const key = normalizePlaceholderKey(part);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
       out.push(key);
     });
+  return out;
+}
+
+export function formatPlaceholderListWrapped(raw: string | string[] | null | undefined): string {
+  const list = Array.isArray(raw)
+    ? parsePlaceholderKeyList(raw.join(', '))
+    : parsePlaceholderKeyList(raw);
+  return list.map((k) => `{{${k}}}`).join(', ');
+}
+
+export function extractWrappedPlaceholderKeys(raw: string | null | undefined): string[] {
+  const str = String(raw || '');
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const braceRegex = /\{\{\s*([^{}]+?)\s*\}\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = braceRegex.exec(str)) !== null) {
+    const key = normalizePlaceholderKey(m[1]);
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      out.push(key);
+    }
+  }
+  if (out.length === 0) {
+    return parsePlaceholderKeyList(str);
+  }
   return out;
 }
 
@@ -185,6 +225,12 @@ function classifyProductBucket(prod?: ProductCatalog, fallbackName?: string): Pr
   return 'OTHER';
 }
 
+export function isInternalCostingTemplate(tpl?: TemplateManager | null): boolean {
+  if (!tpl) return false;
+  const txt = `${tpl.template_id} ${tpl.document_name} ${tpl.google_doc_file_id}`.toLowerCase();
+  return /internal_costing|costing_sheet|tính giá nội bộ|noi_bo/.test(txt);
+}
+
 export function selectMatchingTemplates(
   templates: TemplateManager[],
   kind: DocumentKind,
@@ -216,11 +262,27 @@ export function selectMatchingTemplates(
     if (kind === 'BL') {
       return /\b(bl|b\/l|bill)\b|tmp_bl|vận đơn/.test(text);
     }
+    if (kind === 'QUOTATION') {
+      if (isInternalCostingTemplate(t)) return false;
+      return kws.some((k) => text.includes(k));
+    }
     return kws.some((k) => text.includes(k));
   });
 
   const candidates = kindFiltered;
   if (candidates.length === 0) return [];
+
+  if (kind === 'QUOTATION') {
+    // Streamlined two-template architecture: customer-facing quotation always resolves to TMP_QUOTATION_01
+    const exactCommercial = candidates.find((t) =>
+      /tmp_quotation_01/i.test(`${t.template_id} ${t.google_doc_file_id}`)
+    );
+    const nonComparison = candidates.find(
+      (t) => !/tuvan|comp|so_sanh|comparison|mixed/i.test(`${t.template_id} ${t.document_name} ${t.google_doc_file_id}`)
+    );
+    const chosen = exactCommercial || nonComparison || candidates[0];
+    return chosen ? [chosen] : [];
+  }
 
   const buckets = new Set<ProductBucket>();
   items.forEach((it) => {

@@ -27,7 +27,7 @@ function esc(v: unknown): string {
 export function buildQuotationEmailSubject(
   inq: InquiryQuotation,
   _prop: PricingProposal | undefined,
-  _extraMeta: ProposalExtraMeta | undefined,
+  extraMeta: ProposalExtraMeta | undefined,
   products: ProductCatalog[]
 ): string {
   const items = parseOrderItems(inq, products);
@@ -35,9 +35,10 @@ export function buildQuotationEmailSubject(
     items
       .map((i) => stripInternalCodesForCustomer(i.name_eng || i.name))
       .filter(Boolean)
-      .slice(0, 2)
+      .slice(0, 3)
       .join(', ') || 'Vietnamese Agricultural Products';
-  return `[GREEN AGRI-EXPORTS] Official Quotation – ${itemNames}`;
+  const cleanRef = cleanQuoteNoForCustomer(extraMeta?.quotation_no || '', inq.order_id);
+  return `[GREEN AGRI-EXPORTS] Official Quotation – ${itemNames} (${cleanRef})`;
 }
 
 export function buildQuotationEmailHtml(
@@ -51,7 +52,9 @@ export function buildQuotationEmailHtml(
   overrideSellingPrice?: number
 ): string {
   const items = parseOrderItems(inq, products);
-  const productLines = items.map((i) => `${i.name_eng || i.name} (${fmtNumber(i.weight)} KG)`).join(', ');
+  const productLines = items
+    .map((i) => `${stripInternalCodesForCustomer(i.name_eng || i.name) || i.name_eng || i.name} (${fmtNumber(i.weight)} KG)`)
+    .join(', ');
   const incoterm = overrideIncoterm || prop?.recommended_incoterm || inq.desired_incoterm || 'CIF';
   const totalPrice =
     overrideSellingPrice && overrideSellingPrice > 0 ? overrideSellingPrice : toNum(prop?.final_selling_price);
@@ -61,7 +64,7 @@ export function buildQuotationEmailHtml(
 Thank you for your inquiry with <strong>GREEN AGRI-EXPORTS CO., LTD</strong>.<br/>
 Please find below our quotation summary (Ref: <strong>${esc(cleanRef)}</strong>):<br/><br/>
 • <strong>Products:</strong> ${esc(productLines)}<br/>
-• <strong>Delivery Term:</strong> ${esc(incoterm)} ${esc(sch?.pod || 'Destination Port')} (Incoterms 2020)<br/>
+• <strong>Delivery Term:</strong> ${esc(incoterm)} ${esc(sch?.pod || inq.pod || 'Destination Port')} (Incoterms 2020)<br/>
 • <strong>Total Value:</strong> <strong>$${formatCurrency(totalPrice)} USD</strong><br/>
 • <strong>Payment Terms:</strong> ${esc(inq.proposed_payment_term || cus?.default_payment_term || 'T/T 30/70')}<br/><br/>
 Detailed quotation breakdown is attached in our official quotation file. Please feel free to reply should you wish to confirm the order or discuss alternative Incoterms.<br/><br/>

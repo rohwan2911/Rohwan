@@ -16,6 +16,7 @@ import type {
 } from '../types';
 import {
   classifyCustomerByCount,
+  cleanQuoteNoForCustomer,
   COMPLETED_ORDER_STATUS,
   isQuickCaptureStatus,
   normalizePlainText,
@@ -27,7 +28,13 @@ import {
   WORKFLOW_6_STAGES,
   WORKFLOW_STATUS,
 } from '../utils/calculations';
-import type { DocumentKind } from '../utils/docxEngine';
+import {
+  extractWrappedPlaceholderKeys,
+  formatPlaceholderListWrapped,
+  getVietnamesePlaceholderLabel,
+  normalizePlaceholderKey,
+  type DocumentKind,
+} from '../utils/docxEngine';
 
 const ORDER_META_STORAGE_KEY = 'NSX_ORDER_LOGISTICS_META_V1';
 const PROPOSAL_META_STORAGE_KEY = 'NSX_PROPOSAL_EXTRA_META_V1';
@@ -122,10 +129,50 @@ export function readProposalExtraMetaMap(): Record<string, ProposalExtraMeta> {
 
 export function saveProposalExtraMeta(orderId: string, meta: ProposalExtraMeta) {
   const map = readProposalExtraMetaMap();
-  map[orderId] = meta;
+  const prev = map[orderId];
+  const immutableQuoteNo = cleanQuoteNoForCustomer(prev?.quotation_no || meta.quotation_no || '', orderId);
+  map[orderId] = {
+    ...prev,
+    ...meta,
+    order_id: orderId,
+    quotation_no: immutableQuoteNo,
+    send_count: meta.send_count !== undefined ? meta.send_count : prev?.send_count,
+    last_sent_at: meta.last_sent_at !== undefined ? meta.last_sent_at : prev?.last_sent_at,
+  };
   try {
     localStorage.setItem(PROPOSAL_META_STORAGE_KEY, JSON.stringify(map));
   } catch {}
+}
+
+export function incrementQuotationSendCount(orderId: string, hasPriorSentLink = false): number {
+  const map = readProposalExtraMetaMap();
+  const prev = map[orderId];
+  const baseCount =
+    typeof prev?.send_count === 'number' && prev.send_count > 0
+      ? prev.send_count
+      : hasPriorSentLink
+      ? 1
+      : 0;
+  const nextCount = baseCount + 1;
+  const immutableQuoteNo = cleanQuoteNoForCustomer(prev?.quotation_no || '', orderId);
+  map[orderId] = {
+    ...(prev || {}),
+    order_id: orderId,
+    quotation_no: immutableQuoteNo,
+    floor_price_usd: prev?.floor_price_usd || 0,
+    min_margin_pct: prev?.min_margin_pct || 0,
+    margin_pct: prev?.margin_pct || 0,
+    exw_price: prev?.exw_price || 0,
+    fob_price: prev?.fob_price || 0,
+    cfr_price: prev?.cfr_price || 0,
+    cif_price: prev?.cif_price || 0,
+    send_count: nextCount,
+    last_sent_at: new Date().toISOString(),
+  };
+  try {
+    localStorage.setItem(PROPOSAL_META_STORAGE_KEY, JSON.stringify(map));
+  } catch {}
+  return nextCount;
 }
 
 function assertConfigured() {
@@ -1150,20 +1197,59 @@ export async function deletePricingRateDirect(feeCode: string): Promise<void> {
   if (error) throw new Error(`Lỗi xóa phụ phí: ${error.message}`);
 }
 
+function inferScopeFromTemplate(row: TemplateManager): string {
+  const txt = `${row.template_id} ${row.document_name}`.toUpperCase();
+  if (txt.includes('QUOT') || txt.includes('BÁO GIÁ')) return 'QUOTATION';
+  if (txt.includes('CONTRACT') || txt.includes('HỢP ĐỒNG') || txt.includes('SC')) return 'CONTRACT';
+  if (txt.includes('INVOICE') || txt.includes('CI')) return 'INVOICE';
+  if (txt.includes('PACKING') || txt.includes('PL')) return 'PACKING_LIST';
+  if (txt.includes('CO') || txt.includes('ORIGIN')) return 'CO';
+  if (txt.includes('BL') || txt.includes('BILL')) return 'BL';
+  return 'ALL';
+}
+
 export async function upsertTemplateDirect(row: TemplateManager, isEdit: boolean): Promise<void> {
   assertConfigured();
+  const wrappedPlaceholders = formatPlaceholderListWrapped(row.supported_placeholders);
   const clean: TemplateManager = {
-    template_id: row.template_id,
-    document_name: row.document_name,
-    google_doc_file_id: row.google_doc_file_id,
-    target_department: row.target_department,
-    status: row.status,
-    supported_placeholders: row.supported_placeholders,
+    template_id: row.template_id.trim(),
+    document_name: row.document_name.trim(),
+    google_doc_file_id: row.google_doc_file_id.trim(),
+    target_department: row.target_department.trim(),
+    status: row.status.trim() || 'Active',
+    supported_placeholders: wrappedPlaceholders,
   };
   const { error } = isEdit
     ? await supabase.from('template_manager').update(clean).eq('template_id', clean.template_id)
     : await supabase.from('template_manager').upsert(clean, { onConflict: 'template_id' });
   if (error) throw new Error(`Lỗi lưu biểu mẫu: ${error.message}`);
+
+  // Auto-sync any missing {{PLACEHOLDER}} keys to public.template_placeholders
+  const extractedKeys = extractWrappedPlaceholderKeys(wrappedPlaceholders);
+  if (extractedKeys.length > 0) {
+    try {
+      const existing = await fetchTemplatePlaceholdersSafe();
+      const existingSet = new Set(
+        existing.map((p) => normalizePlaceholderKey(p.placeholder_key)).filter(Boolean)
+      );
+      const scope = inferScopeFromTemplate(clean);
+      const missingRows: TemplatePlaceholder[] = extractedKeys
+        .filter((k) => !existingSet.has(k))
+        .map((k) => ({
+          placeholder_key: k,
+          scope,
+          source_table: 'computed',
+          source_column: k.toLowerCase(),
+          description_vie: getVietnamesePlaceholderLabel(k, existing),
+          is_auto_created: true,
+        }));
+      if (missingRows.length > 0) {
+        await upsertTemplatePlaceholders(missingRows);
+      }
+    } catch {
+      // Non-fatal: template itself is already saved
+    }
+  }
 }
 
 export async function upsertSysUserDirect(row: SysUser, isEdit: boolean): Promise<void> {

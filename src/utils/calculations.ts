@@ -323,19 +323,25 @@ export function getNextContractMilestone(stageNum: number): { nextStatus: string
 
 export function stripInternalCodesForCustomer(text: string): string {
   return String(text || '')
+    .replace(/\bINTERNAL_COSTING_SHEET\b/gi, '')
     .replace(/\bTMP_[A-Z0-9_]+\b/gi, '')
-    .replace(/\b(?:QT-)?ORD-\d{6,}(?:-\d+)?\b/gi, '')
+    .replace(/\b(?:QT-)?ORD-\d{4,}(?:-\d+)?\b/gi, '')
     .replace(/[-_](?:V|R)\d+\b/gi, '')
+    .replace(/\b(?:Comparison|Mixed)\b/gi, '')
+    .replace(/\(\s*\)/g, '')
+    .replace(/\s*[-–—·]\s*(?=[-–—·]|$)/g, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
 
 export function cleanQuoteNoForCustomer(quoteNo: string, orderId?: string): string {
   const s = String(quoteNo || '').trim();
-  if (!s) return orderId ? `QT-${String(orderId).replace(/^ORD-/i, '')}` : 'QUOTATION';
-  return s
+  const base = s || (orderId ? `QT-${String(orderId).trim()}` : 'QUOTATION');
+  return base
     .replace(/^QT-ORD-/i, 'QT-')
-    .replace(/-(?:V|R)\d+$/i, '');
+    .replace(/^ORD-/i, 'QT-')
+    .replace(/[-_](?:V|R)\d+$/i, '')
+    .trim();
 }
 
 export function classifyCustomerByCount(count: number): string {
@@ -1300,20 +1306,167 @@ export function computeFloorPriceScaled(
 }
 
 // ==========================================
+// COUNTRY AUTO-DETECTION & NORMALIZATION
+// ==========================================
+const COUNTRY_ALIAS_GROUPS: Array<{ canonical: string; aliases: string[]; vieDiacriticAliases?: string[] }> = [
+  { canonical: 'Japan', aliases: ['japan', 'jp', 'jpn', 'nhat ban', 'nhat'] },
+  { canonical: 'USA', aliases: ['usa', 'us', 'u s a', 'u s', 'united states', 'united states of america', 'america', 'hoa ky'], vieDiacriticAliases: ['mỹ', 'nước mỹ'] },
+  { canonical: 'Germany', aliases: ['germany', 'de', 'deu', 'deutschland', 'duc'] },
+  { canonical: 'South Korea', aliases: ['south korea', 'korea', 'republic of korea', 'kr', 'kor', 'han quoc'] },
+  { canonical: 'China', aliases: ['china', 'cn', 'chn', 'prc', 'peoples republic of china', 'trung quoc'] },
+  { canonical: 'United Kingdom', aliases: ['united kingdom', 'uk', 'u k', 'great britain', 'britain', 'england', 'gb', 'gbr', 'vuong quoc anh'], vieDiacriticAliases: ['anh', 'nước anh'] },
+  { canonical: 'Netherlands', aliases: ['netherlands', 'the netherlands', 'holland', 'nl', 'nld', 'ha lan'] },
+  { canonical: 'France', aliases: ['france', 'fr', 'fra', 'phap'] },
+  { canonical: 'Australia', aliases: ['australia', 'au', 'aus'], vieDiacriticAliases: ['úc', 'nước úc'] },
+  { canonical: 'Singapore', aliases: ['singapore', 'sg', 'sgp'] },
+  { canonical: 'Thailand', aliases: ['thailand', 'th', 'tha', 'thai lan'] },
+  { canonical: 'Malaysia', aliases: ['malaysia', 'mys'] },
+  { canonical: 'Indonesia', aliases: ['indonesia', 'idn'] },
+  { canonical: 'Philippines', aliases: ['philippines', 'the philippines', 'phl'] },
+  { canonical: 'India', aliases: ['india', 'ind', 'an do'] },
+  { canonical: 'UAE', aliases: ['uae', 'u a e', 'united arab emirates', 'dubai', 'abu dhabi'] },
+  { canonical: 'Canada', aliases: ['canada', 'can'] },
+  { canonical: 'Belgium', aliases: ['belgium', 'bel'], vieDiacriticAliases: ['bỉ', 'nước bỉ'] },
+  { canonical: 'Italy', aliases: ['italy', 'ita', 'italia'], vieDiacriticAliases: ['ý', 'nước ý'] },
+  { canonical: 'Spain', aliases: ['spain', 'esp', 'espana', 'tay ban nha'] },
+  { canonical: 'Taiwan', aliases: ['taiwan', 'twn', 'dai loan'] },
+  { canonical: 'Hong Kong', aliases: ['hong kong', 'hongkong', 'hkg', 'hong kong sar'] },
+  { canonical: 'New Zealand', aliases: ['new zealand', 'nzl'] },
+  { canonical: 'Russia', aliases: ['russia', 'russian federation', 'rus', 'lien bang nga'], vieDiacriticAliases: ['nga'] },
+  { canonical: 'Vietnam', aliases: ['vietnam', 'viet nam', 'vn', 'vnm'] },
+  { canonical: 'Saudi Arabia', aliases: ['saudi arabia', 'ksa'] },
+  { canonical: 'Switzerland', aliases: ['switzerland', 'thuy si'] },
+  { canonical: 'Poland', aliases: ['poland', 'ba lan'] },
+  { canonical: 'Sweden', aliases: ['sweden', 'thuy dien'] },
+  { canonical: 'Denmark', aliases: ['denmark', 'dan mach'] },
+  { canonical: 'Norway', aliases: ['norway', 'na uy'] },
+  { canonical: 'Brazil', aliases: ['brazil', 'brasil'] },
+  { canonical: 'Mexico', aliases: ['mexico'] },
+];
+
+function stripCountryToken(text: string): string {
+  return String(text || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function findCountryGroup(raw: string) {
+  const lowerTrim = String(raw || '').trim().toLowerCase().replace(/[.,;:!?()]+$/g, '').trim();
+  const asciiKey = stripCountryToken(raw);
+  if (!asciiKey) return undefined;
+  return COUNTRY_ALIAS_GROUPS.find(
+    (g) =>
+      stripCountryToken(g.canonical) === asciiKey ||
+      g.aliases.includes(asciiKey) ||
+      (g.vieDiacriticAliases && g.vieDiacriticAliases.includes(lowerTrim))
+  );
+}
+
+export function normalizeCountryName(raw?: string | null, knownCountries: string[] = []): string {
+  const clean = String(raw || '').trim();
+  if (!clean) return '';
+  const group = findCountryGroup(clean);
+  if (group) {
+    const matchedKnown = knownCountries.find((kc) => findCountryGroup(kc)?.canonical === group.canonical);
+    return matchedKnown ? matchedKnown.trim() : group.canonical;
+  }
+  const asciiKey = stripCountryToken(clean);
+  const directKnown = knownCountries.find((kc) => stripCountryToken(kc) === asciiKey);
+  return directKnown ? directKnown.trim() : clean;
+}
+
+export function countriesMatch(a?: string | null, b?: string | null): boolean {
+  const sa = String(a || '').trim();
+  const sb = String(b || '').trim();
+  if (!sa || !sb) return false;
+  const ga = findCountryGroup(sa);
+  const gb = findCountryGroup(sb);
+  if (ga && gb) return ga.canonical === gb.canonical;
+  return stripCountryToken(sa) === stripCountryToken(sb);
+}
+
+export function detectCountryFromAddress(address?: string | null, knownCountries: string[] = []): string {
+  const raw = String(address || '').trim();
+  if (!raw) return '';
+
+  const segments = raw
+    .split(/[,;\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const candidates: string[] = [];
+  if (segments.length > 0) {
+    const lastSeg = segments[segments.length - 1];
+    candidates.push(lastSeg);
+    // Strip trailing/leading postal codes from last segment (e.g. "Japan 105-0011" or "10001 USA")
+    const withoutDigits = lastSeg.replace(/\b\d[\dA-Z-]*\b/gi, ' ').replace(/\s+/g, ' ').trim();
+    if (withoutDigits && withoutDigits !== lastSeg) candidates.push(withoutDigits);
+    const segWords = withoutDigits.split(/\s+/).filter(Boolean);
+    for (let n = Math.min(4, segWords.length); n >= 1; n--) {
+      candidates.push(segWords.slice(-n).join(' '));
+    }
+    if (segments.length >= 2) {
+      candidates.push(segments[segments.length - 2]);
+    }
+  }
+
+  for (const cand of candidates) {
+    const group = findCountryGroup(cand);
+    if (group) {
+      const matchedKnown = knownCountries.find((kc) => findCountryGroup(kc)?.canonical === group.canonical);
+      return matchedKnown ? matchedKnown.trim() : group.canonical;
+    }
+    const candKey = stripCountryToken(cand);
+    if (candKey.length >= 3) {
+      const knownMatch = knownCountries.find((kc) => stripCountryToken(kc) === candKey);
+      if (knownMatch) return knownMatch.trim();
+    }
+  }
+
+  return '';
+}
+
+// ==========================================
 // VIETNAMESE-TO-ENGLISH INTERNATIONAL TRADE & LOGISTICS TRANSLATION
 // ==========================================
 const EXACT_LOGISTICS_GLOSSARY: Array<{ keys: string[]; eng: string }> = [
+  // Incoterms 2020 Terms & Descriptions
+  { keys: ['giao tai xuong', 'tai xuong nguoi ban', 'exw'], eng: 'Ex Works (EXW) - Seller\'s Premises' },
+  { keys: ['giao cho nguoi chuyen cho', 'giao nguoi chuyen cho dau tien', 'fca'], eng: 'Free Carrier (FCA) - Named Place' },
+  { keys: ['giao doc man tau', 'doc man tau cang di', 'fas'], eng: 'Free Alongside Ship (FAS) - Port of Shipment' },
+  { keys: ['giao len tau', 'xep len tau cang di', 'giao hang len tau', 'fob'], eng: 'Free On Board (FOB) - Port of Shipment' },
+  { keys: ['tien hang va cuoc phi', 'cfr'], eng: 'Cost and Freight (CFR) - Named Port of Destination' },
+  { keys: ['tien hang bao hiem va cuoc phi', 'cif'], eng: 'Cost, Insurance and Freight (CIF) - Named Port of Destination' },
+  { keys: ['cuoc phi tra toi', 'cpt'], eng: 'Carriage Paid To (CPT) - Named Place of Destination' },
+  { keys: ['cuoc phi va bao hiem tra toi', 'cip'], eng: 'Carriage and Insurance Paid To (CIP) - Named Place of Destination' },
+  { keys: ['giao tai noi den', 'tai noi den chua do hang', 'dap'], eng: 'Delivered at Place (DAP) - Unloaded by Buyer' },
+  { keys: ['giao tai dia diem da do hang', 'tai noi den da do hang', 'dpu'], eng: 'Delivered at Place Unloaded (DPU)' },
+  { keys: ['giao da nop thue', 'tai noi den da thong quan nk', 'tai noi den da thong quan nhap khau', 'ddp'], eng: 'Delivered Duty Paid (DDP)' },
+  { keys: ['cuoc phi tra truoc', 'nguoi ban tra cuoc'], eng: 'Freight Prepaid' },
+  { keys: ['cuoc phi tra sau', 'nguoi mua tra cuoc'], eng: 'Freight Collect' },
+  { keys: ['nguoi ban tra'], eng: 'Paid by Seller' },
+  { keys: ['nguoi mua tra'], eng: 'Paid by Buyer' },
+
   // Marine Insurance & Extended Clauses
   { keys: ['dieu khoan mo rong rui ro hap hoi nong am', 'rui ro hap hoi nong am', 'dieu khoan mo rong hap hoi nong am', 'hap hoi nong am'], eng: 'incl. Sweating & Heating Clause' },
   { keys: ['bao hiem hang dong lanh', 'bao hiem hang dong lanh frozen food clauses a', 'bao hiem hang lanh', 'bao hiem thuc pham dong lanh'], eng: 'Institute Frozen Food Clauses (A)' },
-  { keys: ['bao hiem moi rui ro', 'bao hiem moi rui ro icc a', 'bao hiem moi rui ro icc a all risks', 'bao hiem dieu kien a'], eng: 'Institute Cargo Clauses (A) - All Risks' },
-  { keys: ['bao hiem dieu kien b', 'bao hiem dieu kien b icc b', 'bao hiem dieu kien b icc b trung binh'], eng: 'Institute Cargo Clauses (B)' },
-  { keys: ['bao hiem dieu kien c', 'bao hiem dieu kien c icc c', 'bao hiem dieu kien c icc c toi thieu'], eng: 'Institute Cargo Clauses (C)' },
-  { keys: ['dieu khoan mo rong chien tranh dinh cong', 'chien tranh dinh cong', 'rui ro chien tranh va dinh cong'], eng: 'incl. War & Strikes Clauses' },
-  { keys: ['dieu khoan mo rong trom cap nuoc ngot', 'trom cap nuoc ngot', 'trom cap va hu hai nuoc ngot'], eng: 'incl. TPND & Fresh Water Damage Clauses' },
-  { keys: ['khong mua bao hiem', 'khong mua bao hiem nguoi mua tu chiu'], eng: 'Insurance excluded (to be covered by Buyer)' },
-  { keys: ['bao hiem hong may lanh', 'rui ro hu hong thiet bi lanh'], eng: 'incl. Refrigeration Breakdown Clause (24 Hours)' },
-  { keys: ['bao hiem hang hoa duong bien'], eng: 'Marine Cargo Insurance' },
+  { keys: ['bao hiem moi rui ro', 'bao hiem moi rui ro icc a', 'bao hiem moi rui ro icc a all risks', 'bao hiem dieu kien a', 'bao hiem icc a'], eng: 'Institute Cargo Clauses (A) - All Risks' },
+  { keys: ['bao hiem dieu kien b', 'bao hiem dieu kien b icc b', 'bao hiem dieu kien b icc b trung binh', 'bao hiem icc b'], eng: 'Institute Cargo Clauses (B)' },
+  { keys: ['bao hiem dieu kien c', 'bao hiem dieu kien c icc c', 'bao hiem dieu kien c icc c toi thieu', 'bao hiem icc c'], eng: 'Institute Cargo Clauses (C)' },
+  { keys: ['dieu khoan mo rong chien tranh dinh cong', 'chien tranh dinh cong', 'rui ro chien tranh va dinh cong', 'bao hiem chien tranh va dinh cong'], eng: 'incl. War & Strikes Clauses' },
+  { keys: ['dieu khoan mo rong trom cap nuoc ngot', 'trom cap nuoc ngot', 'trom cap va hu hai nuoc ngot', 'trom cap mat cap va khong giao hang'], eng: 'incl. TPND & Fresh Water Damage Clauses' },
+  { keys: ['khong mua bao hiem', 'khong mua bao hiem nguoi mua tu chiu', 'nguoi mua tu mua bao hiem'], eng: 'Insurance excluded (to be covered by Buyer)' },
+  { keys: ['bao hiem hong may lanh', 'rui ro hu hong thiet bi lanh', 'hu hong may lanh'], eng: 'incl. Refrigeration Breakdown Clause (24 Hours)' },
+  { keys: ['bao hiem hang hoa duong bien', 'bao hiem hang hai'], eng: 'Marine Cargo Insurance' },
+  { keys: ['bao hiem 110 gia tri cif', '110 gia tri hoa don'], eng: '110% of CIF Invoice Value' },
+  { keys: ['dieu khoan mo rong gay vo ro ri', 'gay vo va ro ri'], eng: 'incl. Breakage & Leakage Clause' },
+  { keys: ['don bao hiem', 'chung thu bao hiem'], eng: 'Marine Insurance Policy / Certificate' },
 
   // Local Charges & Port / Shipping Fees
   { keys: ['phi xep do tai cang', 'phi xep do container tai cang', 'phi thc'], eng: 'Terminal Handling Charge (THC)' },
@@ -1410,17 +1563,40 @@ const PHRASE_REPLACEMENTS: Array<[RegExp, string]> = [
   [/hấp hơi[,\s]+nóng ẩm/gi, 'Sweating & Heating'],
   [/chiến tranh\s*(?:&|và)\s*đình công/gi, 'War & Strikes Clauses'],
   [/trộm cắp\s*(?:&|và)\s*nước ngọt/gi, 'TPND & Fresh Water Damage Clauses'],
+  [/gãy vỡ\s*(?:&|và)\s*rò rỉ/gi, 'Breakage & Leakage Clause'],
+  [/hư hỏng thiết bị lạnh|hỏng máy lạnh/gi, 'Refrigeration Breakdown Clause (24 Hours)'],
   [/bảo hiểm hàng đông lạnh/gi, 'Institute Frozen Food Clauses (A)'],
   [/bảo hiểm mọi rủi ro/gi, 'Institute Cargo Clauses (A) - All Risks'],
   [/bảo hiểm điều kiện\s*a/gi, 'Institute Cargo Clauses (A)'],
   [/bảo hiểm điều kiện\s*b/gi, 'Institute Cargo Clauses (B)'],
   [/bảo hiểm điều kiện\s*c/gi, 'Institute Cargo Clauses (C)'],
+  [/bảo hiểm hàng hóa đường biển/gi, 'Marine Cargo Insurance'],
   [/không mua bảo hiểm/gi, 'Insurance Excluded'],
-  [/người mua tự chịu/gi, 'Covered by Buyer'],
+  [/người mua tự chịu|người mua tự mua/gi, 'Covered by Buyer'],
+  [/người bán mua|người bán chịu/gi, 'Covered by Seller'],
+  [/người bán trả/gi, 'Paid by Seller'],
+  [/người mua trả/gi, 'Paid by Buyer'],
+  [/giao tại xưởng/gi, 'Ex Works (EXW)'],
+  [/giao cho người chuyên chở/gi, 'Free Carrier (FCA)'],
+  [/dọc mạn tàu cảng đi|giao dọc mạn tàu/gi, 'Free Alongside Ship (FAS)'],
+  [/xếp lên tàu cảng đi|giao lên tàu/gi, 'Free On Board (FOB)'],
+  [/cước phí trả trước/gi, 'Freight Prepaid'],
+  [/cước phí trả sau/gi, 'Freight Collect'],
+  [/chuyển giao rủi ro/gi, 'Transfer of Risk'],
+  [/tại nơi đến\s*\(chưa dỡ hàng\)/gi, 'at Named Place of Destination (Unloaded by Buyer)'],
+  [/tại nơi đến\s*\(đã dỡ hàng\)/gi, 'at Named Place of Destination (Unloaded)'],
+  [/tại nơi đến\s*\(đã thông quan\s*(?:nk|nhập khẩu)\)/gi, 'at Named Place of Destination (Duty Paid)'],
+  [/tại xưởng người bán/gi, 'at Seller\'s Premises'],
+  [/tại nơi đến/gi, 'at Named Place of Destination'],
+  [/cảng xếp hàng|cảng đi/gi, 'Port of Loading'],
+  [/cảng dỡ hàng|cảng đến/gi, 'Port of Destination'],
+  [/thông quan xuất khẩu/gi, 'Export Customs Clearance'],
+  [/thông quan nhập khẩu/gi, 'Import Customs Clearance'],
   [/kiểm dịch thực vật/gi, 'Phytosanitary Inspection'],
   [/khai báo hải quan/gi, 'Customs Declaration'],
   [/thủ tục hải quan/gi, 'Customs Clearance'],
   [/chứng nhận xuất xứ/gi, 'Certificate of Origin (C/O)'],
+  [/giấy chứng nhận/gi, 'Certificate'],
   [/hun trùng/gi, 'Fumigation'],
   [/chiếu xạ/gi, 'Irradiation Treatment'],
   [/vận tải nội địa/gi, 'Domestic Inland Trucking'],
@@ -1489,10 +1665,33 @@ const PHRASE_REPLACEMENTS: Array<[RegExp, string]> = [
   [/tươi/gi, 'Fresh'],
   [/xuất khẩu/gi, 'Export'],
   [/nhập khẩu/gi, 'Import'],
+  [/đường biển/gi, 'Sea Freight'],
+  [/đường bộ/gi, 'Inland Trucking'],
+  [/đường hàng không/gi, 'Air Freight'],
+  [/hàng lẻ/gi, 'LCL Cargo'],
+  [/nguyên container/gi, 'FCL Cargo'],
+  [/hàng hóa/gi, 'Cargo'],
+  [/đóng gói/gi, 'Packaging'],
+  [/vận chuyển/gi, 'Transportation'],
+  [/giao hàng/gi, 'Delivery'],
+  [/thanh toán/gi, 'Payment'],
+  [/đặt cọc/gi, 'Deposit'],
+  [/chứng từ/gi, 'Documents'],
+  [/kiểm tra/gi, 'Inspection'],
+  [/xử lý/gi, 'Handling'],
+  [/bắt buộc/gi, 'Mandatory'],
+  [/tùy chọn/gi, 'Optional'],
+  [/không bắt buộc/gi, 'Not Required'],
+  [/đã bao gồm/gi, 'Included'],
+  [/chưa bao gồm/gi, 'Excluded'],
+  [/bao gồm/gi, 'Including'],
   [/phụ phí/gi, 'Surcharge'],
   [/phí /gi, 'Fee '],
   [/cước biển/gi, 'Ocean Freight'],
   [/bảo hiểm/gi, 'Insurance'],
+  [/rủi ro/gi, 'Risk'],
+  [/điều khoản/gi, 'Clause'],
+  [/mở rộng/gi, 'Extended'],
   [/nông sản khô/gi, 'Dried Agricultural Products'],
   [/nông sản tươi/gi, 'Fresh Agricultural Produce'],
   [/trái cây tươi/gi, 'Fresh Tropical Fruits'],
@@ -1504,7 +1703,17 @@ const PHRASE_REPLACEMENTS: Array<[RegExp, string]> = [
   [/lô hàng/gi, 'Shipment'],
   [/tiêu chuẩn/gi, 'Standard'],
   [/tối thiểu/gi, 'Minimum'],
+  [/tối đa/gi, 'Maximum'],
   [/trung bình/gi, 'Medium'],
+  [/tại/gi, 'at'],
+  [/của/gi, 'of'],
+  [/cho/gi, 'for'],
+  [/từ/gi, 'from'],
+  [/đến|tới/gi, 'to'],
+  [/theo/gi, 'per'],
+  [/với/gi, 'with'],
+  [/trong/gi, 'in'],
+  [/hoặc/gi, 'or'],
   [/và/gi, '&'],
 ];
 
@@ -1525,7 +1734,7 @@ export function hasVietnameseResidual(text: string): boolean {
   if (/[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i.test(s)) {
     return true;
   }
-  return /\b(cua|cho|trong|tai|theo|voi|hoac|khong|hang|loai|phi|dieu|khoan|rui|ro|mo|rong|bao|hiem|nong|san)\b/i.test(s);
+  return /\b(cua|cho|trong|tai|theo|voi|hoac|khong|hang|loai|phi|dieu|khoan|rui|ro|mo|rong|bao|hiem|nong|san|nguoi|ban|mua|cang|tau|xuat|nhap|khau)\b/i.test(s);
 }
 
 export function translateVIEtoENG(
@@ -1604,6 +1813,15 @@ export async function translateVIEtoENGSmart(
     }
   } catch {
     // Fall through to deterministic cleanup below
+  }
+
+  // Strip any remaining Vietnamese diacritics if offline fallback still had untranslated words
+  if (hasVietnameseResidual(localTranslated)) {
+    return localTranslated
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D');
   }
 
   return localTranslated;
