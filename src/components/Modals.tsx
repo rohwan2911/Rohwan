@@ -65,6 +65,7 @@ export interface PreviewModalTarget {
   kind: 'QUOTATION' | 'CONTRACT' | 'INVOICE' | 'PACKING_LIST' | 'CO' | 'BL';
   orderId: string;
   initialQuotationTemplate?: 'TMP_QUOTATION_01' | 'INTERNAL_COSTING_SHEET';
+  initialShowEmail?: boolean;
 }
 
 type PreviewZoomPreset = 'FIT' | '75' | '85' | '100';
@@ -72,6 +73,37 @@ type QuotationTemplateKind = 'TMP_QUOTATION_01' | 'INTERNAL_COSTING_SHEET';
 
 const INTERNAL_ONLY_FIELD_PATTERN =
   /(GOODS_COST|MARGIN|FLOOR|INTERNAL|PROFIT|SELF_TRUCK|FWD_|PACKING_COST|PALLET_FEE|LOCAL_CHARGE)/i;
+
+const VALIDITY_DAY_OPTIONS = [7, 10, 14, 15] as const;
+
+const DEFAULT_PAYMENT_TERMS = [
+  'T/T 30% Deposit / 70% against B/L copy',
+  'T/T 100% in advance',
+  'Irrevocable L/C at sight',
+  'D/P at sight',
+  'D/A 30 days',
+];
+
+function computeValidUntilDate(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + Math.max(7, Math.min(15, days)));
+  return d.toISOString().slice(0, 10);
+}
+
+function buildCleanPdfAttachmentName(quoteNo: string, companyName: string): string {
+  const cleanCompany = (stripInternalCodesForCustomer(companyName || 'Customer') || 'Customer')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'Customer';
+  const cleanRef = (quoteNo || 'QT')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9-]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'QT';
+  return `Quotation_${cleanRef}_${cleanCompany}.pdf`;
+}
 
 interface DocumentPreviewModalProps {
   target: PreviewModalTarget | null;
@@ -82,7 +114,13 @@ interface DocumentPreviewModalProps {
   allowQuickAdjust: boolean;
   allowInternalView?: boolean;
   onClose: () => void;
-  onConfirmQuickAdjust?: (orderId: string, newIncoterm: string, newPrice: number, templateMode: 'STANDARD' | 'COMPARISON') => Promise<void>;
+  onConfirmQuickAdjust?: (
+    orderId: string,
+    newIncoterm: string,
+    newPrice: number,
+    validityDays?: number,
+    paymentTerm?: string
+  ) => Promise<void>;
   onMarkQuotationSent?: (orderId: string, linkOrSubject: string) => Promise<void>;
   onRequestRepriceFromModal?: (orderId: string, reason: string) => Promise<void>;
   onDocumentSaved?: () => Promise<void>;
@@ -105,6 +143,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   onToast,
 }) => {
   const docxBodyRef = useRef<HTMLDivElement>(null);
+  const brandedQuoteRef = useRef<HTMLDivElement>(null);
   const internalSheetRef = useRef<HTMLDivElement>(null);
   const docxStyleRef = useRef<HTMLDivElement>(null);
   const printFrameRef = useRef<HTMLIFrameElement>(null);
@@ -113,6 +152,8 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const [quotationTemplateKind, setQuotationTemplateKind] = useState<QuotationTemplateKind>('TMP_QUOTATION_01');
   const [adjIncoterm, setAdjIncoterm] = useState('CIF');
   const [adjPrice, setAdjPrice] = useState('');
+  const [adjValidityDays, setAdjValidityDays] = useState<number>(7);
+  const [adjPaymentTerm, setAdjPaymentTerm] = useState('T/T 30% Deposit / 70% against B/L copy');
   const [emailTo, setEmailTo] = useState('');
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBodyHtml, setEmailBodyHtml] = useState('');
@@ -138,6 +179,15 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
   const [docLoading, setDocLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const paymentTermOptions = useMemo(() => {
+    const lks = data.lookups
+      .filter((l) => String(l.category).toUpperCase().includes('PAYMENT'))
+      .map((l) => l.contract_text_eng || l.display_name_vie)
+      .filter(Boolean);
+    const merged = Array.from(new Set([...lks, ...DEFAULT_PAYMENT_TERMS]));
+    return merged;
+  }, [data.lookups]);
 
   const ctx = useMemo(() => {
     if (!target) return null;
@@ -175,6 +225,34 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const isInternalCostingView =
     target?.kind === 'QUOTATION' && allowInternalView && quotationTemplateKind === 'INTERNAL_COSTING_SHEET';
 
+  const isBrandedQuotationView = target?.kind === 'QUOTATION' && !isInternalCostingView;
+
+  const composeQuotationEmailHtml = (
+    inc: string,
+    price: number,
+    validityDays: number,
+    payTerm: string
+  ): string => {
+    if (!ctx?.inq) return '';
+    const baseHtml = buildQuotationEmailHtml(
+      { ...ctx.inq, proposed_payment_term: payTerm || ctx.inq.proposed_payment_term },
+      ctx.cus,
+      ctx.prop,
+      ctx.extraMeta,
+      ctx.sch,
+      data.products,
+      inc,
+      price
+    );
+    const validUntil = computeValidUntilDate(validityDays);
+    const cleanRef = cleanQuoteNoForCustomer(ctx.extraMeta?.quotation_no || '', ctx.inq.order_id);
+    const pdfName = buildCleanPdfAttachmentName(cleanRef, ctx.cus?.consignee_name || 'Customer');
+    return baseHtml.replace(
+      'Detailed quotation breakdown is attached in our official quotation file.',
+      `• <strong>Quotation Validity:</strong> ${validityDays} days (valid until <strong>${validUntil}</strong>)<br/>• <strong>Attached Official PDF:</strong> <strong>${pdfName}</strong><br/><br/>Please find our official branded PDF quotation attached.`
+    );
+  };
+
   // Initialize metadata & auto-pick active .docx template whenever target changes
   useEffect(() => {
     if (!target || !ctx) return;
@@ -186,11 +264,19 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       setQuotationTemplateKind(nextKind);
       const inc = ctx.prop?.recommended_incoterm || ctx.inq.desired_incoterm || 'CIF';
       const price = toNum(ctx.prop?.final_selling_price);
+      const valDays =
+        ctx.extraMeta?.validity_days && ctx.extraMeta.validity_days >= 7 && ctx.extraMeta.validity_days <= 15
+          ? ctx.extraMeta.validity_days
+          : 7;
+      const payTerm =
+        ctx.inq.proposed_payment_term || ctx.cus?.default_payment_term || 'T/T 30% Deposit / 70% against B/L copy';
       setAdjIncoterm(inc);
       setAdjPrice(price > 0 ? fmtDecimal(price, 2) : '');
+      setAdjValidityDays(valDays);
+      setAdjPaymentTerm(payTerm);
       setEmailTo(ctx.cus?.email || ctx.inq.email || '');
       setEmailSubject(buildQuotationEmailSubject(ctx.inq, ctx.prop, ctx.extraMeta, data.products));
-      setEmailBodyHtml(buildQuotationEmailHtml(ctx.inq, ctx.cus, ctx.prop, ctx.extraMeta, ctx.sch, data.products, inc, price));
+      setEmailBodyHtml(composeQuotationEmailHtml(inc, price, valDays, payTerm));
     } else if (ctx.order) {
       setQuotationTemplateKind('TMP_QUOTATION_01');
       setEmailTo(ctx.cus?.email || ctx.inq?.email || '');
@@ -200,7 +286,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       setEmailBodyHtml(buildExportEmailHtml(label, ctx.order, ctx.cus));
     }
 
-    setShowEmailPane(false);
+    setShowEmailPane(Boolean(target.initialShowEmail));
     setShowFieldEditor(false);
     setDirectEditMode(false);
     setZoomPreset('FIT');
@@ -215,7 +301,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
       bestTpl = matchingTemplates[0]?.template_id || '';
     }
     setSelectedTemplateId(bestTpl);
-  }, [target?.orderId, target?.kind, target?.initialQuotationTemplate, allowInternalView]);
+  }, [target?.orderId, target?.kind, target?.initialQuotationTemplate, target?.initialShowEmail, allowInternalView]);
 
   // Download & populate selected .docx template from Supabase Storage "documents" bucket
   useEffect(() => {
@@ -508,11 +594,17 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
         : `Báo giá ${cleanQuoteNo}`
       : `${target.kind} · ${ctx.order?.contract_no || target.orderId}`;
 
+  const pdfAttachmentName = buildCleanPdfAttachmentName(
+    cleanQuoteNo,
+    ctx.cus?.consignee_name || ctx.inq?.consignee_id || 'Customer'
+  );
+  const pdfFileBase = pdfAttachmentName.replace(/\.pdf$/i, '');
+
   const rawFileBase =
     target.kind === 'QUOTATION'
       ? isInternalCostingView
         ? `INTERNAL_COSTING_SHEET_${target.orderId}`
-        : `Official_Quotation_${cleanQuoteNo}`
+        : pdfFileBase
       : target.kind === 'CONTRACT' && ctx.order?.contract_no
       ? stripInternalCodesForCustomer(ctx.order.contract_no) || ctx.order.contract_no
       : stripInternalCodesForCustomer(cleanQuoteTitle) || cleanQuoteTitle;
@@ -527,16 +619,54 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   const handlePrint = () => {
     const bodyHtml = isInternalCostingView
       ? internalSheetRef.current?.innerHTML || ''
+      : isBrandedQuotationView
+      ? brandedQuoteRef.current?.innerHTML || docxBodyRef.current?.innerHTML || ''
       : docxBodyRef.current?.innerHTML || '';
-    const styleHtml = isInternalCostingView
-      ? `<style>body{font-family:Inter,Arial,sans-serif;color:#0b2418;padding:18px;font-size:12px;} table{width:100%;border-collapse:collapse;margin-top:8px;} th,td{border:1px solid #cbd5e1;padding:6px 8px;text-align:left;} th{background:#0f4a33;color:#fff;} .num{text-align:right;font-family:monospace;}</style>`
-      : docxStyleRef.current?.innerHTML || '';
+    const styleHtml =
+      isInternalCostingView || isBrandedQuotationView
+        ? `<style>
+            @page { size: A4; margin: 12mm; }
+            body { font-family: 'Inter', 'Segoe UI', Arial, sans-serif; color: #0b2418; margin: 0; padding: 0; font-size: 11.5px; line-height: 1.45; background: #fff; }
+            table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+            th, td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; vertical-align: top; }
+            th { background: #0f4a33 !important; color: #fff5d6 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .num, .text-right { text-align: right; }
+            .text-center { text-align: center; }
+            .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+            .font-bold, strong { font-weight: 700; }
+            .font-extrabold, .font-black { font-weight: 800; }
+            .grid { display: grid; gap: 12px; }
+            .grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .flex { display: flex; }
+            .items-start { align-items: flex-start; }
+            .items-center { align-items: center; }
+            .justify-between { justify-content: space-between; }
+            .rounded-lg, .rounded-xl { border-radius: 8px; }
+            .border { border: 1px solid #cbd5e1; }
+            .border-b-2 { border-bottom: 2px solid #0f4a33; }
+            .p-3 { padding: 10px; }
+            .p-4 { padding: 14px; }
+            .p-6 { padding: 18px; }
+            .pb-3 { padding-bottom: 10px; }
+            .mt-1 { margin-top: 4px; }
+            .mt-2 { margin-top: 8px; }
+            .mt-3 { margin-top: 12px; }
+            .mb-1 { margin-bottom: 4px; }
+            .mb-2 { margin-bottom: 8px; }
+            .space-y-4 > * + * { margin-top: 14px; }
+            .space-y-5 > * + * { margin-top: 16px; }
+            .bg-emerald-brand { background: #0f4a33 !important; color: #fff5d6 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .bg-soft-mint { background: #f4fbf7 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .bg-soft-gold { background: #fff8e1 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          </style>`
+        : docxStyleRef.current?.innerHTML || '';
     const frame = printFrameRef.current;
     if (!frame || !bodyHtml) return;
     const doc = frame.contentDocument || frame.contentWindow?.document;
     if (!doc) return;
+    const printTitle = isBrandedQuotationView ? pdfFileBase : cleanQuoteTitle;
     doc.open();
-    doc.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${cleanQuoteTitle}</title>${styleHtml}<style>@media print { body { margin: 0; background: #fff; } .docx-preview-page-wrapper { background: #fff !important; padding: 0 !important; box-shadow: none !important; } }</style></head><body>${bodyHtml}</body></html>`);
+    doc.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${printTitle}</title>${styleHtml}<style>@media print { body { margin: 0; background: #fff; } .docx-preview-page-wrapper { background: #fff !important; padding: 0 !important; box-shadow: none !important; } }</style></head><body>${bodyHtml}</body></html>`);
     doc.close();
     window.setTimeout(() => {
       frame.contentWindow?.focus();
@@ -572,9 +702,14 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     return storagePath;
   };
 
-  const buildRecalculatedFieldsForIncoterm = (nextInc: string, sellingVal: number) => {
+  const buildRecalculatedFieldsForIncoterm = (
+    nextInc: string,
+    sellingVal: number,
+    validityDays = adjValidityDays,
+    payTerm = adjPaymentTerm
+  ) => {
     const pol = ctx.order?.pol || ctx.sch?.pol || 'Cat Lai Port, Ho Chi Minh City, Vietnam';
-    const pod = ctx.order?.pod || ctx.sch?.pod || 'Destination Port';
+    const pod = ctx.order?.pod || ctx.sch?.pod || ctx.inq?.pod || 'Destination Port';
     const originCodes = ['EXW', 'FCA', 'FAS', 'FOB'];
     const incUpper = nextInc.toUpperCase();
     const incPlace = originCodes.includes(incUpper) ? pol : pod;
@@ -614,6 +749,8 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     const words = numberToEnglishWordsUsd(sellingVal);
     const totalNw = toNum(ctx.order?.nw_confirmed_kgs) || toNum(ctx.inq?.net_weight_kgs) || 0;
     const avgUnit = totalNw > 0 ? `$${fmtDecimal(subtotalAmt / totalNw, 3)}` : fieldValues.UNIT_PRICE || '$0.000';
+    const validUntil = computeValidUntilDate(validityDays);
+    const validityText = `${validityDays} days (valid until ${validUntil})`;
 
     const itemTarget = target.kind === 'QUOTATION' ? subtotalAmt : sellingVal;
     const allocated = computeSilentFobUnitPrices(ctx.items, itemTarget, data.products, data.pricingRates);
@@ -648,6 +785,18 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
     });
 
     return {
+      subtotalAmt,
+      freightCost,
+      insCost,
+      destCost,
+      sellingVal,
+      words,
+      insTerm,
+      pol,
+      pod,
+      incPlace,
+      validUntil,
+      allocated,
       patch: {
         INCOTERM: incUpper,
         APPLIED_INCOTERM: incUpper,
@@ -674,10 +823,26 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
         FREIGHT: freightStr,
         FREIGHT_TERM: freightStr,
         UNIT_PRICE: avgUnit,
+        VALIDITY: validityText,
+        QUOTE_VALIDITY: validityText,
+        VALID_UNTIL: validUntil,
+        PAYMENT_TERM: payTerm,
+        PAYMENT_TERMS: payTerm,
+        PAY_TERM: payTerm,
       },
       nextItemsRows,
     };
   };
+
+  const liveQuotationBreakdown =
+    target.kind === 'QUOTATION'
+      ? buildRecalculatedFieldsForIncoterm(
+          adjIncoterm,
+          numericAdjPrice > 0 ? numericAdjPrice : toNum(ctx.prop?.final_selling_price),
+          adjValidityDays,
+          adjPaymentTerm
+        )
+      : null;
 
   return (
     <div className="fixed inset-0 z-50 bg-[#07281c]/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
@@ -824,12 +989,12 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
 
             <button
               type="button"
-              disabled={!isInternalCostingView && !renderedDocxBytes}
+              disabled={!isInternalCostingView && !isBrandedQuotationView && !renderedDocxBytes}
               onClick={handlePrint}
               className="px-3 py-1.5 rounded-lg bg-[#f4d98a] text-[#07281c] text-xs font-extrabold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
               <Printer className="w-3.5 h-3.5" />
-              <span>In / PDF</span>
+              <span>{isBrandedQuotationView ? 'Xuất PDF Báo giá' : 'In / PDF'}</span>
             </button>
 
             {!isInternalCostingView && (
@@ -847,10 +1012,10 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
         </div>
 
         {target.kind === 'QUOTATION' && !isInternalCostingView && allowQuickAdjust && ctx.prop && (
-          <div className="px-4 py-2.5 bg-[#07281c] border-b border-[#186635] flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex flex-wrap items-center gap-2.5">
+          <div className="px-4 py-2.5 bg-[#07281c] border-b border-[#186635] flex flex-wrap items-center justify-between gap-2.5 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1 font-bold text-[#f4d98a]">
-                <SlidersHorizontal className="w-3.5 h-3.5" /> Điều chỉnh nhanh Sales:
+                <SlidersHorizontal className="w-3.5 h-3.5" /> Điều chỉnh Sales:
               </span>
               <select
                 value={adjIncoterm}
@@ -860,9 +1025,14 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                   setAdjIncoterm(nextInc);
                   setAdjPrice(nextPrice > 0 ? fmtDecimal(nextPrice, 2) : '');
                   if (ctx.inq && ctx.prop) {
-                    setEmailBodyHtml(buildQuotationEmailHtml(ctx.inq, ctx.cus, ctx.prop, ctx.extraMeta, ctx.sch, data.products, nextInc, nextPrice));
+                    setEmailBodyHtml(composeQuotationEmailHtml(nextInc, nextPrice, adjValidityDays, adjPaymentTerm));
                   }
-                  const { patch, nextItemsRows } = buildRecalculatedFieldsForIncoterm(nextInc, nextPrice);
+                  const { patch, nextItemsRows } = buildRecalculatedFieldsForIncoterm(
+                    nextInc,
+                    nextPrice,
+                    adjValidityDays,
+                    adjPaymentTerm
+                  );
                   void applyBatchFieldsAndRerender(patch, nextItemsRows);
                 }}
                 className="px-2 py-1 rounded-lg bg-[#0f4a33] border border-[#f4d98a]/60 text-[#fff5d6] font-mono font-bold text-xs"
@@ -871,8 +1041,9 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                   <option key={r.code} value={r.code}>{r.code} — {r.fullName}</option>
                 ))}
               </select>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[#9bccb8]">Giá chào (USD):</span>
+
+              <div className="flex items-center gap-1">
+                <span className="text-[#9bccb8]">Giá chào:</span>
                 <input
                   type="text"
                   inputMode="decimal"
@@ -882,18 +1053,81 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                     setAdjPrice(e.target.value);
                     const val = toNum(e.target.value);
                     if (ctx.inq && ctx.prop) {
-                      setEmailBodyHtml(buildQuotationEmailHtml(ctx.inq, ctx.cus, ctx.prop, ctx.extraMeta, ctx.sch, data.products, adjIncoterm, val));
+                      setEmailBodyHtml(composeQuotationEmailHtml(adjIncoterm, val, adjValidityDays, adjPaymentTerm));
                     }
                     if (val > 0) {
-                      const { patch, nextItemsRows } = buildRecalculatedFieldsForIncoterm(adjIncoterm, val);
+                      const { patch, nextItemsRows } = buildRecalculatedFieldsForIncoterm(
+                        adjIncoterm,
+                        val,
+                        adjValidityDays,
+                        adjPaymentTerm
+                      );
                       void applyBatchFieldsAndRerender(patch, nextItemsRows);
                     }
                   }}
-                  className="w-28 px-2 py-1 rounded-lg bg-[#d7eee4] text-[#07281c] font-mono font-bold text-xs"
+                  className="w-24 px-2 py-1 rounded-lg bg-[#d7eee4] text-[#07281c] font-mono font-bold text-xs"
                 />
               </div>
+
+              <div className="flex items-center gap-1">
+                <span className="text-[#9bccb8]">Hiệu lực:</span>
+                <select
+                  value={adjValidityDays}
+                  onChange={(e) => {
+                    const nextDays = Math.max(7, Math.min(15, Number(e.target.value) || 7));
+                    setAdjValidityDays(nextDays);
+                    const curVal = numericAdjPrice > 0 ? numericAdjPrice : toNum(ctx.prop?.final_selling_price);
+                    if (ctx.inq && ctx.prop) {
+                      setEmailBodyHtml(composeQuotationEmailHtml(adjIncoterm, curVal, nextDays, adjPaymentTerm));
+                    }
+                    const { patch, nextItemsRows } = buildRecalculatedFieldsForIncoterm(
+                      adjIncoterm,
+                      curVal,
+                      nextDays,
+                      adjPaymentTerm
+                    );
+                    void applyBatchFieldsAndRerender(patch, nextItemsRows);
+                  }}
+                  className="px-2 py-1 rounded-lg bg-[#0f4a33] border border-[#186635] text-[#fff5d6] font-bold text-xs"
+                >
+                  {VALIDITY_DAY_OPTIONS.map((d) => (
+                    <option key={d} value={d}>{d} ngày</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <span className="text-[#9bccb8]">Thanh toán:</span>
+                <select
+                  value={adjPaymentTerm}
+                  onChange={(e) => {
+                    const nextPay = e.target.value;
+                    setAdjPaymentTerm(nextPay);
+                    const curVal = numericAdjPrice > 0 ? numericAdjPrice : toNum(ctx.prop?.final_selling_price);
+                    if (ctx.inq && ctx.prop) {
+                      setEmailBodyHtml(composeQuotationEmailHtml(adjIncoterm, curVal, adjValidityDays, nextPay));
+                    }
+                    const { patch, nextItemsRows } = buildRecalculatedFieldsForIncoterm(
+                      adjIncoterm,
+                      curVal,
+                      adjValidityDays,
+                      nextPay
+                    );
+                    void applyBatchFieldsAndRerender(patch, nextItemsRows);
+                  }}
+                  className="px-2 py-1 rounded-lg bg-[#0f4a33] border border-[#186635] text-[#fff5d6] text-xs font-semibold max-w-[210px]"
+                >
+                  {!paymentTermOptions.includes(adjPaymentTerm) && adjPaymentTerm && (
+                    <option value={adjPaymentTerm}>{adjPaymentTerm}</option>
+                  )}
+                  {paymentTermOptions.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              </div>
+
               <span className="text-[11px] text-[#9bccb8]">
-                Giá sàn XNK ({adjIncoterm}): <strong className="text-[#f4d98a] font-mono">{fmtUSD(floorForSelectedInc)}</strong>
+                Giá sàn ({adjIncoterm}): <strong className="text-[#f4d98a] font-mono">{fmtUSD(floorForSelectedInc)}</strong>
               </span>
             </div>
 
@@ -923,9 +1157,19 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                   disabled={busy}
                   onClick={async () => {
                     if (!onConfirmQuickAdjust) return;
+                    if (floorForSelectedInc > 0 && numericAdjPrice < floorForSelectedInc) {
+                      onToast('warning', `Giá chào không được thấp hơn Giá sàn ${fmtUSD(floorForSelectedInc)}.`);
+                      return;
+                    }
                     setBusy(true);
                     try {
-                      await onConfirmQuickAdjust(target.orderId, adjIncoterm, numericAdjPrice, 'STANDARD');
+                      await onConfirmQuickAdjust(
+                        target.orderId,
+                        adjIncoterm,
+                        numericAdjPrice,
+                        adjValidityDays,
+                        adjPaymentTerm
+                      );
                     } finally {
                       setBusy(false);
                     }
@@ -1019,6 +1263,232 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
             </div>
 
             {isInternalCostingView ? (
+              (() => {
+                const oceanFreightCost = Math.max(
+                  0,
+                  ctx.extraMeta?.cfr_price && ctx.extraMeta?.fob_price
+                    ? ctx.extraMeta.cfr_price - ctx.extraMeta.fob_price
+                    : toNum(ctx.extraMeta?.fwd_ocean)
+                );
+                const exportLocalCustomsCost = Math.max(
+                  0,
+                  toNum(ctx.prop?.total_freight_local) - oceanFreightCost
+                );
+                const insAndDestCost =
+                  toNum(ctx.prop?.insurance_cost) +
+                  toNum(ctx.extraMeta?.dest_extra) +
+                  toNum(ctx.extraMeta?.import_duty_usd);
+                const rateExpiry = ctx.sch?.expiry_date || '';
+                const isRateExpired = Boolean(rateExpiry && rateExpiry < new Date().toISOString().slice(0, 10));
+                return (
+                  <div className="p-3 sm:p-4 flex-1">
+                    <div
+                      style={{
+                        width: `${Math.round(820 * effectiveZoomScale)}px`,
+                        margin: '0 auto',
+                        position: 'relative',
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: '820px',
+                          transform: `scale(${effectiveZoomScale})`,
+                          transformOrigin: 'top left',
+                        }}
+                      >
+                        <div
+                          ref={internalSheetRef}
+                          className="bg-white text-[#0b2418] rounded-xl shadow-xl border-2 border-[#186635] p-6 space-y-5 text-xs"
+                        >
+                          <div className="flex items-start justify-between border-b-2 border-[#0f4a33] pb-3">
+                            <div>
+                              <div className="text-[10px] font-extrabold uppercase tracking-wider text-[#8c3b3b]">
+                                TÀI LIỆU NỘI BỘ · CHỈ DÀNH CHO PHÒNG XNK, SALES &amp; BAN GIÁM ĐỐC (KHÔNG GỬI KHÁCH)
+                              </div>
+                              <h2 className="text-lg font-black text-[#0f4a33] mt-0.5">
+                                INTERNAL_COSTING_SHEET — PHIẾU TÍNH GIÁ XNK (5 NHÓM CHI PHÍ)
+                              </h2>
+                              <div className="text-[11px] text-slate-600 mt-0.5">
+                                Đơn hàng: <strong className="font-mono text-[#07281c]">{target.orderId}</strong> · Số Báo giá:{' '}
+                                <strong className="font-mono text-[#07281c]">{cleanQuoteNo}</strong> · NV XNK:{' '}
+                                <strong>{ctx.prop?.xnk_rep || '-'}</strong>
+                              </div>
+                            </div>
+                            <div className="text-right text-[11px]">
+                              <div className="font-bold text-[#0f4a33]">GREEN AGRICULTURAL PRODUCTS EXPORT</div>
+                              <div>Ngày lập: {ctx.prop?.booking_date || '-'}</div>
+                              {sendCount > 0 && (
+                                <div className="font-bold text-[#8c3b3b]">Đã gửi khách: Lần {sendCount}</div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2.5">
+                            <div className="rounded-lg bg-[#f4fbf7] border border-[#186635]/40 p-2.5">
+                              <div className="text-[10px] uppercase font-bold text-[#0f4a33]">Incoterm XNK Khuyến nghị</div>
+                              <div className="text-base font-black font-mono text-[#07281c] mt-0.5">
+                                {ctx.prop?.recommended_incoterm || 'CIF'}
+                              </div>
+                              <div className="text-[10.5px] text-slate-600">
+                                Giá chào đề xuất: <strong className="font-mono text-[#0f4a33]">{fmtUSD(ctx.prop?.final_selling_price || 0)}</strong>
+                              </div>
+                            </div>
+                            <div className="rounded-lg bg-[#fff5d6] border border-[#d4a017]/60 p-2.5">
+                              <div className="text-[10px] uppercase font-bold text-[#8c3b3b]">Giá Sàn Tối Thiểu (Khóa cứng)</div>
+                              <div className="text-base font-black font-mono text-[#8c3b3b] mt-0.5">
+                                {fmtUSD(ctx.extraMeta?.floor_price_usd || 0)}
+                              </div>
+                              <div className="text-[10.5px] text-slate-700">
+                                Sales không được báo thấp hơn mức sàn này
+                              </div>
+                            </div>
+                            <div className={`rounded-lg border p-2.5 ${isRateExpired ? 'bg-[#fee2e2] border-[#8c3b3b]' : 'bg-[#f4fbf7] border-[#186635]/40'}`}>
+                              <div className="text-[10px] uppercase font-bold text-[#0f4a33]">Hạn hiệu lực Cước tàu (Expiry)</div>
+                              <div className={`text-base font-black font-mono mt-0.5 ${isRateExpired ? 'text-[#8c3b3b]' : 'text-[#07281c]'}`}>
+                                {rateExpiry || 'Theo hãng tàu'}
+                              </div>
+                              <div className="text-[10.5px] text-slate-600">
+                                {ctx.sch?.shipping_line || '-'} · ETD: {ctx.sch?.etd || '-'}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-3 bg-[#f4fbf7] border border-[#186635]/30 rounded-lg p-3">
+                            <div>
+                              <div><strong>Khách hàng:</strong> {ctx.cus?.consignee_name || ctx.inq?.consignee_id || '-'}</div>
+                              <div><strong>Quốc gia / POD:</strong> {ctx.cus?.country || '-'} · {ctx.sch?.pod || ctx.inq?.pod || '-'}</div>
+                              <div><strong>Lịch tàu:</strong> {ctx.prop?.schedule_id || '-'} · {ctx.sch?.vessel || '-'}</div>
+                            </div>
+                            <div>
+                              <div><strong>Container:</strong> {ctx.prop?.container_type || '-'} ({ctx.prop?.container_qty || 0} cont)</div>
+                              <div><strong>Đóng gói:</strong> {fmtNumber(ctx.prop?.total_cartons || 0)} thùng · {fmtNumber(ctx.prop?.total_pallets || 0)} pallet · {fmtNumber(ctx.prop?.total_cbm || 0)} CBM</div>
+                              <div><strong>Khối lượng:</strong> NW {fmtNumber(ctx.inq?.net_weight_kgs || 0)} KG · GW {fmtNumber(ctx.prop?.total_gross_weight || 0)} KG</div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <h4 className="font-extrabold text-[#0f4a33] uppercase text-[11px] mb-1.5">
+                              1. Bóc tách 5 Nhóm Chi phí Nội bộ, Biên lợi nhuận &amp; Giá sàn
+                            </h4>
+                            <table className="w-full border-collapse text-xs">
+                              <thead>
+                                <tr className="bg-[#0f4a33] text-[#fff5d6]">
+                                  <th className="p-2 text-left border border-[#186635]">Nhóm chi phí nội bộ</th>
+                                  <th className="p-2 text-right border border-[#186635]">Giá trị (USD)</th>
+                                  <th className="p-2 text-left border border-[#186635]">Ghi chú phân bổ</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr>
+                                  <td className="p-2 border border-slate-300 font-semibold">Nhóm 1 · Giá vốn hàng hóa (Base Goods Cost)</td>
+                                  <td className="p-2 border border-slate-300 text-right font-mono font-bold">{fmtUSD(ctx.prop?.goods_cost || 0)}</td>
+                                  <td className="p-2 border border-slate-300">Phân bổ ẩn vào Đơn giá FOB trên Báo giá khách</td>
+                                </tr>
+                                <tr className="bg-slate-50">
+                                  <td className="p-2 border border-slate-300 font-semibold">Nhóm 2 · Chi phí Bao bì &amp; Pallet (Packing + Pallet)</td>
+                                  <td className="p-2 border border-slate-300 text-right font-mono">{fmtUSD(ctx.prop?.packing_pallet_cost || 0)}</td>
+                                  <td className="p-2 border border-slate-300">Phí Pallet ISPM-15: {fmtUSD(ctx.prop?.pallet_fee || 0)}</td>
+                                </tr>
+                                <tr>
+                                  <td className="p-2 border border-slate-300 font-semibold">Nhóm 3 · Nội địa, Trucking, Local Charges &amp; Hải quan XK</td>
+                                  <td className="p-2 border border-slate-300 text-right font-mono">{fmtUSD(exportLocalCustomsCost)}</td>
+                                  <td className="p-2 border border-slate-300">Phương án thực hiện: {ctx.extraMeta?.freight_exec_option || 'SELF'} (ẩn vào FOB)</td>
+                                </tr>
+                                <tr className="bg-slate-50">
+                                  <td className="p-2 border border-slate-300 font-semibold">Nhóm 4 · Cước biển Quốc tế (Ocean Freight)</td>
+                                  <td className="p-2 border border-slate-300 text-right font-mono">{fmtUSD(oceanFreightCost)}</td>
+                                  <td className="p-2 border border-slate-300">Hạn cước: {rateExpiry || 'Theo báo giá hãng tàu'}</td>
+                                </tr>
+                                <tr>
+                                  <td className="p-2 border border-slate-300 font-semibold">Nhóm 5 · Bảo hiểm hàng hải ({ctx.prop?.insurance_code || 'INS-NONE'}) &amp; Phí đầu đến</td>
+                                  <td className="p-2 border border-slate-300 text-right font-mono">{fmtUSD(insAndDestCost)}</td>
+                                  <td className="p-2 border border-slate-300">BH: {fmtUSD(ctx.prop?.insurance_cost || 0)} · Đích/Thuế: {fmtUSD(toNum(ctx.extraMeta?.dest_extra) + toNum(ctx.extraMeta?.import_duty_usd))}</td>
+                                </tr>
+                                <tr className="bg-slate-50">
+                                  <td className="p-2 border border-slate-300 font-semibold">Biên lợi nhuận mục tiêu / tối thiểu</td>
+                                  <td className="p-2 border border-slate-300 text-right font-mono font-bold text-[#0f4a33]">
+                                    {fmtDecimal(ctx.extraMeta?.margin_pct || 0, 1)}% (Min {fmtDecimal(ctx.extraMeta?.min_margin_pct || 0, 1)}%)
+                                  </td>
+                                  <td className="p-2 border border-slate-300">Lợi nhuận nội bộ dự kiến: {fmtUSD(ctx.extraMeta?.internal_profit_usd || 0)}</td>
+                                </tr>
+                                <tr className="bg-[#fff5d6]">
+                                  <td className="p-2 border border-slate-300 font-extrabold">Giá sàn tối thiểu (Floor Price — Locked)</td>
+                                  <td className="p-2 border border-slate-300 text-right font-mono font-extrabold text-[#8c3b3b]">{fmtUSD(ctx.extraMeta?.floor_price_usd || 0)}</td>
+                                  <td className="p-2 border border-slate-300">Sales không được chào thấp hơn mức sàn</td>
+                                </tr>
+                                <tr className="bg-[#d7eee4]">
+                                  <td className="p-2 border border-slate-300 font-extrabold">Giá chào đề xuất ({ctx.prop?.recommended_incoterm || 'CIF'})</td>
+                                  <td className="p-2 border border-slate-300 text-right font-mono font-extrabold text-[#0f4a33]">{fmtUSD(ctx.prop?.final_selling_price || 0)}</td>
+                                  <td className="p-2 border border-slate-300">Khớp tổng thanh toán trên TMP_QUOTATION_01</td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <h4 className="font-extrabold text-[#0f4a33] uppercase text-[11px] mb-1.5">
+                                2. So sánh Phương án Thực hiện (Self vs. Hybrid vs. FWD)
+                              </h4>
+                              <table className="w-full border-collapse text-xs">
+                                <tbody>
+                                  <tr>
+                                    <td className="p-1.5 border border-slate-300">Phương án đang chọn</td>
+                                    <td className="p-1.5 border border-slate-300 text-right font-mono font-bold">{ctx.extraMeta?.freight_exec_option || 'SELF'}</td>
+                                  </tr>
+                                  <tr className="bg-slate-50">
+                                    <td className="p-1.5 border border-slate-300">Trucking tự chạy (Self)</td>
+                                    <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(ctx.extraMeta?.self_trucking || 0)}</td>
+                                  </tr>
+                                  <tr>
+                                    <td className="p-1.5 border border-slate-300">FWD Ocean / Trucking</td>
+                                    <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(ctx.extraMeta?.fwd_ocean || 0)} / {fmtUSD(ctx.extraMeta?.fwd_trucking || 0)}</td>
+                                  </tr>
+                                  <tr className="bg-slate-50">
+                                    <td className="p-1.5 border border-slate-300">FWD Hải quan / Giấy phép</td>
+                                    <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(ctx.extraMeta?.fwd_customs || 0)} / {fmtUSD(ctx.extraMeta?.fwd_permits || 0)}</td>
+                                  </tr>
+                                  <tr>
+                                    <td className="p-1.5 border border-slate-300 font-bold">Tổng chi phí nội bộ / Thu khách</td>
+                                    <td className="p-1.5 border border-slate-300 text-right font-mono font-bold">
+                                      {fmtUSD(ctx.extraMeta?.internal_cost_usd || 0)} / {fmtUSD(ctx.extraMeta?.buyer_charge_usd || 0)}
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+
+                            <div>
+                              <h4 className="font-extrabold text-[#0f4a33] uppercase text-[11px] mb-1.5">
+                                3. Bảng so sánh Incoterms 2020 (Giá chào vs. Giá sàn)
+                              </h4>
+                              <table className="w-full border-collapse text-xs">
+                                <thead>
+                                  <tr className="bg-[#0f4a33] text-[#fff5d6]">
+                                    <th className="p-1.5 text-left border border-[#186635]">Incoterm</th>
+                                    <th className="p-1.5 text-right border border-[#186635]">Giá sàn</th>
+                                    <th className="p-1.5 text-right border border-[#186635]">Giá chào</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {['EXW', 'FOB', 'CFR', 'CIF', 'CIP', 'DAP', 'DDP'].map((code) => (
+                                    <tr key={code} className={code === ctx.prop?.recommended_incoterm ? 'bg-[#fff5d6] font-bold' : ''}>
+                                      <td className="p-1.5 border border-slate-300 font-mono font-bold">{code}</td>
+                                      <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(computeFloorPriceScaled(ctx.prop, ctx.extraMeta, code))}</td>
+                                      <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(computeSellingPriceScaled(ctx.prop, ctx.extraMeta, code))}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()
+            ) : isBrandedQuotationView && liveQuotationBreakdown ? (
               <div className="p-3 sm:p-4 flex-1">
                 <div
                   style={{
@@ -1035,154 +1505,233 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                     }}
                   >
                     <div
-                      ref={internalSheetRef}
-                      className="bg-white text-[#0b2418] rounded-xl shadow-xl border-2 border-[#186635] p-6 space-y-5 text-xs"
+                      ref={brandedQuoteRef}
+                      contentEditable={directEditMode}
+                      suppressContentEditableWarning
+                      className="bg-white text-[#0b2418] rounded-xl shadow-xl border border-slate-300 p-7 space-y-5 text-xs outline-none"
                     >
-                      <div className="flex items-start justify-between border-b-2 border-[#0f4a33] pb-3">
-                        <div>
-                          <div className="text-[10px] font-extrabold uppercase tracking-wider text-[#8c3b3b]">
-                            TÀI LIỆU NỘI BỘ · CHỈ DÀNH CHO PHÒNG XNK &amp; BAN GIÁM ĐỐC (KHÔNG GỬI KHÁCH)
+                      {/* Branded Header */}
+                      <div className="flex items-start justify-between border-b-2 border-[#0f4a33] pb-4 gap-4">
+                        <div className="flex items-start gap-3">
+                          <div className="w-12 h-12 rounded-xl bg-[#0f4a33] text-[#f4d98a] flex items-center justify-center font-black text-lg tracking-tight shrink-0 border-2 border-[#f4d98a]">
+                            GA
                           </div>
-                          <h2 className="text-lg font-black text-[#0f4a33] mt-0.5">
-                            INTERNAL_COSTING_SHEET — PHIẾU TÍNH GIÁ &amp; SO SÁNH PHƯƠNG ÁN
-                          </h2>
-                          <div className="text-[11px] text-slate-600 mt-0.5">
-                            Đơn hàng: <strong className="font-mono text-[#07281c]">{target.orderId}</strong> · Số Báo giá:{' '}
-                            <strong className="font-mono text-[#07281c]">{cleanQuoteNo}</strong> · NV XNK:{' '}
-                            <strong>{ctx.prop?.xnk_rep || '-'}</strong>
+                          <div>
+                            <div className="text-[15px] font-black tracking-wide text-[#0f4a33] uppercase">
+                              GREEN AGRICULTURAL PRODUCTS EXPORT CO., LTD
+                            </div>
+                            <div className="text-[10.5px] text-slate-600 mt-0.5">
+                              128 Nguyen Van Linh St., Hai Chau Dist., Da Nang City, Vietnam
+                            </div>
+                            <div className="text-[10.5px] text-slate-600">
+                              Tel: +84 236 388 9966 · Email: sales@greenagri-exports.vn · Web: www.greenagri-exports.vn
+                            </div>
                           </div>
                         </div>
-                        <div className="text-right text-[11px]">
-                          <div className="font-bold text-[#0f4a33]">GREEN AGRI-EXPORTS CO., LTD</div>
-                          <div>Ngày lập: {ctx.prop?.booking_date || '-'}</div>
-                          {sendCount > 0 && (
-                            <div className="font-bold text-[#8c3b3b]">Đã gửi khách: Lần {sendCount}</div>
+                        <div className="text-right shrink-0">
+                          <div className="text-lg font-black text-[#0f4a33] tracking-wider uppercase">
+                            OFFICIAL QUOTATION
+                          </div>
+                          <div className="text-[11px] mt-1 space-y-0.5">
+                            <div>
+                              <span className="text-slate-500">Quotation No.:</span>{' '}
+                              <strong className="font-mono text-[#07281c]">{cleanQuoteNo}</strong>
+                            </div>
+                            <div>
+                              <span className="text-slate-500">Date:</span>{' '}
+                              <strong className="font-mono">{new Date().toISOString().slice(0, 10)}</strong>
+                            </div>
+                            <div>
+                              <span className="text-slate-500">Valid Until:</span>{' '}
+                              <strong className="font-mono text-[#0f4a33]">
+                                {liveQuotationBreakdown.validUntil} ({adjValidityDays} days)
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Buyer & Shipment Summary */}
+                      <div className="grid grid-cols-2 gap-4 bg-[#f4fbf7] border border-[#186635]/30 rounded-lg p-3.5">
+                        <div className="space-y-1">
+                          <div className="text-[10px] font-extrabold uppercase tracking-wider text-[#0f4a33]">
+                            TO (BUYER / CONSIGNEE)
+                          </div>
+                          <div className="font-extrabold text-[13px] text-[#07281c]">
+                            {stripInternalCodesForCustomer(ctx.cus?.consignee_name || '') || ctx.cus?.consignee_name || 'Valued Partner'}
+                          </div>
+                          {(ctx.cus?.address || ctx.inq?.address) && (
+                            <div className="text-[11px] text-slate-700">{ctx.cus?.address || ctx.inq?.address}</div>
                           )}
+                          <div className="text-[11px] text-slate-700">
+                            Attn: <strong>{ctx.cus?.contact_person || ctx.inq?.contact || 'Purchasing Department'}</strong>
+                          </div>
+                          <div className="text-[11px] text-slate-600">
+                            {[ctx.cus?.email || ctx.inq?.email, ctx.cus?.phone || ctx.inq?.phone].filter(Boolean).join(' · ')}
+                          </div>
+                        </div>
+                        <div className="space-y-1">
+                          <div className="text-[10px] font-extrabold uppercase tracking-wider text-[#0f4a33]">
+                            SHIPMENT &amp; DELIVERY SUMMARY
+                          </div>
+                          <div className="text-[11px]">
+                            <strong>Trade Term:</strong>{' '}
+                            <span className="font-mono font-bold text-[#0f4a33]">
+                              {adjIncoterm.toUpperCase()} {liveQuotationBreakdown.incPlace} (Incoterms 2020)
+                            </span>
+                          </div>
+                          <div className="text-[11px]">
+                            <strong>Port of Loading (POL):</strong> {liveQuotationBreakdown.pol}
+                          </div>
+                          <div className="text-[11px]">
+                            <strong>Port of Discharge (POD):</strong> {liveQuotationBreakdown.pod}
+                          </div>
+                          <div className="text-[11px]">
+                            <strong>Container / ETD:</strong>{' '}
+                            {ctx.prop?.container_type || 'Standard'} ({ctx.prop?.container_qty || 1}x)
+                            {ctx.sch?.etd ? ` · Est. ETD: ${ctx.sch.etd}` : ''}
+                          </div>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-3 bg-[#f4fbf7] border border-[#186635]/30 rounded-lg p-3">
-                        <div>
-                          <div><strong>Khách hàng:</strong> {ctx.cus?.consignee_name || ctx.inq?.consignee_id || '-'}</div>
-                          <div><strong>Quốc gia / POD:</strong> {ctx.cus?.country || '-'} · {ctx.sch?.pod || ctx.inq?.pod || '-'}</div>
-                          <div><strong>Tuyến &amp; Lịch tàu:</strong> {ctx.prop?.schedule_id || '-'} · {ctx.sch?.shipping_line || '-'}</div>
-                        </div>
-                        <div>
-                          <div><strong>Container:</strong> {ctx.prop?.container_type || '-'} ({ctx.prop?.container_qty || 0} cont)</div>
-                          <div><strong>Đóng gói:</strong> {fmtNumber(ctx.prop?.total_cartons || 0)} thùng · {fmtNumber(ctx.prop?.total_pallets || 0)} pallet · {fmtNumber(ctx.prop?.total_cbm || 0)} CBM</div>
-                          <div><strong>Khối lượng:</strong> NW {fmtNumber(ctx.inq?.net_weight_kgs || 0)} KG · GW {fmtNumber(ctx.prop?.total_gross_weight || 0)} KG</div>
-                        </div>
-                      </div>
-
+                      {/* Commercial Product Table (Zero Internal Cost Leaks) */}
                       <div>
-                        <h4 className="font-extrabold text-[#0f4a33] uppercase text-[11px] mb-1.5">
-                          1. Cơ cấu Giá vốn, Bao bì, Biên lợi nhuận &amp; Giá sàn
-                        </h4>
                         <table className="w-full border-collapse text-xs">
                           <thead>
                             <tr className="bg-[#0f4a33] text-[#fff5d6]">
-                              <th className="p-2 text-left border border-[#186635]">Hạng mục chi phí / chỉ tiêu</th>
-                              <th className="p-2 text-right border border-[#186635]">Giá trị (USD)</th>
-                              <th className="p-2 text-left border border-[#186635]">Ghi chú nội bộ</th>
+                              <th className="p-2 text-center border border-[#186635] w-10">No.</th>
+                              <th className="p-2 text-left border border-[#186635]">Description of Goods &amp; HS Code</th>
+                              <th className="p-2 text-left border border-[#186635]">Export Packaging</th>
+                              <th className="p-2 text-right border border-[#186635]">Net Weight (KG)</th>
+                              <th className="p-2 text-right border border-[#186635]">FOB Unit Price (USD/KG)</th>
+                              <th className="p-2 text-right border border-[#186635]">Amount (USD)</th>
                             </tr>
                           </thead>
                           <tbody>
-                            <tr>
-                              <td className="p-2 border border-slate-300 font-semibold">Giá vốn hàng hóa (Base Goods Cost)</td>
-                              <td className="p-2 border border-slate-300 text-right font-mono font-bold">{fmtUSD(ctx.prop?.goods_cost || 0)}</td>
-                              <td className="p-2 border border-slate-300">Phân bổ ẩn vào Đơn giá FOB trên Báo giá khách</td>
-                            </tr>
-                            <tr className="bg-slate-50">
-                              <td className="p-2 border border-slate-300 font-semibold">Chi phí Bao bì &amp; Pallet (Packing + Pallet)</td>
-                              <td className="p-2 border border-slate-300 text-right font-mono">{fmtUSD(ctx.prop?.packing_pallet_cost || 0)}</td>
-                              <td className="p-2 border border-slate-300">Pallet fee: {fmtUSD(ctx.prop?.pallet_fee || 0)}</td>
-                            </tr>
-                            <tr>
-                              <td className="p-2 border border-slate-300 font-semibold">Cước biển + Local Charges + Hải quan</td>
-                              <td className="p-2 border border-slate-300 text-right font-mono">{fmtUSD(ctx.prop?.total_freight_local || 0)}</td>
-                              <td className="p-2 border border-slate-300">Phương án thực hiện: {ctx.extraMeta?.freight_exec_option || 'SELF'}</td>
-                            </tr>
-                            <tr className="bg-slate-50">
-                              <td className="p-2 border border-slate-300 font-semibold">Bảo hiểm hàng hải ({ctx.prop?.insurance_code || 'INS-NONE'})</td>
-                              <td className="p-2 border border-slate-300 text-right font-mono">{fmtUSD(ctx.prop?.insurance_cost || 0)}</td>
-                              <td className="p-2 border border-slate-300">Áp dụng cho CIF / CIP</td>
-                            </tr>
-                            <tr>
-                              <td className="p-2 border border-slate-300 font-semibold">Biên lợi nhuận mục tiêu / tối thiểu</td>
-                              <td className="p-2 border border-slate-300 text-right font-mono font-bold text-[#0f4a33]">
-                                {fmtDecimal(ctx.extraMeta?.margin_pct || 0, 1)}% (Min {fmtDecimal(ctx.extraMeta?.min_margin_pct || 0, 1)}%)
-                              </td>
-                              <td className="p-2 border border-slate-300">Lợi nhuận nội bộ dự kiến: {fmtUSD(ctx.extraMeta?.internal_profit_usd || 0)}</td>
-                            </tr>
-                            <tr className="bg-[#fff5d6]">
-                              <td className="p-2 border border-slate-300 font-extrabold">Giá sàn tối thiểu (Floor Price)</td>
-                              <td className="p-2 border border-slate-300 text-right font-mono font-extrabold text-[#8c3b3b]">{fmtUSD(ctx.extraMeta?.floor_price_usd || 0)}</td>
-                              <td className="p-2 border border-slate-300">Sales không được chào thấp hơn mức sàn</td>
-                            </tr>
-                            <tr className="bg-[#d7eee4]">
-                              <td className="p-2 border border-slate-300 font-extrabold">Giá chào đề xuất ({ctx.prop?.recommended_incoterm || 'CIF'})</td>
-                              <td className="p-2 border border-slate-300 text-right font-mono font-extrabold text-[#0f4a33]">{fmtUSD(ctx.prop?.final_selling_price || 0)}</td>
-                              <td className="p-2 border border-slate-300">Khớp tổng thanh toán trên TMP_QUOTATION_01</td>
-                            </tr>
+                            {liveQuotationBreakdown.allocated.map((row, idx) => {
+                              const prod = data.products.find(
+                                (p) => p.sku_code.toLowerCase() === row.item.sku.toLowerCase()
+                              );
+                              const packSpec = resolvePackingSpec(row.item.packingCode, data.pricingRates);
+                              const cleanName =
+                                stripInternalCodesForCustomer(row.item.name_eng || row.item.name) ||
+                                row.item.name_eng ||
+                                row.item.name;
+                              const cleanPack =
+                                stripInternalCodesForCustomer(packSpec.engText || row.item.packingName) ||
+                                packSpec.engText ||
+                                'Export Standard Carton';
+                              return (
+                                <tr key={`${row.item.sku}-${idx}`} className={idx % 2 === 1 ? 'bg-slate-50/70' : ''}>
+                                  <td className="p-2 border border-slate-300 text-center font-mono">{idx + 1}</td>
+                                  <td className="p-2 border border-slate-300">
+                                    <div className="font-bold text-[#07281c]">{cleanName}</div>
+                                    <div className="text-[10.5px] text-slate-500">
+                                      Origin: Vietnam · HS Code: {prod?.hs_code || '0810.90'}
+                                    </div>
+                                  </td>
+                                  <td className="p-2 border border-slate-300 text-[11px]">{cleanPack}</td>
+                                  <td className="p-2 border border-slate-300 text-right font-mono font-semibold">
+                                    {fmtNumber(row.item.weight)}
+                                  </td>
+                                  <td className="p-2 border border-slate-300 text-right font-mono font-bold text-[#0f4a33]">
+                                    ${fmtDecimal(row.unitPricePerKg, 3)}
+                                  </td>
+                                  <td className="p-2 border border-slate-300 text-right font-mono font-bold">
+                                    {fmtUSD(row.lineTotalUsd)}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
-                        </table>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <h4 className="font-extrabold text-[#0f4a33] uppercase text-[11px] mb-1.5">
-                            2. So sánh Phương án Thực hiện (Self vs. Hybrid vs. FWD)
-                          </h4>
-                          <table className="w-full border-collapse text-xs">
-                            <tbody>
+                          <tfoot>
+                            <tr className="bg-[#f4fbf7] font-bold">
+                              <td colSpan={5} className="p-2 border border-slate-300 text-right">
+                                Subtotal (FOB {liveQuotationBreakdown.pol})
+                              </td>
+                              <td className="p-2 border border-slate-300 text-right font-mono">
+                                {fmtUSD(liveQuotationBreakdown.subtotalAmt)}
+                              </td>
+                            </tr>
+                            {liveQuotationBreakdown.freightCost > 0 && (
                               <tr>
-                                <td className="p-1.5 border border-slate-300">Phương án đang chọn</td>
-                                <td className="p-1.5 border border-slate-300 text-right font-mono font-bold">{ctx.extraMeta?.freight_exec_option || 'SELF'}</td>
-                              </tr>
-                              <tr className="bg-slate-50">
-                                <td className="p-1.5 border border-slate-300">Trucking tự chạy (Self)</td>
-                                <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(ctx.extraMeta?.self_trucking || 0)}</td>
-                              </tr>
-                              <tr>
-                                <td className="p-1.5 border border-slate-300">FWD Ocean / Trucking</td>
-                                <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(ctx.extraMeta?.fwd_ocean || 0)} / {fmtUSD(ctx.extraMeta?.fwd_trucking || 0)}</td>
-                              </tr>
-                              <tr className="bg-slate-50">
-                                <td className="p-1.5 border border-slate-300">FWD Hải quan / Giấy phép</td>
-                                <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(ctx.extraMeta?.fwd_customs || 0)} / {fmtUSD(ctx.extraMeta?.fwd_permits || 0)}</td>
-                              </tr>
-                              <tr>
-                                <td className="p-1.5 border border-slate-300 font-bold">Tổng chi phí nội bộ / Thu khách</td>
-                                <td className="p-1.5 border border-slate-300 text-right font-mono font-bold">
-                                  {fmtUSD(ctx.extraMeta?.internal_cost_usd || 0)} / {fmtUSD(ctx.extraMeta?.buyer_charge_usd || 0)}
+                                <td colSpan={5} className="p-2 border border-slate-300 text-right">
+                                  International Ocean Freight ({liveQuotationBreakdown.pol} → {liveQuotationBreakdown.pod})
+                                </td>
+                                <td className="p-2 border border-slate-300 text-right font-mono">
+                                  {fmtUSD(liveQuotationBreakdown.freightCost)}
                                 </td>
                               </tr>
-                            </tbody>
-                          </table>
+                            )}
+                            {liveQuotationBreakdown.insCost > 0 && (
+                              <tr>
+                                <td colSpan={5} className="p-2 border border-slate-300 text-right">
+                                  Marine Cargo Insurance ({liveQuotationBreakdown.insTerm})
+                                </td>
+                                <td className="p-2 border border-slate-300 text-right font-mono">
+                                  {fmtUSD(liveQuotationBreakdown.insCost)}
+                                </td>
+                              </tr>
+                            )}
+                            {liveQuotationBreakdown.destCost > 0 && (
+                              <tr>
+                                <td colSpan={5} className="p-2 border border-slate-300 text-right">
+                                  Destination Delivery &amp; Handling Charges ({adjIncoterm.toUpperCase()})
+                                </td>
+                                <td className="p-2 border border-slate-300 text-right font-mono">
+                                  {fmtUSD(liveQuotationBreakdown.destCost)}
+                                </td>
+                              </tr>
+                            )}
+                            <tr className="bg-[#0f4a33] text-[#fff5d6]">
+                              <td colSpan={5} className="p-2.5 border border-[#186635] text-right font-extrabold text-[12.5px] uppercase">
+                                TOTAL QUOTATION VALUE ({adjIncoterm.toUpperCase()} {liveQuotationBreakdown.incPlace})
+                              </td>
+                              <td className="p-2.5 border border-[#186635] text-right font-mono font-black text-[13.5px] text-[#f4d98a]">
+                                {fmtUSD(liveQuotationBreakdown.sellingVal)}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                        <div className="mt-1.5 text-[11px] italic text-slate-700">
+                          <strong>Say Total:</strong> {liveQuotationBreakdown.words}
+                        </div>
+                      </div>
+
+                      {/* Commercial Terms & Vietcombank Da Nang USD Banking Details */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="rounded-lg border border-slate-300 p-3 space-y-1.5">
+                          <div className="text-[10.5px] font-extrabold uppercase tracking-wider text-[#0f4a33] border-b border-slate-200 pb-1">
+                            COMMERCIAL TERMS &amp; CONDITIONS
+                          </div>
+                          <div><strong>1. Validity:</strong> {adjValidityDays} calendar days from quotation date (until {liveQuotationBreakdown.validUntil}).</div>
+                          <div><strong>2. Payment Terms:</strong> {adjPaymentTerm}.</div>
+                          <div><strong>3. Insurance:</strong> {liveQuotationBreakdown.insTerm}.</div>
+                          <div><strong>4. Export Documents:</strong> Commercial Invoice, Packing List, Bill of Lading, Phytosanitary Certificate, Certificate of Origin (C/O).</div>
+                          <div><strong>5. Lead Time:</strong> 7–14 days upon receipt of deposit / workable L/C.</div>
                         </div>
 
-                        <div>
-                          <h4 className="font-extrabold text-[#0f4a33] uppercase text-[11px] mb-1.5">
-                            3. Bảng so sánh Incoterms 2020 (Giá chào vs. Giá sàn)
-                          </h4>
-                          <table className="w-full border-collapse text-xs">
-                            <thead>
-                              <tr className="bg-[#0f4a33] text-[#fff5d6]">
-                                <th className="p-1.5 text-left border border-[#186635]">Incoterm</th>
-                                <th className="p-1.5 text-right border border-[#186635]">Giá sàn</th>
-                                <th className="p-1.5 text-right border border-[#186635]">Giá chào</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {['EXW', 'FOB', 'CFR', 'CIF', 'CIP', 'DAP', 'DDP'].map((code) => (
-                                <tr key={code} className={code === ctx.prop?.recommended_incoterm ? 'bg-[#fff5d6] font-bold' : ''}>
-                                  <td className="p-1.5 border border-slate-300 font-mono font-bold">{code}</td>
-                                  <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(computeFloorPriceScaled(ctx.prop, ctx.extraMeta, code))}</td>
-                                  <td className="p-1.5 border border-slate-300 text-right font-mono">{fmtUSD(computeSellingPriceScaled(ctx.prop, ctx.extraMeta, code))}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                        <div className="rounded-lg bg-[#fff8e1] border border-[#d4a017]/60 p-3 space-y-1.5">
+                          <div className="text-[10.5px] font-extrabold uppercase tracking-wider text-[#0f4a33] border-b border-[#d4a017]/40 pb-1">
+                            BENEFICIARY BANKING DETAILS (USD)
+                          </div>
+                          <div><strong>Beneficiary:</strong> GREEN AGRICULTURAL PRODUCTS EXPORT CO., LTD</div>
+                          <div><strong>Bank Name:</strong> Joint Stock Commercial Bank for Foreign Trade of Vietnam (Vietcombank) – Da Nang Branch</div>
+                          <div><strong>Bank Address:</strong> 140–142 Le Loi St., Hai Chau Dist., Da Nang City, Vietnam</div>
+                          <div><strong>USD Account No.:</strong> <span className="font-mono font-bold">0041 37 0988 888</span></div>
+                          <div><strong>SWIFT Code:</strong> <span className="font-mono font-bold">BFTVVNVX004</span></div>
+                        </div>
+                      </div>
+
+                      {/* Signature Footer */}
+                      <div className="flex items-end justify-between pt-3 border-t border-slate-200 text-[11px]">
+                        <div className="text-slate-600">
+                          <div>Prepared by: <strong>{ctx.inq?.sale_rep || currentUser?.full_name || 'Export Sales Team'}</strong></div>
+                          <div>GREEN AGRICULTURAL PRODUCTS EXPORT CO., LTD</div>
+                        </div>
+                        <div className="text-right text-slate-500">
+                          <div>Official Commercial Quotation · {cleanQuoteNo}</div>
+                          <div>Thank you for your valued business!</div>
                         </div>
                       </div>
                     </div>
@@ -1249,6 +1798,23 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
                   className="agri-input text-xs font-semibold"
                 />
               </div>
+              {target.kind === 'QUOTATION' && (
+                <div className="rounded-lg bg-[#07281c] border border-[#f4d98a]/40 px-2.5 py-2 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[10px] text-[#9bccb8] uppercase font-bold">File PDF đính kèm chuẩn</div>
+                    <div className="text-[11px] font-mono font-bold text-[#f4d98a] truncate" title={pdfAttachmentName}>
+                      {pdfAttachmentName}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handlePrint}
+                    className="shrink-0 px-2 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[10.5px] font-extrabold cursor-pointer"
+                  >
+                    Xuất PDF
+                  </button>
+                </div>
+              )}
               <div className="flex-1">
                 <label className="block text-[11px] text-[#9bccb8] mb-1">Xem trước nội dung Email</label>
                 <div

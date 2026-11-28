@@ -112,6 +112,33 @@ export const App: React.FC = () => {
     }, 3200);
   }, []);
 
+  const patchProposalMeta = useCallback((orderId: string, patch: Partial<ProposalExtraMeta>) => {
+    const currentMap = readProposalExtraMetaMap();
+    const prev = currentMap[orderId];
+    const base: ProposalExtraMeta = {
+      order_id: orderId,
+      quotation_no: prev?.quotation_no || '',
+      floor_price_usd: prev?.floor_price_usd || 0,
+      min_margin_pct: prev?.min_margin_pct || 0,
+      margin_pct: prev?.margin_pct || 0,
+      exw_price: prev?.exw_price || 0,
+      fob_price: prev?.fob_price || 0,
+      cfr_price: prev?.cfr_price || 0,
+      cif_price: prev?.cif_price || 0,
+    };
+    saveProposalExtraMeta(orderId, {
+      ...(prev || base),
+      ...patch,
+      order_id: orderId,
+    });
+    setProposalMetaMap(readProposalExtraMetaMap());
+  }, []);
+
+  const patchOrderMeta = useCallback((orderId: string, patch: Partial<OrderLogisticsMeta>) => {
+    saveOrderLogisticsMeta(orderId, patch);
+    setOrderMetaMap(readOrderLogisticsMetaMap());
+  }, []);
+
   const syncData = useCallback(async (opts?: { silent?: boolean }) => {
     setIsSyncing(true);
     try {
@@ -316,6 +343,8 @@ export const App: React.FC = () => {
               }}
               onOpenPreview={setPreviewTarget}
               onOpenTimeline={setTimelineOrderId}
+              onPatchProposalMeta={patchProposalMeta}
+              onPatchOrderMeta={patchOrderMeta}
               onRequestConfirm={(title, message, onConfirm, danger) =>
                 setConfirmState({ open: true, title, message, onConfirm, danger })
               }
@@ -491,15 +520,21 @@ export const App: React.FC = () => {
         orderMetaMap={orderMetaMap}
         proposalMetaMap={proposalMetaMap}
         allowQuickAdjust={role === 'SALES' || role === 'ADMIN'}
-        allowInternalView={role === 'XNK' || role === 'ADMIN'}
+        allowInternalView={role === 'SALES' || role === 'XNK' || role === 'ADMIN'}
         onClose={() => setPreviewTarget(null)}
-        onConfirmQuickAdjust={async (orderId, newInc, newPrice, tplMode) => {
+        onConfirmQuickAdjust={async (orderId, newInc, newPrice, validityDays, paymentTerm) => {
           await updateQuotationWorkflow(
             orderId,
-            { quotation_mode: tplMode === 'COMPARISON' ? 'COMPARISON' : 'SINGLE' },
+            {
+              quotation_mode: 'SINGLE',
+              ...(paymentTerm ? { proposed_payment_term: paymentTerm } : {}),
+            },
             { recommended_incoterm: newInc, final_selling_price: newPrice }
           );
-          pushToast('success', `Đã lưu điều chỉnh ${newInc} · ${fmtUSD(newPrice)}.`);
+          if (validityDays && validityDays >= 7 && validityDays <= 15) {
+            patchProposalMeta(orderId, { validity_days: validityDays });
+          }
+          pushToast('success', `Đã lưu điều chỉnh ${newInc} · ${fmtUSD(newPrice)} · Hiệu lực ${validityDays || 7} ngày.`);
           await syncData({ silent: true });
         }}
         onMarkQuotationSent={async (orderId, linkOrSubject) => {

@@ -19,6 +19,13 @@ import {
   Search,
   Package,
   Check,
+  BellRing,
+  Copy,
+  Mail,
+  Send,
+  Wallet,
+  FileSpreadsheet,
+  Download,
 } from 'lucide-react';
 import type {
   AppDataState,
@@ -53,6 +60,7 @@ import {
   parseOrderItems,
   resolvePackingSpec,
   stripItemsTag,
+  stripInternalCodesForCustomer,
   todayIsoDate,
   translateVIEtoENGSmart,
   WORKFLOW_STATUS,
@@ -107,6 +115,8 @@ interface SalesCrmViewProps {
   onDeleteConsignee: (consigneeId: string) => Promise<void>;
   onOpenPreview: (target: PreviewModalTarget) => void;
   onOpenTimeline: (orderId: string) => void;
+  onPatchProposalMeta: (orderId: string, patch: Partial<ProposalExtraMeta>) => void;
+  onPatchOrderMeta: (orderId: string, patch: Partial<OrderLogisticsMeta>) => void;
   onRequestConfirm: (title: string, message: string, onConfirm: () => Promise<void>, danger?: boolean) => void;
   onToast: (type: 'success' | 'error' | 'info' | 'warning', title: string) => void;
 }
@@ -117,6 +127,26 @@ interface DraftLine {
   name_eng: string;
   weightStr: string;
   packingCode: string;
+}
+
+type FollowUpAngle = 'GENERAL' | 'INCOTERM_FLEX' | 'SCHEDULE_VALIDITY';
+
+function formatShortTimestamp(iso?: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}/${mm} ${hh}:${min}`;
+}
+
+function getElapsedHours(iso?: string): number {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return 0;
+  return Math.max(0, (Date.now() - t) / (1000 * 60 * 60));
 }
 
 export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
@@ -135,6 +165,8 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
   onDeleteConsignee,
   onOpenPreview,
   onOpenTimeline,
+  onPatchProposalMeta,
+  onPatchOrderMeta,
   onRequestConfirm,
   onToast,
 }) => {
@@ -185,6 +217,22 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
   // Reprice reason modal
   const [repriceOrderId, setRepriceOrderId] = useState<string | null>(null);
   const [repriceReason, setRepriceReason] = useState('');
+
+  // Follow-up Auto-Draft modal (native Web App assistant)
+  const [followUpOrderId, setFollowUpOrderId] = useState<string | null>(null);
+  const [followUpAngle, setFollowUpAngle] = useState<FollowUpAngle>('GENERAL');
+  const [followUpTo, setFollowUpTo] = useState('');
+  const [followUpSubject, setFollowUpSubject] = useState('');
+  const [followUpBody, setFollowUpBody] = useState('');
+
+  // Deposit (T/T) / L/C Handover modal (Sales -> XNK)
+  const [depositOrderId, setDepositOrderId] = useState<string | null>(null);
+  const [depositMethod, setDepositMethod] = useState<'T/T' | 'L/C'>('T/T');
+  const [depositAmountStr, setDepositAmountStr] = useState('');
+  const [depositRef, setDepositRef] = useState('');
+  const [depositBank, setDepositBank] = useState('');
+  const [depositDate, setDepositDate] = useState('');
+  const [depositNote, setDepositNote] = useState('');
 
   // Customer edit modal
   const [cusModalOpen, setCusModalOpen] = useState(false);
@@ -1759,7 +1807,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   </label>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Incoterm mong muốn</label>
                     <SearchableCombo
@@ -1769,13 +1817,6 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                       allowCustom={false}
                       placeholder="VD: CIF / FOB / CFR..."
                     />
-                  </div>
-                  <div>
-                    <label className="block font-bold text-[#fff5d6] mb-1">Chế độ Báo giá</label>
-                    <select value={quoteMode} onChange={(e) => setQuoteMode(e.target.value as 'SINGLE' | 'COMPARISON')} className="agri-input">
-                      <option value="SINGLE">Đơn lẻ (1 Incoterm)</option>
-                      <option value="COMPARISON">So sánh nhiều ĐK (Tư vấn)</option>
-                    </select>
                   </div>
                   <div>
                     <label className="block font-bold text-[#fff5d6] mb-1">Ngày giao dự kiến</label>
@@ -1836,7 +1877,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   <textarea
                     rows={2}
                     value={rfqNote}
-                    placeholder="VD: Yêu cầu chứng nhận kiểm dịch thực vật, đóng thùng 10kg, gửi bảng so sánh FOB & CIF..."
+                    placeholder="VD: Yêu cầu chứng nhận kiểm dịch thực vật, đóng thùng 10kg, yêu cầu ETD sớm..."
                     onChange={(e) => setRfqNote(e.target.value)}
                     className="agri-input"
                   />
@@ -1858,12 +1899,90 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     );
   }
 
+  const buildFollowUpDraftForInquiry = (inq: InquiryQuotation, angle: FollowUpAngle) => {
+    const cus = data.consignees.find((c) => c.consignee_id === inq.consignee_id);
+    const prop = data.proposals.find((p) => p.order_id === inq.order_id);
+    const extra = proposalMetaMap[inq.order_id];
+    const sch = prop?.schedule_id
+      ? data.schedules.find((s) => s.schedule_id === prop.schedule_id)
+      : undefined;
+    const cleanRef = cleanQuoteNoForCustomer(extra?.quotation_no || '', inq.order_id);
+    const items = parseOrderItems(inq, data.products, data.pricingRates);
+    const engProducts =
+      items
+        .map((it) => stripInternalCodesForCustomer(it.name_eng || it.name))
+        .filter(Boolean)
+        .slice(0, 3)
+        .join(', ') || 'Vietnamese Agricultural Products';
+    const buyerGreeting = cus?.contact_person || inq.contact || cus?.consignee_name || 'Valued Partner';
+    const inc = prop?.recommended_incoterm || inq.desired_incoterm || 'CIF';
+    const pod = sch?.pod || inq.pod || 'your destination port';
+    const priceStr = prop ? fmtUSD(prop.final_selling_price) : 'our quoted price';
+    const subject = `Follow-up: [GREEN AGRI-EXPORTS] Official Quotation – ${engProducts} (${cleanRef})`;
+
+    const angleParagraph =
+      angle === 'INCOTERM_FLEX'
+        ? `If you prefer comparing alternative trade terms (such as FOB Cat Lai / Da Nang vs. CIF ${pod}) or adjusting the payment structure, we would be happy to prepare an updated option tailored to your logistics plan.`
+        : angle === 'SCHEDULE_VALIDITY'
+        ? `Please note that our current ocean freight allocation${sch?.etd ? ` (Est. ETD: ${sch.etd})` : ''}${sch?.expiry_date ? ` and carrier rate validity (until ${sch.expiry_date})` : ''} are filling up quickly. Confirming early will help us secure the best vessel space and rate for your shipment.`
+        : `Could you kindly share your feedback on the packaging specifications, MOQ / order volume (${fmtNumber(inq.net_weight_kgs)} KG), or preferred shipping schedule? We can also flexibly adjust between FOB and CIF terms if helpful.`;
+
+    const body = [
+      `Dear ${buyerGreeting},`,
+      '',
+      `I hope this message finds you well. I am writing to gently follow up on our Official Quotation ${cleanRef} for ${engProducts} (${fmtNumber(inq.net_weight_kgs)} KG, ${inc} ${pod} – ${priceStr}).`,
+      '',
+      angleParagraph,
+      '',
+      `Please let us know if you need product specifications, sample photos, or any clarification prior to order confirmation. We look forward to supporting your upcoming shipment.`,
+      '',
+      `Best regards,`,
+      `${inq.sale_rep || currentUser.full_name || 'Export Sales Team'}`,
+      `GREEN AGRICULTURAL PRODUCTS EXPORT CO., LTD`,
+    ].join('\n');
+
+    return {
+      to: cus?.email || inq.email || '',
+      subject,
+      body,
+    };
+  };
+
+  const openFollowUpModal = (inq: InquiryQuotation, angle: FollowUpAngle = 'GENERAL') => {
+    const draft = buildFollowUpDraftForInquiry(inq, angle);
+    setFollowUpOrderId(inq.order_id);
+    setFollowUpAngle(angle);
+    setFollowUpTo(draft.to);
+    setFollowUpSubject(draft.subject);
+    setFollowUpBody(draft.body);
+  };
+
   if (activeView === 'sales-quotation') {
+    const followUpCountDue = quotationRows.filter((inq) => {
+      const extra = proposalMetaMap[inq.order_id];
+      const sendCount =
+        typeof extra?.send_count === 'number' && extra.send_count > 0
+          ? extra.send_count
+          : inq.sent_mail_link
+          ? 1
+          : 0;
+      const isSent = isSentWaitingCustomerStatus(inq.inquiry_status) && sendCount > 0;
+      if (!isSent) return false;
+      const elapsed = getElapsedHours(extra?.last_sent_at || inq.timestamp);
+      return extra?.engagement_status === 'VIEWED' || elapsed >= 24;
+    }).length;
+
     return (
       <div className="space-y-4">
         <div className="agri-table-wrap">
-          <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex items-center justify-between">
+          <div className="px-4 py-3 bg-[#0f4a33] border-b border-[#186635] flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-extrabold text-[#fff5d6]">Quản lý Báo giá Khách hàng ({quotationRows.length})</h3>
+            {followUpCountDue > 0 && (
+              <span className="keep-badge-color inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold">
+                <BellRing className="w-3.5 h-3.5 text-[#8c3b3b]" />
+                {followUpCountDue} báo giá cần Follow-up
+              </span>
+            )}
           </div>
           <div className="agri-table-scroll">
             <table className="agri-table">
@@ -1874,7 +1993,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   <th className="text-left">Sản phẩm · KL</th>
                   <th className="text-center">Incoterm</th>
                   <th className="text-center">Giá chào (USD)</th>
-                  <th className="text-center">Trạng thái</th>
+                  <th className="text-center">Trạng thái &amp; Follow-up</th>
                   <th className="text-center">Thao tác</th>
                 </tr>
               </thead>
@@ -1890,6 +2009,12 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                       : inq.sent_mail_link
                       ? 1
                       : 0;
+                  const isSent = isSentWaitingCustomerStatus(inq.inquiry_status) || sendCount > 0;
+                  const sentAnchorIso = extra?.last_sent_at || (isSent ? inq.timestamp : '');
+                  const elapsedHrs = isSent ? getElapsedHours(sentAnchorIso) : 0;
+                  const isViewed = extra?.engagement_status === 'VIEWED';
+                  const needsFollowUp =
+                    isSentWaitingCustomerStatus(inq.inquiry_status) && (isViewed || elapsedHrs >= 24);
                   const readyOrSent = isPricedReadyStatus(inq.inquiry_status) || isSentWaitingCustomerStatus(inq.inquiry_status);
                   const canConfirm = readyOrSent && Boolean(prop);
                   const canDelete = !isContractCreatedStatus(inq.inquiry_status) && !data.orders.some((o) => o.order_id === inq.order_id && orderMetaMap[o.order_id]?.is_locked);
@@ -1901,10 +2026,15 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                           {inq.order_id}
                         </button>
                         {sendCount > 0 && (
-                          <div className="mt-0.5">
+                          <div className="mt-0.5 flex flex-wrap items-center justify-center gap-1">
                             <span className="keep-badge-color inline-block px-1.5 py-0.5 rounded-full bg-[#f4d98a] text-[#07281c] text-[10px] font-extrabold">
                               Lần {sendCount}
                             </span>
+                            {extra?.followup_count ? (
+                              <span className="keep-badge-color inline-block px-1.5 py-0.5 rounded-full bg-[#16977f] text-white text-[10px] font-bold">
+                                FU ×{extra.followup_count}
+                              </span>
+                            ) : null}
                           </div>
                         )}
                       </td>
@@ -1920,20 +2050,90 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                         {prop ? fmtUSD(prop.final_selling_price) : <span className="opacity-65 italic">Chờ XNK</span>}
                       </td>
                       <td className="text-center">
-                        <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
-                          {inq.inquiry_status}
-                        </span>
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
+                            {inq.inquiry_status}
+                          </span>
+                          {isSent && !isConfirmedStatus(inq.inquiry_status) && !isContractCreatedStatus(inq.inquiry_status) && (
+                            <div className="flex flex-wrap items-center justify-center gap-1">
+                              {isViewed && (
+                                <span className="keep-badge-color inline-block px-1.5 py-0.5 rounded bg-[#16977f] text-white text-[10px] font-bold">
+                                  Khách đã xem báo giá
+                                </span>
+                              )}
+                              {needsFollowUp ? (
+                                <span className="keep-badge-color inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-[#8c3b3b] text-[#fff5d6] text-[10px] font-extrabold">
+                                  <BellRing className="w-2.5 h-2.5" />
+                                  Cần Follow-up{elapsedHrs >= 48 ? ' (>48h)' : elapsedHrs >= 24 ? ' (>24h)' : ''}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] opacity-80 font-semibold">
+                                  Đã gửi — Chờ phản hồi{sentAnchorIso ? ` (${formatShortTimestamp(sentAnchorIso)})` : ''}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </td>
                       <td className="text-center">
                         <div className="inline-flex flex-wrap justify-center gap-1">
                           {prop && (
-                            <button
-                              type="button"
-                              onClick={() => onOpenPreview({ kind: 'QUOTATION', orderId: inq.order_id, initialQuotationTemplate: 'TMP_QUOTATION_01' })}
-                              className="keep-btn-style px-2.5 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold cursor-pointer"
-                            >
-                              {sendCount > 0 ? `Xem & Gửi lại (Lần ${sendCount + 1})` : 'Xem & Gửi Báo giá'}
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                title="Xem Phiếu tính giá nội bộ XNK (5 nhóm chi phí, Giá sàn, Hạn cước)"
+                                onClick={() => onOpenPreview({ kind: 'QUOTATION', orderId: inq.order_id, initialQuotationTemplate: 'INTERNAL_COSTING_SHEET' })}
+                                className="keep-btn-style px-2 py-1 rounded bg-[#07281c] text-[#f4d98a] border border-[#f4d98a]/50 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                              >
+                                <FileSpreadsheet className="w-3 h-3" /> Phiếu giá XNK
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onOpenPreview({ kind: 'QUOTATION', orderId: inq.order_id, initialQuotationTemplate: 'TMP_QUOTATION_01' })}
+                                className="keep-btn-style px-2.5 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold cursor-pointer"
+                              >
+                                {sendCount > 0 ? `Xem & Gửi lại (Lần ${sendCount + 1})` : 'Xem & Gửi Báo giá'}
+                              </button>
+                            </>
+                          )}
+                          {isSent && !isConfirmedStatus(inq.inquiry_status) && !isContractCreatedStatus(inq.inquiry_status) && (
+                            <>
+                              <button
+                                type="button"
+                                title="Đánh dấu trạng thái khách đã xem báo giá"
+                                onClick={() => {
+                                  const nextStatus = isViewed ? 'WAITING' : 'VIEWED';
+                                  onPatchProposalMeta(inq.order_id, {
+                                    engagement_status: nextStatus,
+                                    viewed_at: nextStatus === 'VIEWED' ? new Date().toISOString() : undefined,
+                                  });
+                                  onToast(
+                                    'info',
+                                    nextStatus === 'VIEWED'
+                                      ? `Đã đánh dấu khách đã xem báo giá ${cleanRef}.`
+                                      : `Đã chuyển ${cleanRef} về Chờ phản hồi.`
+                                  );
+                                }}
+                                className={`keep-btn-style px-2 py-1 rounded text-[11px] font-bold cursor-pointer ${
+                                  isViewed
+                                    ? 'bg-[#16977f] text-white'
+                                    : 'bg-[#d7eee4] text-[#07281c] border border-[#186635]'
+                                }`}
+                              >
+                                {isViewed ? 'Đã xem ✓' : 'Đánh dấu Đã xem'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openFollowUpModal(inq, 'GENERAL')}
+                                className={`keep-btn-style px-2 py-1 rounded text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer ${
+                                  needsFollowUp
+                                    ? 'bg-[#b45309] text-white'
+                                    : 'bg-[#0f4a33] text-[#f4d98a]'
+                                }`}
+                              >
+                                <Mail className="w-3 h-3" /> Soạn Follow-up
+                              </button>
+                            </>
                           )}
                           {isStoredDocumentPath(inq.sent_mail_link) && (
                             <button
@@ -2007,6 +2207,137 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
             </table>
           </div>
         </div>
+
+        {/* Native Follow-Up Auto-Draft Modal */}
+        {followUpOrderId && (() => {
+          const fuInq = data.inquiries.find((i) => i.order_id === followUpOrderId);
+          if (!fuInq) return null;
+          const fuExtra = proposalMetaMap[followUpOrderId];
+          const fuRef = cleanQuoteNoForCustomer(fuExtra?.quotation_no || '', followUpOrderId);
+          return (
+            <div className="fixed inset-0 z-50 bg-[#07281c]/75 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden text-[#f4f8f5]">
+                <div className="px-5 py-3.5 bg-[#0f4a33] border-b-2 border-[#186635] flex items-start justify-between gap-4">
+                  <div>
+                    <h4 className="text-sm font-extrabold text-[#fff5d6] flex items-center gap-1.5">
+                      <BellRing className="w-4 h-4 text-[#f4d98a]" />
+                      Trợ lý Soạn Follow-up Tự động · {fuRef}
+                    </h4>
+                    <p className="text-[11px] text-[#9bccb8] mt-0.5">
+                      Chọn góc độ chăm sóc khách hàng để tạo nhanh nội dung tiếng Anh lịch sự, chuyên nghiệp
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFollowUpOrderId(null)}
+                    className="p-1.5 rounded-lg bg-[#8c3b3b] text-white cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-5 space-y-3 text-xs">
+                  <div className="flex flex-wrap gap-1.5">
+                    {(
+                      [
+                        { id: 'GENERAL', label: 'Bao bì, MOQ & Lịch tàu' },
+                        { id: 'INCOTERM_FLEX', label: 'Linh hoạt FOB vs. CIF' },
+                        { id: 'SCHEDULE_VALIDITY', label: 'Hạn cước & Chỗ tàu ETD' },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          const d = buildFollowUpDraftForInquiry(fuInq, opt.id);
+                          setFollowUpAngle(opt.id);
+                          setFollowUpSubject(d.subject);
+                          setFollowUpBody(d.body);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer border ${
+                          followUpAngle === opt.id
+                            ? 'bg-[#f4d98a] text-[#07281c] border-[#f4d98a]'
+                            : 'bg-[#07281c] text-[#d2ebe0] border-[#186635]'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block font-bold text-[#fff5d6] mb-1">Người nhận (To)</label>
+                      <input
+                        type="email"
+                        value={followUpTo}
+                        onChange={(e) => setFollowUpTo(e.target.value)}
+                        className="agri-input text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-[#fff5d6] mb-1">Tiêu đề Email</label>
+                      <input
+                        type="text"
+                        value={followUpSubject}
+                        onChange={(e) => setFollowUpSubject(e.target.value)}
+                        className="agri-input text-xs font-semibold"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-[#fff5d6] mb-1">Nội dung Follow-up (Tiếng Anh)</label>
+                    <textarea
+                      rows={9}
+                      value={followUpBody}
+                      onChange={(e) => setFollowUpBody(e.target.value)}
+                      className="agri-input text-xs leading-relaxed"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(`Subject: ${followUpSubject}\n\n${followUpBody}`);
+                        onToast('success', 'Đã sao chép email Follow-up vào bộ nhớ tạm.');
+                      }}
+                      className="px-3 py-2 rounded-lg bg-[#0f4a33] border border-[#f4d98a]/50 text-[#fff5d6] font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5" /> Copy Email
+                    </button>
+                    {followUpTo && (
+                      <a
+                        href={`mailto:${encodeURIComponent(followUpTo)}?subject=${encodeURIComponent(followUpSubject)}&body=${encodeURIComponent(followUpBody)}`}
+                        className="px-3 py-2 rounded-lg bg-[#16977f] text-white font-bold inline-flex items-center gap-1.5"
+                      >
+                        <Mail className="w-3.5 h-3.5" /> Mở Mail
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const prevCount = fuExtra?.followup_count || 0;
+                        const nowIso = new Date().toISOString();
+                        onPatchProposalMeta(followUpOrderId, {
+                          followup_count: prevCount + 1,
+                          last_followup_at: nowIso,
+                          last_sent_at: nowIso,
+                        });
+                        onToast('success', `Đã ghi nhận Follow-up lần ${prevCount + 1} cho ${fuRef}.`);
+                        setFollowUpOrderId(null);
+                      }}
+                      className="agri-btn-gold inline-flex items-center gap-1.5"
+                    >
+                      <Send className="w-3.5 h-3.5" /> Ghi nhận Đã Follow-up
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {repriceOrderId && (
           <div className="fixed inset-0 z-50 bg-[#07281c]/75 flex items-center justify-center p-4">
@@ -2082,7 +2413,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   <th className="text-left">Sản phẩm · KL</th>
                   <th className="text-center">Incoterm / TT</th>
                   <th className="text-center">Giá trị (USD)</th>
-                  <th className="text-center">Trạng thái</th>
+                  <th className="text-center">Trạng thái &amp; Cọc / L/C</th>
                   <th className="text-center">Hồ sơ &amp; Xác nhận</th>
                 </tr>
               </thead>
@@ -2091,6 +2422,8 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                   const cus = data.consignees.find((c) => c.consignee_id === ord.consignee_id);
                   const meta = orderMetaMap[ord.order_id];
                   const isLocked = Boolean(meta?.is_locked);
+                  const hasDepositOrLc =
+                    meta?.deposit_lc_status === 'RECEIVED_TT' || meta?.deposit_lc_status === 'OPENED_LC';
                   return (
                     <tr key={ord.order_id}>
                       <td className="text-center">
@@ -2113,55 +2446,111 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                       </td>
                       <td className="text-center font-mono font-extrabold">{fmtUSD(ord.contract_value)}</td>
                       <td className="text-center">
-                        <span className={`keep-badge-color inline-block px-2 py-0.5 rounded text-[11px] font-bold ${isLocked ? 'bg-[#0f4a33] text-[#fff5d6]' : 'bg-[#f4d98a] text-[#07281c]'}`}>
-                          {isLocked ? `Đã ký (${meta?.signed_date || 'OK'})` : 'Chờ Sales đưa ký'}
-                        </span>
+                        <div className="flex flex-col items-center gap-1">
+                          <span className={`keep-badge-color inline-block px-2 py-0.5 rounded text-[11px] font-bold ${isLocked ? 'bg-[#0f4a33] text-[#fff5d6]' : 'bg-[#f4d98a] text-[#07281c]'}`}>
+                            {isLocked ? `Đã ký (${meta?.signed_date || 'OK'})` : 'Chờ Sales đưa ký'}
+                          </span>
+                          {hasDepositOrLc ? (
+                            <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#16977f] text-white text-[10px] font-bold">
+                              {meta?.deposit_lc_status === 'OPENED_LC'
+                                ? `Đã mở L/C${meta.deposit_lc_ref ? ` · ${meta.deposit_lc_ref}` : ''}`
+                                : `Đã cọc T/T${meta?.deposit_amount_usd ? ` · ${fmtUSD(meta.deposit_amount_usd)}` : ''}`}
+                            </span>
+                          ) : isLocked ? (
+                            <span className="text-[10px] opacity-80 italic">Chờ ghi nhận Cọc T/T / L/C</span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="text-center">
-                        <div className="inline-flex flex-wrap items-center justify-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => onOpenPreview({ kind: 'CONTRACT', orderId: ord.order_id })}
-                            className="keep-btn-style px-2.5 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <Eye className="w-3.5 h-3.5" /> Xem hợp đồng
-                          </button>
-                          {ord.contract_link ? (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                openDocumentWithSignedUrl(ord.contract_link).catch((err: any) =>
-                                  onToast('error', err?.message || 'Không thể mở file hợp đồng.')
-                                )
-                              }
-                              className="keep-btn-style px-2.5 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
-                            >
-                              <ExternalLink className="w-3 h-3" /> Mở / Tải File HĐ
-                            </button>
-                          ) : (
+                        <div className="inline-flex flex-wrap items-center justify-center gap-1.5">
+                          {/* Top: View Contract / Bottom: Download Contract */}
+                          <div className="flex flex-col gap-1">
                             <button
                               type="button"
                               onClick={() => onOpenPreview({ kind: 'CONTRACT', orderId: ord.order_id })}
-                              className="keep-btn-style px-2.5 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                              className="keep-btn-style px-2.5 py-1 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold inline-flex items-center justify-center gap-1 cursor-pointer"
                             >
-                              <FileText className="w-3 h-3" /> Mở / Tải File HĐ
+                              <Eye className="w-3.5 h-3.5" /> Xem hợp đồng
                             </button>
-                          )}
-                          {!isLocked && (
+                            {ord.contract_link ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openDocumentWithSignedUrl(ord.contract_link).catch((err: any) =>
+                                    onToast('error', err?.message || 'Không thể tải file hợp đồng.')
+                                  )
+                                }
+                                className="keep-btn-style px-2.5 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold inline-flex items-center justify-center gap-1 cursor-pointer"
+                              >
+                                <Download className="w-3 h-3" /> Tải File HĐ
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => onOpenPreview({ kind: 'CONTRACT', orderId: ord.order_id })}
+                                className="keep-btn-style px-2.5 py-1 rounded bg-[#d7eee4] text-[#07281c] border border-[#186635] text-[11px] font-bold inline-flex items-center justify-center gap-1 cursor-pointer"
+                              >
+                                <FileText className="w-3 h-3" /> Tải File HĐ
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="flex flex-col gap-1">
                             <button
                               type="button"
-                              onClick={() =>
-                                onRequestConfirm(
-                                  'Xác nhận Khách đã ký Hợp đồng?',
-                                  `Hợp đồng ${ord.contract_no} sẽ chuyển sang Mốc 3/6 (Chờ Booking & Đóng hàng) và khóa các điều khoản thương mại.`,
-                                  () => onConfirmSignedContract(ord.order_id)
-                                )
-                              }
-                              className="keep-btn-style px-2.5 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer"
+                              onClick={() => onOpenPreview({ kind: 'CONTRACT', orderId: ord.order_id, initialShowEmail: true })}
+                              className="keep-btn-style px-2.5 py-1 rounded bg-[#07281c] text-[#f4d98a] text-[11px] font-bold inline-flex items-center justify-center gap-1 cursor-pointer"
                             >
-                              <CheckCircle2 className="w-3.5 h-3.5" /> Xác nhận Khách đã ký HĐ
+                              <Mail className="w-3 h-3" /> Gửi Khách
                             </button>
-                          )}
+                            {!isLocked ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onRequestConfirm(
+                                    'Xác nhận Khách đã ký Hợp đồng?',
+                                    `Hợp đồng ${ord.contract_no} sẽ chuyển sang Mốc 3/6 (Chờ Booking & Đóng hàng) và khóa các điều khoản thương mại.`,
+                                    () => onConfirmSignedContract(ord.order_id)
+                                  )
+                                }
+                                className="keep-btn-style px-2.5 py-1 rounded bg-[#f4d98a] text-[#07281c] text-[11px] font-extrabold inline-flex items-center justify-center gap-1 cursor-pointer"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Khách đã ký HĐ
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const isLcTerm = String(ord.payment_terms || '').toUpperCase().includes('L/C');
+                                  setDepositOrderId(ord.order_id);
+                                  setDepositMethod(
+                                    meta?.payment_method_type === 'L/C' || (meta?.payment_method_type !== 'T/T' && isLcTerm)
+                                      ? 'L/C'
+                                      : 'T/T'
+                                  );
+                                  setDepositAmountStr(
+                                    meta?.deposit_amount_usd
+                                      ? formatEditableNumber(meta.deposit_amount_usd)
+                                      : ord.contract_value
+                                      ? formatEditableNumber(Math.round(ord.contract_value * 0.3 * 100) / 100)
+                                      : ''
+                                  );
+                                  setDepositRef(meta?.deposit_lc_ref || '');
+                                  setDepositBank(meta?.deposit_lc_bank || '');
+                                  setDepositDate(meta?.deposit_lc_date || todayIsoDate());
+                                  setDepositNote(meta?.deposit_lc_note || '');
+                                }}
+                                className={`keep-btn-style px-2.5 py-1 rounded text-[11px] font-extrabold inline-flex items-center justify-center gap-1 cursor-pointer ${
+                                  hasDepositOrLc
+                                    ? 'bg-[#16977f] text-white'
+                                    : 'bg-[#f4d98a] text-[#07281c]'
+                                }`}
+                              >
+                                <Wallet className="w-3.5 h-3.5" />
+                                {hasDepositOrLc ? 'Sửa Cọc / L/C' : 'Ghi nhận Cọc T/T / L/C'}
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -2182,6 +2571,160 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
             </table>
           </div>
         </div>
+
+        {/* Deposit (T/T) / L/C Opening Handover Modal */}
+        {depositOrderId && (() => {
+          const depOrd = data.orders.find((o) => o.order_id === depositOrderId);
+          if (!depOrd) return null;
+          return (
+            <div className="fixed inset-0 z-50 bg-[#07281c]/75 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-[#547d59] border-2 border-[#186635] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden text-[#f4f8f5]">
+                <div className="px-5 py-3.5 bg-[#0f4a33] border-b-2 border-[#186635] flex items-start justify-between gap-4">
+                  <div>
+                    <h4 className="text-sm font-extrabold text-[#fff5d6] flex items-center gap-1.5">
+                      <Wallet className="w-4 h-4 text-[#f4d98a]" />
+                      Ghi nhận Cọc T/T / Mở L/C · {depOrd.contract_no}
+                    </h4>
+                    <p className="text-[11px] text-[#9bccb8] mt-0.5">
+                      Bàn giao thông tin thanh toán ban đầu cho Phòng XNK triển khai đóng hàng &amp; xuất tàu
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDepositOrderId(null)}
+                    className="p-1.5 rounded-lg bg-[#8c3b3b] text-white cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-5 space-y-3 text-xs">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDepositMethod('T/T')}
+                      className={`py-2 rounded-lg font-extrabold border cursor-pointer ${
+                        depositMethod === 'T/T'
+                          ? 'bg-[#f4d98a] text-[#07281c] border-[#f4d98a]'
+                          : 'bg-[#07281c] text-[#d2ebe0] border-[#186635]'
+                      }`}
+                    >
+                      Đặt cọc T/T (Deposit)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDepositMethod('L/C')}
+                      className={`py-2 rounded-lg font-extrabold border cursor-pointer ${
+                        depositMethod === 'L/C'
+                          ? 'bg-[#f4d98a] text-[#07281c] border-[#f4d98a]'
+                          : 'bg-[#07281c] text-[#d2ebe0] border-[#186635]'
+                      }`}
+                    >
+                      Mở Thư tín dụng (L/C)
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block font-bold text-[#fff5d6] mb-1">
+                        {depositMethod === 'L/C' ? 'Giá trị L/C (USD)' : 'Số tiền cọc T/T (USD)'}
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={depositAmountStr}
+                        onChange={(e) => setDepositAmountStr(e.target.value)}
+                        placeholder="VD: 6,500.00"
+                        className="agri-input font-mono font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-[#fff5d6] mb-1">
+                        {depositMethod === 'L/C' ? 'Ngày mở L/C' : 'Ngày nhận cọc'}
+                      </label>
+                      <input
+                        type="date"
+                        value={depositDate}
+                        onChange={(e) => setDepositDate(e.target.value)}
+                        className="agri-input font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block font-bold text-[#fff5d6] mb-1">
+                        {depositMethod === 'L/C' ? 'Số L/C (L/C No.)' : 'Số tham chiếu (MT103 / Ref)'}
+                      </label>
+                      <input
+                        type="text"
+                        value={depositRef}
+                        onChange={(e) => setDepositRef(e.target.value)}
+                        placeholder={depositMethod === 'L/C' ? 'VD: LC-2026-88991' : 'VD: FT2611280091'}
+                        className="agri-input font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-[#fff5d6] mb-1">Ngân hàng phát hành / chuyển</label>
+                      <input
+                        type="text"
+                        value={depositBank}
+                        onChange={(e) => setDepositBank(e.target.value)}
+                        placeholder="VD: MUFG Bank / Vietcombank"
+                        className="agri-input"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-[#fff5d6] mb-1">Ghi chú bàn giao Phòng XNK</label>
+                    <textarea
+                      rows={2}
+                      value={depositNote}
+                      onChange={(e) => setDepositNote(e.target.value)}
+                      placeholder="VD: Đã nhận đủ 30% T/T vào TK USD Vietcombank Đà Nẵng, đề nghị XNK đặt booking tàu..."
+                      className="agri-input"
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setDepositOrderId(null)}
+                      className="px-3.5 py-2 rounded-lg bg-[#07281c] text-[#fff5d6] font-bold cursor-pointer"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onPatchOrderMeta(depositOrderId, {
+                          payment_method_type: depositMethod,
+                          deposit_lc_status: depositMethod === 'L/C' ? 'OPENED_LC' : 'RECEIVED_TT',
+                          deposit_amount_usd: parseLocaleNumber(depositAmountStr),
+                          deposit_lc_ref: depositRef.trim(),
+                          deposit_lc_bank: depositBank.trim(),
+                          deposit_lc_date: depositDate || todayIsoDate(),
+                          deposit_lc_note: depositNote.trim(),
+                        });
+                        onToast(
+                          'success',
+                          depositMethod === 'L/C'
+                            ? `Đã ghi nhận mở L/C (${depositRef.trim() || depOrd.contract_no}) bàn giao XNK.`
+                            : `Đã ghi nhận cọc T/T ${fmtUSD(parseLocaleNumber(depositAmountStr))} bàn giao XNK.`
+                        );
+                        setDepositOrderId(null);
+                      }}
+                      className="agri-btn-gold"
+                    >
+                      Lưu &amp; Bàn giao XNK
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     );
   }

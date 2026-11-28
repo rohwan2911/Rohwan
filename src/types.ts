@@ -243,6 +243,13 @@ export interface OrderLogisticsMeta {
   packing_list_link?: string;
   co_link?: string;
   bl_link?: string;
+  payment_method_type?: 'T/T' | 'L/C' | '';
+  deposit_lc_status?: 'PENDING' | 'RECEIVED_TT' | 'OPENED_LC';
+  deposit_amount_usd?: number;
+  deposit_lc_ref?: string;
+  deposit_lc_date?: string;
+  deposit_lc_bank?: string;
+  deposit_lc_note?: string;
 }
 
 export interface ProposalExtraMeta {
@@ -272,6 +279,11 @@ export interface ProposalExtraMeta {
   note?: string;
   send_count?: number;
   last_sent_at?: string;
+  validity_days?: number;
+  engagement_status?: 'WAITING' | 'VIEWED' | 'REPLIED';
+  viewed_at?: string;
+  followup_count?: number;
+  last_followup_at?: string;
 }
 
 export interface AppDataState {
