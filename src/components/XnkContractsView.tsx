@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { FileCheck2, Send, ArrowRightCircle, Ship, FolderOpen, Edit3, Eye, FileDown } from 'lucide-react';
+import { FileCheck2, Send, ArrowRightCircle, Ship, FolderOpen, Edit3, Eye, FileDown, ShieldCheck, AlertTriangle, Clock } from 'lucide-react';
 import type { AppDataState, OrderLogisticsMeta, OrderMaster, ProposalExtraMeta, SysUser, ViewId } from '../types';
 import {
   COMPLETED_ORDER_STATUS,
@@ -16,6 +16,35 @@ import {
 import type { PreviewModalTarget } from './Modals';
 import { SearchableCombo } from './SearchableCombo';
 import { isStoredDocumentPath, openDocumentWithSignedUrl } from '../services/supabaseService';
+
+function isLcPaymentOrder(ord: OrderMaster, meta?: OrderLogisticsMeta): boolean {
+  if (meta?.payment_method_type === 'L/C') return true;
+  if (meta?.payment_method_type === 'T/T') return false;
+  return String(ord.payment_terms || '').toUpperCase().includes('L/C');
+}
+
+function isPaymentGateCleared(ord: OrderMaster, meta?: OrderLogisticsMeta): boolean {
+  if (!meta) return false;
+  if (isLcPaymentOrder(ord, meta)) {
+    return Boolean(
+      meta.payment_gate_verified ||
+        (meta.lc_chk_expiry && meta.lc_chk_latest_ship && meta.lc_chk_46a_docs && meta.lc_chk_21day_pres)
+    );
+  }
+  return Boolean(meta.payment_gate_verified);
+}
+
+function formatCutoffCountdown(iso?: string): { text: string; tone: 'ok' | 'warn' | 'overdue' } | null {
+  if (!iso) return null;
+  const targetMs = new Date(iso).getTime();
+  if (Number.isNaN(targetMs)) return { text: iso, tone: 'ok' };
+  const diffHrs = (targetMs - Date.now()) / (1000 * 60 * 60);
+  if (diffHrs < 0) return { text: 'Quá hạn', tone: 'overdue' };
+  if (diffHrs < 24) return { text: `Còn ${Math.max(1, Math.round(diffHrs))}h`, tone: 'warn' };
+  const days = Math.floor(diffHrs / 24);
+  const remH = Math.round(diffHrs % 24);
+  return { text: `Còn ${days}d ${remH}h`, tone: 'ok' };
+}
 
 interface XnkContractsViewProps {
   activeView: Extract<ViewId, 'xnk-contract' | 'xnk-documents'>;
@@ -153,14 +182,16 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                   const cus = data.consignees.find((c) => c.consignee_id === ord.consignee_id);
                   const meta = orderMetaMap[ord.order_id];
                   const isHighlighted = highlightedOrderId === ord.order_id;
-                  const cutoffs = [
-                    meta?.si_cutoff && `S/I: ${meta.si_cutoff}`,
-                    meta?.vgm_cutoff && `VGM: ${meta.vgm_cutoff}`,
-                    meta?.cfs_cutoff && `CFS: ${meta.cfs_cutoff}`,
-                    meta?.cy_cutoff && `CY: ${meta.cy_cutoff}`,
-                    meta?.customs_cutoff && `HQ: ${meta.customs_cutoff}`,
-                    meta?.draft_bl_cutoff && `Draft B/L: ${meta.draft_bl_cutoff}`,
-                  ].filter(Boolean);
+                  const mandatoryCutoffs: Array<{ label: string; iso?: string }> = [
+                    { label: 'S/I', iso: meta?.si_cutoff },
+                    { label: 'VGM', iso: meta?.vgm_cutoff },
+                    { label: 'Draft B/L', iso: meta?.draft_bl_cutoff },
+                    { label: 'CY/HQ', iso: meta?.cy_cutoff || meta?.customs_cutoff },
+                  ].filter((c) => Boolean(c.iso));
+                  const incUp = String(ord.applied_incoterm || '').toUpperCase();
+                  const freightStatus = ['EXW', 'FCA', 'FAS', 'FOB'].includes(incUp)
+                    ? 'FREIGHT COLLECT'
+                    : 'FREIGHT PREPAID';
                   return (
                     <tr key={ord.order_id} className={isHighlighted ? '!bg-[#f4d98a]/40 ring-2 ring-inset ring-[#186635]' : ''}>
                       <td className="text-center">
@@ -171,14 +202,44 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                       </td>
                       <td className="text-left">
                         <div className="font-bold">{cus?.consignee_name || ord.consignee_id}</div>
-                        <div className="text-[11px] opacity-80">{ord.applied_incoterm} · {fmtUSD(ord.contract_value)}</div>
+                        <div className="text-[11px] opacity-80">
+                          {ord.applied_incoterm} · {fmtUSD(ord.contract_value)} ·{' '}
+                          <span className="font-mono font-bold text-[#0f4a33]">{freightStatus}</span>
+                        </div>
                       </td>
                       <td className="text-left text-xs">
                         <div>{ord.pol} → {ord.pod}</div>
-                        <div className="font-mono text-[11px]">BK: {meta?.bk_no || '-'} · {meta?.ves_voy || '-'}</div>
+                        <div className="font-mono text-[11px]">
+                          BK: {meta?.bk_no || '-'} · {meta?.ves_voy || '-'}
+                          {meta?.reefer_temp ? ` · ${meta.reefer_temp}` : ''}
+                        </div>
                       </td>
-                      <td className="text-left text-[11px] font-mono">
-                        {cutoffs.length > 0 ? cutoffs.join(' · ') : <span className="opacity-65 italic">Chưa nhập Cut-off</span>}
+                      <td className="text-left text-[11px]">
+                        {mandatoryCutoffs.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {mandatoryCutoffs.map((c) => {
+                              const cd = formatCutoffCountdown(c.iso);
+                              return (
+                                <span
+                                  key={c.label}
+                                  title={`${c.label}: ${c.iso}`}
+                                  className={`keep-badge-color inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded font-mono text-[10px] font-bold ${
+                                    cd?.tone === 'overdue'
+                                      ? 'bg-[#8c3b3b] text-white'
+                                      : cd?.tone === 'warn'
+                                      ? 'bg-[#b45309] text-white'
+                                      : 'bg-[#0f4a33] text-[#fff5d6]'
+                                  }`}
+                                >
+                                  <Clock className="w-2.5 h-2.5" />
+                                  {c.label}: {cd?.text || c.iso}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="opacity-65 italic">Chưa nhập 4 mốc Cut-off</span>
+                        )}
                       </td>
                       <td className="text-center font-mono font-bold">{ord.co_form || suggestCoFormCode(ord.pod, cus?.country)}</td>
                       <td className="text-center space-y-1">
@@ -333,6 +394,8 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                   : stageNum >= 7
                   ? COMPLETED_ORDER_STATUS
                   : statusTxt;
+                const paymentGateOk = isPaymentGateCleared(ord, meta);
+                const isLc = isLcPaymentOrder(ord, meta);
                 return (
                   <tr key={ord.order_id}>
                     <td className="text-center">
@@ -370,9 +433,32 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                     </td>
                     <td className="text-center font-mono font-extrabold">{fmtUSD(ord.contract_value)}</td>
                     <td className="text-center">
-                      <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
-                        {displayStatus}
-                      </span>
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
+                          {displayStatus}
+                        </span>
+                        {isLocked && (
+                          <span
+                            className={`keep-badge-color inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              paymentGateOk
+                                ? 'bg-[#16977f] text-white'
+                                : 'bg-[#b45309] text-white'
+                            }`}
+                          >
+                            {paymentGateOk ? (
+                              <>
+                                <ShieldCheck className="w-2.5 h-2.5" />
+                                {isLc ? 'L/C MT700 Đạt' : 'Cọc T/T Đạt'}
+                              </>
+                            ) : (
+                              <>
+                                <AlertTriangle className="w-2.5 h-2.5" />
+                                {isLc ? 'Chờ duyệt L/C' : 'Chờ duyệt Cọc T/T'}
+                              </>
+                            )}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="text-center space-y-1">
                       <div className="inline-flex justify-center gap-1 flex-wrap">
@@ -413,13 +499,26 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                           </button>
                         )}
                         {isLocked && nextM && (
-                          <button
-                            type="button"
-                            onClick={() => onAdvanceMilestone(ord, nextM.nextStatus)}
-                            className="keep-btn-style px-2.5 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <ArrowRightCircle className="w-3 h-3" /> {nextM.label}
-                          </button>
+                          stageNum <= 3 && !paymentGateOk ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                openEditContractModal(ord);
+                                onToast('warning', 'Vui lòng xác nhận Cổng Thanh toán (Cọc T/T hoặc Checklist L/C MT700) trước khi mở khóa Booking & Đóng hàng.');
+                              }}
+                              className="keep-btn-style px-2.5 py-1 rounded bg-[#b45309] text-white text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <ShieldCheck className="w-3 h-3" /> Duyệt Cọc / L/C
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => onAdvanceMilestone(ord, nextM.nextStatus)}
+                              className="keep-btn-style px-2.5 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <ArrowRightCircle className="w-3 h-3" /> {nextM.label}
+                            </button>
+                          )
                         )}
                       </div>
                     </td>
@@ -705,9 +804,136 @@ const ContractBookingModal: React.FC<ContractBookingModalProps> = ({
             </div>
           </div>
 
+          {/* Payment Gate before Stuffing (T/T 30% Deposit or L/C MT700 Compliance Checklist) */}
+          {(() => {
+            const isLc = isLcPaymentOrder(order, meta);
+            const targetDeposit = Math.round(toNum(order.contract_value) * 0.3 * 100) / 100;
+            const gateOk = isPaymentGateCleared(order, meta);
+            return (
+              <div className={`agri-card-inner p-3.5 space-y-2.5 border-2 ${gateOk ? 'border-[#16977f]' : 'border-[#b45309]'}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-extrabold text-[#07281c] uppercase text-[11px] flex items-center gap-1.5">
+                    <ShieldCheck className={`w-4 h-4 ${gateOk ? 'text-[#16977f]' : 'text-[#b45309]'}`} />
+                    Cổng Kiểm soát Thanh toán (Payment Gate — Bắt buộc trước Đóng hàng)
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => onChangeMeta({ ...meta, payment_method_type: 'T/T' })}
+                      className={`px-2 py-0.5 rounded text-[10.5px] font-bold cursor-pointer ${!isLc ? 'bg-[#0f4a33] text-[#f4d98a]' : 'bg-white/70 text-[#07281c]'}`}
+                    >
+                      Cọc T/T (30%)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onChangeMeta({ ...meta, payment_method_type: 'L/C' })}
+                      className={`px-2 py-0.5 rounded text-[10.5px] font-bold cursor-pointer ${isLc ? 'bg-[#0f4a33] text-[#f4d98a]' : 'bg-white/70 text-[#07281c]'}`}
+                    >
+                      L/C MT700
+                    </button>
+                  </div>
+                </div>
+
+                {!isLc ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end">
+                    <div>
+                      <label className="block font-bold mb-1">Cọc T/T thực nhận (30% ≈ {fmtUSD(targetDeposit)})</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={meta.deposit_amount_usd ?? ''}
+                        placeholder={String(targetDeposit)}
+                        onChange={(e) => onChangeMeta({ ...meta, deposit_amount_usd: toNum(e.target.value), deposit_lc_status: 'RECEIVED_TT' })}
+                        className="agri-input font-mono font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold mb-1">Mã điện chuyển tiền (MT103 / Bank Ref)</label>
+                      <input
+                        value={meta.deposit_lc_ref || ''}
+                        placeholder="VD: FT2611280091"
+                        onChange={(e) => onChangeMeta({ ...meta, deposit_lc_ref: e.target.value })}
+                        className="agri-input font-mono"
+                      />
+                    </div>
+                    <label className="inline-flex items-center gap-2 p-2 rounded-lg bg-white/80 border border-[#186635]/40 font-bold text-[#07281c] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(meta.payment_gate_verified)}
+                        onChange={(e) =>
+                          onChangeMeta({
+                            ...meta,
+                            payment_gate_verified: e.target.checked,
+                            deposit_lc_status: e.target.checked ? 'RECEIVED_TT' : meta.deposit_lc_status,
+                          })
+                        }
+                        className="accent-[#0f4a33] w-4 h-4"
+                      />
+                      <span>Đã xác nhận tiền vào TK USD</span>
+                    </label>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block font-bold mb-1">Số L/C (MT700 Reference)</label>
+                        <input
+                          value={meta.deposit_lc_ref || ''}
+                          placeholder="VD: LC-2026-88991"
+                          onChange={(e) => onChangeMeta({ ...meta, deposit_lc_ref: e.target.value, deposit_lc_status: 'OPENED_LC' })}
+                          className="agri-input font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1">Ngân hàng phát hành (Issuing Bank)</label>
+                        <input
+                          value={meta.deposit_lc_bank || ''}
+                          placeholder="VD: MUFG Bank / SMBC"
+                          onChange={(e) => onChangeMeta({ ...meta, deposit_lc_bank: e.target.value })}
+                          className="agri-input"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                      {(
+                        [
+                          ['lc_chk_expiry', '1. Expiry Date & Place hợp lệ'],
+                          ['lc_chk_latest_ship', '2. Latest Shipment Date khả thi theo ETD'],
+                          ['lc_chk_46a_docs', '3. 46A Documents Required khớp chứng từ'],
+                          ['lc_chk_21day_pres', '4. 21-day Presentation Period (Field 48)'],
+                        ] as const
+                      ).map(([field, label]) => (
+                        <label key={field} className="inline-flex items-center gap-2 p-1.5 rounded bg-white/80 border border-[#186635]/30 font-semibold text-[#07281c] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(meta[field])}
+                            onChange={(e) => {
+                              const nextMeta: OrderLogisticsMeta = { ...meta, [field]: e.target.checked };
+                              const all4 = Boolean(
+                                nextMeta.lc_chk_expiry &&
+                                  nextMeta.lc_chk_latest_ship &&
+                                  nextMeta.lc_chk_46a_docs &&
+                                  nextMeta.lc_chk_21day_pres
+                              );
+                              nextMeta.payment_gate_verified = all4;
+                              if (all4) nextMeta.deposit_lc_status = 'OPENED_LC';
+                              onChangeMeta(nextMeta);
+                            }}
+                            className="accent-[#0f4a33]"
+                          />
+                          <span>{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           <div className="agri-card-inner p-3.5 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="font-extrabold text-[#07281c] uppercase text-[11px]">Thông tin Booking &amp; Vận hành Tàu</div>
+              <div className="font-extrabold text-[#07281c] uppercase text-[11px]">Thông tin Booking, Vận hành Tàu &amp; Tính VGM</div>
               <div className="w-full sm:w-80">
                 <SearchableCombo
                   value={selectedScheduleId}
@@ -724,6 +950,8 @@ const ContractBookingModal: React.FC<ContractBookingModalProps> = ({
                         ...meta,
                         ves_voy: [sch.vessel, sch.voyage].filter(Boolean).join(' / ') || meta.ves_voy,
                         fwd_name: sch.shipping_line || meta.fwd_name,
+                        etd_date: sch.etd || meta.etd_date,
+                        eta_date: sch.eta || meta.eta_date,
                       });
                     }
                   }}
@@ -747,6 +975,18 @@ const ContractBookingModal: React.FC<ContractBookingModalProps> = ({
                 <input value={meta.cont_seal_list || ''} onChange={(e) => onChangeMeta({ ...meta, cont_seal_list: e.target.value })} className="agri-input font-mono" />
               </div>
               <div>
+                <label className="block font-bold mb-1">ETD (Ngày tàu chạy)</label>
+                <input type="date" value={meta.etd_date || ''} onChange={(e) => onChangeMeta({ ...meta, etd_date: e.target.value })} className="agri-input font-mono" />
+              </div>
+              <div>
+                <label className="block font-bold mb-1">ETA (Ngày tàu đến)</label>
+                <input type="date" value={meta.eta_date || ''} onChange={(e) => onChangeMeta({ ...meta, eta_date: e.target.value })} className="agri-input font-mono" />
+              </div>
+              <div>
+                <label className="block font-bold mb-1">Nhiệt độ Reefer (nếu hàng lạnh)</label>
+                <input value={meta.reefer_temp || ''} placeholder="VD: -18°C / +12°C, Vent 25%" onChange={(e) => onChangeMeta({ ...meta, reefer_temp: e.target.value })} className="agri-input font-mono" />
+              </div>
+              <div>
                 <label className="block font-bold mb-1">Loại Vận đơn (B/L Type)</label>
                 <SearchableCombo
                   value={meta.bl_type || 'ORIGINAL'}
@@ -765,6 +1005,35 @@ const ContractBookingModal: React.FC<ContractBookingModalProps> = ({
                 <input value={meta.cfs_warehouse || ''} onChange={(e) => onChangeMeta({ ...meta, cfs_warehouse: e.target.value })} className="agri-input" />
               </div>
             </div>
+
+            {/* VGM Auto-Calculation Strip */}
+            {(() => {
+              const cargoGw = toNum(prop?.total_gross_weight) || Math.round(toNum(order.nw_confirmed_kgs) * 1.06);
+              const defaultTare = String(prop?.container_type || '').includes('40') ? 3800 : 2200;
+              const contTare = meta.container_tare_kg !== undefined && meta.container_tare_kg > 0 ? meta.container_tare_kg : defaultTare;
+              const vgmTotal = cargoGw + contTare;
+              return (
+                <div className="rounded-lg bg-[#0f4a33] text-[#fff5d6] p-2.5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                  <div className="font-bold">
+                    VGM = Cargo Gross Weight (<span className="font-mono text-[#f4d98a]">{fmtNumber(cargoGw)} KG</span>) + Container Tare
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="inline-flex items-center gap-1">
+                      <span>Tare (KG):</span>
+                      <input
+                        type="number"
+                        value={contTare}
+                        onChange={(e) => onChangeMeta({ ...meta, container_tare_kg: Math.max(0, toNum(e.target.value)) })}
+                        className="w-20 px-1.5 py-0.5 rounded bg-[#07281c] border border-[#f4d98a]/50 text-[#f4d98a] font-mono font-bold text-center"
+                      />
+                    </label>
+                    <span className="px-2 py-0.5 rounded bg-[#f4d98a] text-[#07281c] font-mono font-black">
+                      VGM: {fmtNumber(vgmTotal)} KG
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           <div className="agri-card-inner p-3.5 space-y-2.5">

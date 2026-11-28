@@ -2164,14 +2164,14 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                                 type="button"
                                 onClick={() =>
                                   onRequestConfirm(
-                                    'Chốt đơn hàng?',
-                                    `Xác nhận khách hàng đã đồng ý báo giá ${cleanRef} và chuyển sang Phòng XNK khởi tạo Hợp đồng Ngoại thương?`,
+                                    'Chốt đơn & Lập Hợp đồng Ngoại thương?',
+                                    `Xác nhận khách hàng đã đồng ý báo giá ${cleanRef}? Hệ thống sẽ tự động khớp mẫu Hợp đồng theo nhóm sản phẩm, điền sẵn điều khoản C/O, dung sai ±5%, bảo hiểm 110% và mở bản xem trước để Sales gửi khách ngay.`,
                                     () => onConfirmOrder(inq.order_id)
                                   )
                                 }
                                 className="keep-btn-style px-2.5 py-1 rounded bg-[#16977f] text-white text-[11px] font-bold cursor-pointer"
                               >
-                                Khách Chốt đơn
+                                Chốt đơn &amp; Lập Hợp đồng
                               </button>
                             </>
                           )}

@@ -250,6 +250,15 @@ export interface OrderLogisticsMeta {
   deposit_lc_date?: string;
   deposit_lc_bank?: string;
   deposit_lc_note?: string;
+  payment_gate_verified?: boolean;
+  lc_chk_expiry?: boolean;
+  lc_chk_latest_ship?: boolean;
+  lc_chk_46a_docs?: boolean;
+  lc_chk_21day_pres?: boolean;
+  reefer_temp?: string;
+  container_tare_kg?: number;
+  etd_date?: string;
+  eta_date?: string;
 }
 
 export interface ProposalExtraMeta {

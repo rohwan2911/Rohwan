@@ -312,8 +312,11 @@ export const App: React.FC = () => {
               }}
               onConfirmOrder={async (orderId) => {
                 await updateQuotationWorkflow(orderId, { inquiry_status: WORKFLOW_STATUS.CONFIRMED_ORDER });
-                pushToast('success', `Đã chốt đơn ${orderId} chuyển sang XNK lập Hợp đồng.`);
+                const ord = await createOrOverwriteContractDraft(data, orderId, currentUser.full_name);
+                patchOrderMeta(orderId, { sent_to_sales: true });
                 await syncData({ silent: true });
+                pushToast('success', `Đã chốt đơn & lập Hợp đồng ${ord.contract_no} — Sẵn sàng xem, xuất file và gửi khách.`);
+                setPreviewTarget({ kind: 'CONTRACT', orderId });
               }}
               onRequestReprice={async (orderId, reason) => {
                 const inq = data.inquiries.find((i) => i.order_id === orderId);

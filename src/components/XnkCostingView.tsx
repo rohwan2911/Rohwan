@@ -96,12 +96,9 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
   const [podFilter, setPodFilter] = useState('');
   const [selectedScheduleId, setSelectedScheduleId] = useState('');
 
-  // Incoterms & 3-criteria Filter
+  // Incoterms 2020 selection
   const [proposedIncoterms, setProposedIncoterms] = useState<string[]>(['CIF']);
   const [recIncoterm, setRecIncoterm] = useState('CIF');
-  const [filterFreight, setFilterFreight] = useState('');
-  const [filterIns, setFilterIns] = useState('');
-  const [filterRisk, setFilterRisk] = useState('');
 
   // Gemini AI Advisor
   const [aiMessages, setAiMessages] = useState<AiChatMessage[]>([]);
@@ -457,10 +454,22 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
       : (mix.hasLcl && fwdOcean > 0 ? fwdOcean : 0);
     const cfrSell = Math.round((fobSell + freightF) * 100) / 100;
 
-    const defaultCifPct = toNum(insuranceCatalog.byCode['INS-ICC-C']?.standard_rate) || 0.08;
+    const defaultCifPct = toNum(insuranceCatalog.byCode['INS-ICC-C']?.standard_rate) || 0.12;
     const defaultCipPct = toNum(insuranceCatalog.byCode['INS-ICC-A']?.standard_rate) || 0.25;
-    const cifRatePct = recIncoterm === 'CIF' && selectedInsRatePct > 0 ? selectedInsRatePct : defaultCifPct;
-    const cipRatePct = recIncoterm === 'CIP' && selectedInsRatePct > 0 ? selectedInsRatePct : defaultCipPct;
+    const defaultFrzPct = toNum(insuranceCatalog.byCode['INS-FRZ-A']?.standard_rate) || 0.35;
+    const isColdCargo = mix.reefer > 0 || itemsState.some((it) => isReeferProduct(data.products.find((p) => p.sku_code === it.sku), it.name));
+    const cifRatePct =
+      recIncoterm === 'CIF' && selectedInsRatePct > 0
+        ? selectedInsRatePct
+        : isColdCargo
+        ? defaultFrzPct
+        : defaultCifPct;
+    const cipRatePct =
+      recIncoterm === 'CIP' && selectedInsRatePct > 0
+        ? selectedInsRatePct
+        : isColdCargo
+        ? defaultFrzPct
+        : defaultCipPct;
     const insCif = computeInsurancePremiumExact(cfrSell, cifRatePct);
     const insCip = computeInsurancePremiumExact(cfrSell, cipRatePct);
     const cifSell = Math.round((cfrSell + insCif) * 100) / 100;
@@ -502,6 +511,11 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
       ? fobSell
       : Math.round((fobSell + effOcean + effSurcharge + effDest + effInsurance) * 100) / 100;
 
+    const totalInputCost = Math.round(
+      (goodsCost + effectivePackingCost + effTrucking + localTotal + customsTotal + effOcean + effSurcharge + effInsurance + effDest) * 100
+    ) / 100;
+    const marginUsd = Math.round((finalSelling - totalInputCost) * 100) / 100;
+
     const computedFloor = Math.round(
       (goodsAndPack * (1 + minMarginPct / 100) +
         (isExw ? 0 : originCharges) +
@@ -542,6 +556,8 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
       effDest,
       totalFreightLocal,
       effInsurance,
+      totalInputCost,
+      marginUsd,
       finalSelling,
       floorPrice,
       computedFloor,
@@ -559,7 +575,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
     };
   }, [
     goodsCost, effectivePackingCost, marginPct, selfTruckChecked, selfTruckRate, defaultTruckRate,
-    fwdTruck, fullLocalTotal, customsSplit, schOceanRes, mix.hasLcl, fwdOcean,
+    fwdTruck, fullLocalTotal, customsSplit, schOceanRes, mix.hasLcl, mix.reefer, itemsState, data.products, fwdOcean,
     insuranceCatalog, recIncoterm, selectedInsRatePct, includeFreight, destExtra, importDutyUsd,
     includeInsurance, manualInsurance, minMarginPct, manualFloorPrice, fwdCustoms, fwdPermits,
     selfOceanChecked, selfCustomsChecked, selfPermitsChecked, execOption,
@@ -568,14 +584,25 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
   const applyIncotermToKhung4 = (code: string) => {
     setRecIncoterm(code);
     const rule = INCOTERMS_2020_MATRIX.find((r) => r.code === code);
+    const isCold = mix.reefer > 0 || itemsState.some((it) => isReeferProduct(data.products.find((p) => p.sku_code === it.sku), it.name));
     if (rule) {
       setIncludeFreight(rule.includeFreight);
       setIncludeInsurance(rule.includeIns);
+      setManualInsurance('');
       if (!rule.includeIns) {
         setInsBaseCode('INS-NONE');
         setInsAddons([]);
-      } else if (insBaseCode === 'INS-NONE') {
-        setInsBaseCode(code === 'CIP' ? 'INS-ICC-A' : 'INS-ICC-C');
+      } else {
+        if (isCold && insuranceCatalog.byCode['INS-FRZ-A']) {
+          setInsBaseCode('INS-FRZ-A');
+          setInsAddons([]);
+        } else if (code === 'CIP') {
+          setInsBaseCode('INS-ICC-A');
+          setInsAddons([]);
+        } else {
+          setInsBaseCode('INS-ICC-C');
+          setInsAddons(insuranceCatalog.byCode['INS-EXT-SWH'] ? ['INS-EXT-SWH'] : []);
+        }
       }
     }
   };
@@ -1104,40 +1131,25 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
           </div>
         </div>
 
-        {/* 3-Criteria Filter + 11 Checkboxes */}
-        <div className="agri-card-inner p-3.5 space-y-3 text-xs">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <select value={filterFreight} onChange={(e) => setFilterFreight(e.target.value)} className="agri-input text-xs">
-              <option value="">-- Lọc 1: Ai trả cước chính --</option>
-              <option value="BUYER">Người mua trả cước (EXW, FCA, FAS, FOB)</option>
-              <option value="SELLER">Người bán trả cước (CFR, CIF, CPT, CIP, DAP, DPU, DDP)</option>
-            </select>
-            <select value={filterIns} onChange={(e) => setFilterIns(e.target.value)} className="agri-input text-xs">
-              <option value="">-- Lọc 2: Trách nhiệm Bảo hiểm --</option>
-              <option value="NONE">Không bắt buộc mua BH</option>
-              <option value="MIN_C">Tối thiểu ICC (C) - CIF</option>
-              <option value="MAX_A">Mọi rủi ro ICC (A) - CIP</option>
-              <option value="OPTIONAL">Tùy chọn bảo vệ (DAP/DPU/DDP)</option>
-            </select>
-            <select value={filterRisk} onChange={(e) => setFilterRisk(e.target.value)} className="agri-input text-xs">
-              <option value="">-- Lọc 3: Điểm chuyển rủi ro --</option>
-              <option value="ORIGIN">Tại xưởng / Nơi đi (EXW, FCA, CPT, CIP)</option>
-              <option value="PORT_ORIGIN">Tại cảng đi (FAS, FOB, CFR, CIF)</option>
-              <option value="DESTINATION">Tại cảng/nơi đến (DAP, DPU, DDP)</option>
-            </select>
+        {/* 11 Incoterms 2020 Checkboxes (Single Horizontal Row) */}
+        <div className="agri-card-inner p-3.5 space-y-2 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-extrabold text-[#07281c] uppercase text-[11px]">
+              Chọn Điều kiện Incoterms 2020 cần tính / so sánh
+            </span>
+            {aiBestTerm && (
+              <span className="px-2 py-0.5 rounded bg-[#0f4a33] text-[#f4d98a] font-mono font-bold text-[11px]">
+                ★ AI Khuyến nghị: {aiBestTerm}
+              </span>
+            )}
           </div>
-
           <div className="flex flex-wrap gap-1.5">
-            {INCOTERMS_2020_MATRIX.filter((r) => {
-              if (filterFreight && r.freightOwner !== filterFreight) return false;
-              if (filterIns && r.insOwner !== filterIns) return false;
-              if (filterRisk && r.riskGroup !== filterRisk) return false;
-              return true;
-            }).map((r) => {
+            {INCOTERMS_2020_MATRIX.map((r) => {
               const checked = proposedIncoterms.includes(r.code);
               return (
                 <label
                   key={r.code}
+                  title={`${r.code} — ${r.fullName}`}
                   className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border-[1.5px] font-mono font-bold cursor-pointer ${
                     checked ? 'bg-[#0f4a33] border-[#f4d98a] text-[#fff5d6]' : 'bg-[#d7eee4] border-[#186635] text-[#07281c]'
                   }`}
@@ -1240,21 +1252,28 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 text-xs">
           <div className="lg:col-span-7 agri-card-inner p-4 space-y-3">
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 items-end">
+            {/* Compact Margin / Floor Inputs (+ Conditional Group D Destination / Duty Inputs) */}
+            <div className={`grid gap-2.5 items-end ${
+              recIncoterm === 'DDP'
+                ? 'grid-cols-2 sm:grid-cols-5'
+                : ['DAP', 'DPU'].includes(recIncoterm)
+                ? 'grid-cols-2 sm:grid-cols-4'
+                : 'grid-cols-3'
+            }`}>
               <div className="flex flex-col justify-end h-full">
-                <label className="text-[11px] leading-tight font-bold mb-1.5 min-h-[28px] flex items-end">
+                <label className="text-[11px] leading-tight font-bold mb-1.5 min-h-[26px] flex items-end">
                   Biên LN mục tiêu (%)
                 </label>
                 <input type="text" inputMode="decimal" placeholder="VD: 12" value={marginPctStr} onChange={(e) => setMarginPctStr(e.target.value)} className="agri-input font-mono font-bold" />
               </div>
               <div className="flex flex-col justify-end h-full">
-                <label className="text-[11px] leading-tight font-bold mb-1.5 min-h-[28px] flex items-end">
+                <label className="text-[11px] leading-tight font-bold mb-1.5 min-h-[26px] flex items-end">
                   Biên LN sàn (%)
                 </label>
                 <input type="text" inputMode="decimal" placeholder="VD: 5" value={minMarginPctStr} onChange={(e) => setMinMarginPctStr(e.target.value)} className="agri-input font-mono" />
               </div>
               <div className="flex flex-col justify-end h-full">
-                <label className="text-[11px] leading-tight font-bold mb-1.5 min-h-[28px] flex items-end">
+                <label className="text-[11px] leading-tight font-bold mb-1.5 min-h-[26px] flex items-end">
                   Giá Sàn Floor ($)
                 </label>
                 <input
@@ -1266,41 +1285,43 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                   className="agri-input font-mono font-bold"
                 />
               </div>
-              <div className="flex flex-col justify-end h-full">
-                <label className="text-[11px] leading-tight font-bold mb-1.5 min-h-[28px] flex items-end">
-                  Phí Đích DAP/DPU/DDP ($)
-                </label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="VD: 450.00"
-                  disabled={!['DAP', 'DPU', 'DDP'].includes(recIncoterm)}
-                  value={destExtraStr}
-                  onChange={(e) => setDestExtraStr(e.target.value)}
-                  className="agri-input font-mono disabled:opacity-50"
-                />
-              </div>
-              <div className="flex flex-col justify-end h-full">
-                <label className="text-[11px] leading-tight font-bold mb-1.5 min-h-[28px] flex items-end">
-                  Thuế NK (DDP $)
-                </label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="VD: 320.00"
-                  disabled={recIncoterm !== 'DDP'}
-                  value={importDutyStr}
-                  onChange={(e) => setImportDutyStr(e.target.value)}
-                  className="agri-input font-mono disabled:opacity-50"
-                />
-              </div>
+              {['DAP', 'DPU', 'DDP'].includes(recIncoterm) && (
+                <div className="flex flex-col justify-end h-full">
+                  <label className="text-[11px] leading-tight font-bold mb-1.5 min-h-[26px] flex items-end">
+                    {recIncoterm === 'DPU' ? 'Phí Đích & Dỡ hàng (DPU $)' : `Phí Đích (${recIncoterm} $)`}
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="VD: 450.00"
+                    value={destExtraStr}
+                    onChange={(e) => setDestExtraStr(e.target.value)}
+                    className="agri-input font-mono"
+                  />
+                </div>
+              )}
+              {recIncoterm === 'DDP' && (
+                <div className="flex flex-col justify-end h-full">
+                  <label className="text-[11px] leading-tight font-bold mb-1.5 min-h-[26px] flex items-end">
+                    Thuế NK (DDP $)
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="VD: 320.00"
+                    value={importDutyStr}
+                    onChange={(e) => setImportDutyStr(e.target.value)}
+                    className="agri-input font-mono"
+                  />
+                </div>
+              )}
             </div>
 
-            {/* Insurance Selector + Formula V = (C+F)*1.1 / (1-R) */}
+            {/* 2-Row Insurance Selector + Extension Checkboxes */}
             <div className="p-3 rounded-xl bg-white/60 border border-[#186635]/40 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-extrabold text-[#07281c] flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-[#0f4a33]" /> Bảo hiểm V = (C+F)×1.1 / (1-R) · R = {fmtDecimal(selectedInsRatePct, 2)}%
+                  <ShieldCheck className="w-4 h-4 text-[#0f4a33]" /> Bảo hiểm 110% · V = (C+F)×1.1 / (1-R) · R = {fmtDecimal(selectedInsRatePct, 2)}%
                 </span>
                 <label className="inline-flex items-center gap-1.5 font-bold cursor-pointer">
                   <input type="checkbox" checked={includeInsurance} onChange={(e) => setIncludeInsurance(e.target.checked)} className="accent-[#0f4a33]" />
@@ -1355,20 +1376,32 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
               {insClauseEng && <div className="text-[11px] text-[#0f4a33] font-semibold">Điều khoản HĐ: {insClauseEng}</div>}
             </div>
 
-            {/* 2-Way Cross-Locked Self vs FWD Matrix */}
-            <div className="p-3 rounded-xl bg-white/60 border border-[#186635]/40 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <label className="inline-flex items-center gap-2 font-extrabold text-[#07281c] cursor-pointer whitespace-nowrap">
-                  <input type="checkbox" checked={showFwdCompare} onChange={(e) => setShowFwdCompare(e.target.checked)} className="accent-[#0f4a33] shrink-0" />
-                  <span>So sánh Nội bộ (Self) vs Forwarder (FWD)</span>
-                </label>
-                <span className="px-2 py-0.5 rounded bg-[#0f4a33] text-[#f4d98a] font-mono font-bold whitespace-nowrap shrink-0">
-                  Lựa chọn: {execOption}
-                </span>
+            {/* Conditional Self vs FWD Comparison (Hidden by default for FCL with toggle; auto-expanded for LCL) */}
+            <div className="p-3 rounded-xl bg-white/60 border border-[#186635]/40 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="font-extrabold text-[#07281c]">
+                    So sánh Tự làm vs. Forwarder
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-[#0f4a33] text-[#f4d98a] font-bold text-[10.5px]">
+                    {execOption === 'SELF'
+                      ? '1. Tự làm 100%'
+                      : execOption === 'HYBRID'
+                      ? '2. Kết hợp tối ưu'
+                      : '3. FWD trọn gói'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowFwdCompare((v) => !v)}
+                  className="px-2.5 py-1 rounded-lg bg-[#0f4a33] text-[#f4d98a] text-[11px] font-bold cursor-pointer hover:bg-[#07281c]"
+                >
+                  {showFwdCompare ? 'Ẩn bảng so sánh FWD' : 'Mở bảng so sánh FWD'}
+                </button>
               </div>
 
               {showFwdCompare && (
-                <div className="space-y-2 pt-1">
+                <div className="space-y-2.5 pt-1">
                   <table className="w-full text-xs border border-[#186635]/40">
                     <thead className="bg-[#547d59] text-[#fff5d6]">
                       <tr>
@@ -1380,7 +1413,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                     </thead>
                     <tbody>
                       <tr className="border-t border-[#186635]/30">
-                        <td className="p-1.5 text-left font-semibold">1. Ocean &amp; Local/CFS</td>
+                        <td className="p-1.5 text-left font-semibold">1. Cước biển &amp; Local/CFS</td>
                         <td className="p-1.5 text-center">
                           <input
                             type="checkbox"
@@ -1511,76 +1544,128 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                     </tbody>
                   </table>
 
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                    <div className="flex flex-wrap gap-1.5">
-                      {!mix.hasLcl && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setExecOption('SELF');
-                            setSelfOceanChecked(true);
-                            setSelfCustomsChecked(true);
-                            setSelfPermitsChecked(true);
-                            if (defaultTruckRate > 0) {
-                              setSelfTruckChecked(true);
-                              if (selfTruckRate === 0) setSelfTruckRateStr(fmtDecimal(defaultTruckRate, 2));
-                            }
-                            setFwdOceanStr('');
-                            setFwdTruckStr('');
-                            setFwdCustomsStr('');
-                            setFwdPermitsStr('');
-                          }}
-                          className={`px-2 py-1 rounded font-bold cursor-pointer ${execOption === 'SELF' ? 'bg-[#0f4a33] text-[#f4d98a]' : 'bg-[#d7eee4]'}`}
-                        >
-                          Công ty tự làm 100% ({fmtUSD(costing.selfTotal || 0)})
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setExecOption('HYBRID')}
-                        className={`px-2 py-1 rounded font-bold cursor-pointer ${execOption === 'HYBRID' ? 'bg-[#0f4a33] text-[#f4d98a]' : 'bg-[#d7eee4]'}`}
-                      >
-                        Thuê FWD vài hạng mục / Kết hợp tối ưu ({fmtUSD(costing.hybridTotal)})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setExecOption('FWD_ALL');
-                          setSelfOceanChecked(false);
-                          setSelfTruckChecked(false);
-                          setSelfCustomsChecked(false);
-                          setSelfPermitsChecked(false);
-                        }}
-                        className={`px-2 py-1 rounded font-bold cursor-pointer ${execOption === 'FWD_ALL' ? 'bg-[#0f4a33] text-[#f4d98a]' : 'bg-[#d7eee4]'}`}
-                      >
-                        Thuê FWD trọn gói 100% ({fmtUSD(costing.fwdAllTotal)})
-                      </button>
-                    </div>
-                    <div className="font-mono font-bold text-[#07281c]">
-                      Chi phí nội bộ: {fmtUSD(costing.internalCost)} · Chênh lệch cước: {fmtUSD(costing.internalProfit)}
-                    </div>
+                  {/* 3 Distinct Option Cards with Real Totals */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      disabled={mix.hasLcl}
+                      onClick={() => {
+                        setExecOption('SELF');
+                        setSelfOceanChecked(true);
+                        setSelfCustomsChecked(true);
+                        setSelfPermitsChecked(true);
+                        if (defaultTruckRate > 0) {
+                          setSelfTruckChecked(true);
+                          if (selfTruckRate === 0) setSelfTruckRateStr(fmtDecimal(defaultTruckRate, 2));
+                        }
+                        setFwdOceanStr('');
+                        setFwdTruckStr('');
+                        setFwdCustomsStr('');
+                        setFwdPermitsStr('');
+                      }}
+                      className={`p-2 rounded-lg border text-left transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed ${
+                        execOption === 'SELF' && !mix.hasLcl
+                          ? 'bg-[#0f4a33] text-[#fff5d6] border-[#f4d98a]'
+                          : 'bg-[#d7eee4] text-[#07281c] border-[#186635]/50'
+                      }`}
+                    >
+                      <div className="text-[10.5px] font-extrabold">1. Tự làm 100%</div>
+                      <div className="font-mono font-black text-xs mt-0.5">
+                        {mix.hasLcl ? 'LCL → Thuê FWD' : fmtUSD(costing.selfTotal || 0)}
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setExecOption('HYBRID')}
+                      className={`p-2 rounded-lg border text-left transition-colors cursor-pointer ${
+                        execOption === 'HYBRID'
+                          ? 'bg-[#0f4a33] text-[#fff5d6] border-[#f4d98a]'
+                          : 'bg-[#d7eee4] text-[#07281c] border-[#186635]/50'
+                      }`}
+                    >
+                      <div className="text-[10.5px] font-extrabold">2. Kết hợp tối ưu</div>
+                      <div className="font-mono font-black text-xs mt-0.5">{fmtUSD(costing.hybridTotal)}</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExecOption('FWD_ALL');
+                        setSelfOceanChecked(false);
+                        setSelfTruckChecked(false);
+                        setSelfCustomsChecked(false);
+                        setSelfPermitsChecked(false);
+                      }}
+                      className={`p-2 rounded-lg border text-left transition-colors cursor-pointer ${
+                        execOption === 'FWD_ALL'
+                          ? 'bg-[#0f4a33] text-[#fff5d6] border-[#f4d98a]'
+                          : 'bg-[#d7eee4] text-[#07281c] border-[#186635]/50'
+                      }`}
+                    >
+                      <div className="text-[10.5px] font-extrabold">3. FWD trọn gói</div>
+                      <div className="font-mono font-black text-xs mt-0.5">{fmtUSD(costing.fwdAllTotal)}</div>
+                    </button>
+                  </div>
+                  <div className="text-[11px] font-mono font-bold text-[#07281c] flex justify-between">
+                    <span>Chi phí Logistics nội bộ: {fmtUSD(costing.internalCost)}</span>
+                    <span>Chênh lệch cước: {fmtUSD(costing.internalProfit)}</span>
                   </div>
                 </div>
               )}
             </div>
           </div>
 
+          {/* Right Column: TỔNG HỢP CẤU TRÚC GIÁ NỘI BỘ (Exact Cent Reconciliation) */}
           <div className="lg:col-span-5 dash-xnk-dark p-4 flex flex-col justify-between space-y-3">
             <div className="space-y-1.5 text-xs">
-              <div className="text-[11px] font-bold uppercase text-[#f4d98a] mb-2">Tổng hợp Cấu trúc Giá ({recIncoterm})</div>
-              <div className="flex justify-between"><span>Giá vốn hàng hóa:</span><span className="font-mono font-bold">{fmtUSD(goodsCost)}</span></div>
-              <div className="flex justify-between"><span>Bao bì &amp; Pallet:</span><span className="font-mono font-bold">{fmtUSD(effectivePackingCost)}</span></div>
-              <div className="flex justify-between"><span>Trucking + Local + Hải quan/C/O:</span><span className="font-mono">{fmtUSD(costing.effTrucking + costing.localTotal + costing.customsTotal)}</span></div>
-              <div className="flex justify-between"><span>Cước biển + Phụ phí tàu:</span><span className="font-mono">{fmtUSD(costing.effOcean + costing.effSurcharge)}</span></div>
-              <div className="flex justify-between"><span>Phí Đích (+ Thuế NK) &amp; Bảo hiểm:</span><span className="font-mono">{fmtUSD(costing.effDest + costing.effInsurance)}</span></div>
-              <div className="border-t border-white/15 pt-2 flex justify-between text-base font-extrabold text-[#f4d98a]">
-                <span>GIÁ BÁN ĐỀ XUẤT:</span>
+              <div className="text-[11px] font-extrabold uppercase text-[#f4d98a] tracking-wide mb-2">
+                TỔNG HỢP CẤU TRÚC GIÁ NỘI BỘ ({recIncoterm})
+              </div>
+              <div className="flex justify-between">
+                <span>1. Giá vốn hàng hóa:</span>
+                <span className="font-mono font-bold">{fmtUSD(goodsCost)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>2. Bao bì &amp; Pallet:</span>
+                <span className="font-mono font-bold">{fmtUSD(effectivePackingCost)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>3. Logistics đầu xuất (Truck + Local + HQ/C/O):</span>
+                <span className="font-mono">{fmtUSD(costing.effTrucking + costing.localTotal + costing.customsTotal)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>4. Cước vận tải quốc tế (Ocean + Phụ phí):</span>
+                <span className="font-mono">{fmtUSD(costing.effOcean + costing.effSurcharge)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>5. Phí bảo hiểm 110%:</span>
+                <span className="font-mono">{fmtUSD(costing.effInsurance)}</span>
+              </div>
+              {['DAP', 'DPU', 'DDP'].includes(recIncoterm) && (
+                <div className="flex justify-between">
+                  <span>6. Phí đích &amp; Thuế NK ({recIncoterm}):</span>
+                  <span className="font-mono">{fmtUSD(costing.effDest)}</span>
+                </div>
+              )}
+
+              <div className="border-t border-white/20 pt-1.5 flex justify-between font-bold text-[#d2ebe0]">
+                <span>= TỔNG CHI PHÍ ĐẦU VÀO (TOTAL COST):</span>
+                <span className="font-mono">{fmtUSD(costing.totalInputCost)}</span>
+              </div>
+              <div className="flex justify-between text-[#9bccb8]">
+                <span>+ Biên lợi nhuận mục tiêu ({fmtDecimal(marginPct, 1)}%):</span>
+                <span className="font-mono font-bold text-[#f4d98a]">+{fmtUSD(costing.marginUsd)}</span>
+              </div>
+
+              <div className="border-t border-white/25 pt-2 flex justify-between text-base font-extrabold text-[#f4d98a]">
+                <span>= GIÁ BÁN ĐỀ XUẤT:</span>
                 <span className="font-mono">{fmtUSD(costing.finalSelling)}</span>
               </div>
               <div className="flex justify-between text-[11px] text-[#9bccb8]">
-                <span>Đơn giá bình quân:</span>
-                <span className="font-mono font-bold">
-                  {selectedInq && selectedInq.net_weight_kgs > 0 ? `${fmtUSD(costing.finalSelling / selectedInq.net_weight_kgs)} / KG` : '$0.00 / KG'}
+                <span>Đơn giá bình quân ($/KG):</span>
+                <span className="font-mono font-bold text-white">
+                  {selectedInq && selectedInq.net_weight_kgs > 0
+                    ? `$${fmtDecimal(costing.finalSelling / selectedInq.net_weight_kgs, 3)} / KG`
+                    : '$0.000 / KG'}
                 </span>
               </div>
             </div>
