@@ -124,12 +124,12 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
   const importDutyUsd = parseLocaleNumber(importDutyStr);
   const [calcNote, setCalcNote] = useState('');
 
-  // 2-Way Cross-Locked Self vs FWD Matrix
-  const [showFwdCompare, setShowFwdCompare] = useState(false);
+  // Parallel Self vs FWD Comparison Matrix
+  const [showFwdCompare, setShowFwdCompare] = useState(true);
   const [execOption, setExecOption] = useState<'SELF' | 'HYBRID' | 'FWD_ALL'>('SELF');
   const [selfOceanChecked, setSelfOceanChecked] = useState(true);
   const [fwdOceanStr, setFwdOceanStr] = useState('');
-  const [selfTruckChecked, setSelfTruckChecked] = useState(false);
+  const [selfTruckChecked, setSelfTruckChecked] = useState(true);
   const [selfTruckRateStr, setSelfTruckRateStr] = useState('');
   const [fwdTruckStr, setFwdTruckStr] = useState('');
   const [selfCustomsChecked, setSelfCustomsChecked] = useState(true);
@@ -271,17 +271,17 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
       optMix.reeferMode === 'LCL';
     const savedExec = existingMeta?.freight_exec_option || (hasLclAuto ? 'FWD_ALL' : 'SELF');
     setExecOption(savedExec);
-    setShowFwdCompare(hasLclAuto || savedExec !== 'SELF' || toNum(existingMeta?.fwd_ocean) > 0 || toNum(existingMeta?.fwd_trucking) > 0);
+    setShowFwdCompare(true);
     setFwdOceanStr(toNum(existingMeta?.fwd_ocean) > 0 ? fmtDecimal(existingMeta?.fwd_ocean, 2) : '');
     setFwdTruckStr(toNum(existingMeta?.fwd_trucking) > 0 ? fmtDecimal(existingMeta?.fwd_trucking, 2) : '');
     setFwdCustomsStr(toNum(existingMeta?.fwd_customs) > 0 ? fmtDecimal(existingMeta?.fwd_customs, 2) : '');
     setFwdPermitsStr(toNum(existingMeta?.fwd_permits) > 0 ? fmtDecimal(existingMeta?.fwd_permits, 2) : '');
     const savedSelfTruck = existingMeta?.self_trucking !== undefined ? toNum(existingMeta.self_trucking) : defaultTruck;
     setSelfTruckRateStr(savedSelfTruck > 0 ? fmtDecimal(savedSelfTruck, 2) : '');
-    setSelfTruckChecked(savedSelfTruck > 0 && toNum(existingMeta?.fwd_trucking) === 0);
-    setSelfOceanChecked(!hasLclAuto && toNum(existingMeta?.fwd_ocean) === 0);
-    setSelfCustomsChecked(toNum(existingMeta?.fwd_customs) === 0);
-    setSelfPermitsChecked(toNum(existingMeta?.fwd_permits) === 0);
+    setSelfTruckChecked(true);
+    setSelfOceanChecked(!hasLclAuto);
+    setSelfCustomsChecked(true);
+    setSelfPermitsChecked(true);
 
     const desired = (existingProp?.recommended_incoterm || inq.desired_incoterm || 'CIF').toUpperCase();
     const savedTerms = existingProp?.proposed_incoterms
@@ -346,8 +346,21 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
     earliest.setHours(0, 0, 0, 0);
     earliest.setDate(earliest.getDate() + leadDays);
 
+    const evalMix =
+      mix.total > 0 || mix.hasLcl
+        ? mix
+        : buildContainerMixState(
+            { q20dc: hasCold ? 0 : 1, q40dc: 0, q40hc: 0, q20rf: hasCold ? 1 : 0, q40rf: 0, q40rh: 0 },
+            itemsState,
+            usePallet,
+            lclBasis,
+            lclRate,
+            data.products,
+            data.pricingRates
+          );
+
     const evals = list.map((s) => {
-      const res = computeScheduleOceanAndMissing(s, mix);
+      const res = computeScheduleOceanAndMissing(s, evalMix);
       const etd = s.etd ? new Date(s.etd) : null;
       const eta = s.eta ? new Date(s.eta) : null;
       const isTooTight = Boolean(etd && !Number.isNaN(etd.getTime()) && etd.getTime() < earliest.getTime());
@@ -437,21 +450,61 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
     [insBaseCode, insAddons, recIncoterm, data.pricingRates]
   );
 
-  // Final Calculations for Khung 4 (Exact Incoterms 2020 & Insurance 110% Formulas)
+  // Final Calculations for Khung 4 (Exact Incoterms 2020, Insurance 110% & Selected Self/Hybrid/FWD Costs)
   const costing = useMemo(() => {
     const goodsAndPack = goodsCost + effectivePackingCost;
     const exwSell = Math.round(goodsAndPack * (1 + marginPct / 100) * 100) / 100;
 
-    const effSelfTruckVal = selfTruckChecked ? (selfTruckRate > 0 ? selfTruckRate : defaultTruckRate) : 0;
-    const activeTrucking = selfTruckChecked ? effSelfTruckVal : fwdTruck;
-    const originCharges = activeTrucking + fullLocalTotal + customsSplit.customsTotal;
-    const fobSell = Math.round((exwSell + originCharges) * 100) / 100;
-
     const schOcean = schOceanRes.ocean;
     const schSurcharge = schOceanRes.surcharge;
-    const freightF = (schOcean + schSurcharge) > 0
-      ? (schOcean + schSurcharge)
-      : (mix.hasLcl && fwdOcean > 0 ? fwdOcean : 0);
+    const selfOceanBase = schOcean + schSurcharge;
+    const effSelfTruckVal = selfTruckRate > 0 ? selfTruckRate : defaultTruckRate;
+    const selfCustomsVal = customsSplit.customsExportUsd;
+    const selfPermitsVal = customsSplit.permitsUsd;
+
+    const effFwdOcean = fwdOcean > 0 ? fwdOcean : selfOceanBase + (mix.hasLcl ? 0 : fullLocalTotal);
+    const effFwdTruck = fwdTruck > 0 ? fwdTruck : effSelfTruckVal;
+    const effFwdCustoms = fwdCustoms > 0 ? fwdCustoms : selfCustomsVal;
+    const effFwdPermits = fwdPermits > 0 ? fwdPermits : selfPermitsVal;
+
+    const selfOceanTotal = mix.hasLcl ? null : Math.round((selfOceanBase + fullLocalTotal) * 100) / 100;
+    const selfTotal =
+      selfOceanTotal !== null
+        ? Math.round((selfOceanTotal + effSelfTruckVal + selfCustomsVal + selfPermitsVal) * 100) / 100
+        : null;
+    const fwdAllTotal = Math.round((effFwdOcean + effFwdTruck + effFwdCustoms + effFwdPermits) * 100) / 100;
+
+    const hybridOcean = selfOceanChecked && selfOceanTotal !== null ? selfOceanTotal : effFwdOcean;
+    const hybridTruck = selfTruckChecked ? effSelfTruckVal : effFwdTruck;
+    const hybridCustoms = selfCustomsChecked ? selfCustomsVal : effFwdCustoms;
+    const hybridPermits = selfPermitsChecked ? selfPermitsVal : effFwdPermits;
+    const hybridTotal = Math.round((hybridOcean + hybridTruck + hybridCustoms + hybridPermits) * 100) / 100;
+
+    // Feed selected execution option into active costing components
+    const activeTrucking =
+      execOption === 'SELF'
+        ? effSelfTruckVal
+        : execOption === 'FWD_ALL'
+        ? effFwdTruck
+        : hybridTruck;
+    const activeCustoms =
+      execOption === 'SELF'
+        ? selfCustomsVal + selfPermitsVal
+        : execOption === 'FWD_ALL'
+        ? effFwdCustoms + effFwdPermits
+        : hybridCustoms + hybridPermits;
+    const useFwdOceanLine =
+      (execOption === 'FWD_ALL' && fwdOcean > 0) ||
+      (execOption === 'HYBRID' && (!selfOceanChecked || mix.hasLcl) && fwdOcean > 0) ||
+      (mix.hasLcl && fwdOcean > 0 && selfOceanBase === 0);
+    const activeLocal = useFwdOceanLine ? 0 : fullLocalTotal;
+    const activeOcean = useFwdOceanLine ? fwdOcean : schOcean;
+    const activeSurcharge = useFwdOceanLine ? 0 : schSurcharge;
+
+    const originCharges = activeTrucking + activeLocal + activeCustoms;
+    const fobSell = Math.round((exwSell + originCharges) * 100) / 100;
+
+    const freightF = activeOcean + activeSurcharge;
     const cfrSell = Math.round((fobSell + freightF) * 100) / 100;
 
     const defaultCifPct = toNum(insuranceCatalog.byCode['INS-ICC-C']?.standard_rate) || 0.12;
@@ -482,12 +535,10 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
     const isDestGroup = recIncoterm === 'DAP' || recIncoterm === 'DPU' || recIncoterm === 'DDP';
 
     const effTrucking = isExw ? 0 : activeTrucking;
-    const localTotal = isExw ? 0 : fullLocalTotal;
-    const customsTotal = isExw ? 0 : customsSplit.customsTotal;
-    const effOcean = !isExw && !isFobGroup && includeFreight
-      ? (schOcean > 0 ? schOcean : (mix.hasLcl && fwdOcean > 0 ? fwdOcean : 0))
-      : 0;
-    const effSurcharge = !isExw && !isFobGroup && includeFreight ? schSurcharge : 0;
+    const localTotal = isExw ? 0 : activeLocal;
+    const customsTotal = isExw ? 0 : activeCustoms;
+    const effOcean = !isExw && !isFobGroup && includeFreight ? activeOcean : 0;
+    const effSurcharge = !isExw && !isFobGroup && includeFreight ? activeSurcharge : 0;
     const effDest = isDestGroup
       ? toNum(destExtra) + (recIncoterm === 'DDP' ? toNum(importDutyUsd) : 0)
       : 0;
@@ -527,22 +578,6 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
     ) / 100;
     const floorPrice = manualFloorPrice !== '' ? toNum(manualFloorPrice) : computedFloor;
 
-    // 2-Way Cross-Locked Self vs FWD Comparison
-    const selfOceanTotal = mix.hasLcl ? null : effOcean + effSurcharge + localTotal;
-    const effFwdOcean = fwdOcean > 0 ? fwdOcean : effOcean + effSurcharge + (mix.hasLcl ? 0 : localTotal);
-    const effFwdCustoms = fwdCustoms > 0 ? fwdCustoms : customsSplit.customsExportUsd;
-    const effFwdPermits = fwdPermits > 0 ? fwdPermits : customsSplit.permitsUsd;
-    const fwdAllTotal = Math.round((effFwdOcean + fwdTruck + effFwdCustoms + effFwdPermits) * 100) / 100;
-
-    const hybridOcean = selfOceanChecked && selfOceanTotal !== null ? selfOceanTotal : effFwdOcean;
-    const hybridTruck = selfTruckChecked ? effSelfTruckVal : fwdTruck;
-    const hybridCustoms = selfCustomsChecked ? customsSplit.customsExportUsd : effFwdCustoms;
-    const hybridPermits = selfPermitsChecked ? customsSplit.permitsUsd : effFwdPermits;
-    const hybridTotal = Math.round((hybridOcean + hybridTruck + hybridCustoms + hybridPermits) * 100) / 100;
-
-    const selfTotal = selfOceanTotal !== null
-      ? Math.round((selfOceanTotal + customsSplit.customsExportUsd + customsSplit.permitsUsd + effSelfTruckVal) * 100) / 100
-      : null;
     const internalCost = execOption === 'SELF' && selfTotal !== null ? selfTotal : execOption === 'HYBRID' ? hybridTotal : fwdAllTotal;
     const buyerCharge = Math.round(totalFreightLocal * 100) / 100;
     const internalProfit = Math.round((buyerCharge - internalCost) * 100) / 100;
@@ -566,6 +601,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
       cfrSell,
       cifSell,
       effSelfTruckVal,
+      selfOceanTotal,
       selfTotal,
       hybridTotal,
       fwdAllTotal,
@@ -1030,8 +1066,8 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                   <th className="text-left">Hãng tàu</th>
                   <th className="text-left">Tuyến (POL → POD)</th>
                   <th className="text-center">ETD / ETA</th>
-                  <th className="text-center">Cước biển</th>
-                  <th className="text-center">Phụ phí tàu</th>
+                  <th className="text-center">Cước biển (USD)</th>
+                  <th className="text-center">Phụ phí tàu (USD)</th>
                 </tr>
               </thead>
               <tbody>
@@ -1188,10 +1224,10 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                     <th className="text-left">Cước chính</th>
                     <th className="text-left">Bảo hiểm</th>
                     <th className="text-left">Điểm chuyển rủi ro</th>
-                    <th className="text-center">Giá EXW</th>
-                    <th className="text-center">Phí áp dụng</th>
-                    <th className="text-center">Bảo hiểm</th>
-                    <th className="text-center">Giá chào dự kiến</th>
+                    <th className="text-center">Giá EXW (USD)</th>
+                    <th className="text-center">Phí áp dụng (USD)</th>
+                    <th className="text-center">Bảo hiểm (USD)</th>
+                    <th className="text-center">Giá chào dự kiến (USD)</th>
                     <th className="text-center">Áp dụng K4</th>
                   </tr>
                 </thead>
@@ -1407,8 +1443,8 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                       <tr>
                         <th className="p-1.5 text-left">Hạng mục</th>
                         <th className="p-1.5 text-center">Công ty Tự làm</th>
-                        <th className="p-1.5 text-center">Phí Tự làm ($)</th>
-                        <th className="p-1.5 text-center">Thuê ngoài FWD ($)</th>
+                        <th className="p-1.5 text-center">Phí Tự làm (USD)</th>
+                        <th className="p-1.5 text-center">Thuê ngoài FWD (USD)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1417,27 +1453,25 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                         <td className="p-1.5 text-center">
                           <input
                             type="checkbox"
-                            disabled={mix.hasLcl || fwdOcean > 0}
-                            checked={selfOceanChecked && !mix.hasLcl && fwdOcean === 0}
+                            disabled={mix.hasLcl}
+                            checked={selfOceanChecked && !mix.hasLcl}
                             onChange={(e) => {
                               setSelfOceanChecked(e.target.checked);
-                              if (e.target.checked) setFwdOceanStr('');
+                              setExecOption('HYBRID');
                             }}
                           />
                         </td>
-                        <td className="p-1.5 text-center font-mono">{mix.hasLcl ? 'LCL→FWD' : fmtUSD(costing.effOcean + costing.effSurcharge + costing.localTotal)}</td>
+                        <td className="p-1.5 text-center font-mono font-semibold">
+                          {mix.hasLcl ? 'LCL→FWD' : fmtUSD(costing.selfOceanTotal || 0)}
+                        </td>
                         <td className="p-1.5 text-center">
                           <input
                             type="text"
                             inputMode="decimal"
                             placeholder="VD: 1,200.00"
-                            disabled={selfOceanChecked && !mix.hasLcl}
                             value={fwdOceanStr}
-                            onChange={(e) => {
-                              setFwdOceanStr(e.target.value);
-                              if (parseLocaleNumber(e.target.value) > 0) setSelfOceanChecked(false);
-                            }}
-                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
+                            onChange={(e) => setFwdOceanStr(e.target.value)}
+                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono"
                           />
                         </td>
                       </tr>
@@ -1446,13 +1480,12 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                         <td className="p-1.5 text-center">
                           <input
                             type="checkbox"
-                            disabled={fwdTruck > 0}
-                            checked={selfTruckChecked && fwdTruck === 0}
+                            checked={selfTruckChecked}
                             onChange={(e) => {
                               setSelfTruckChecked(e.target.checked);
-                              if (e.target.checked) {
-                                setFwdTruckStr('');
-                                if (selfTruckRate === 0 && defaultTruckRate > 0) setSelfTruckRateStr(fmtDecimal(defaultTruckRate, 2));
+                              setExecOption('HYBRID');
+                              if (e.target.checked && selfTruckRate === 0 && defaultTruckRate > 0) {
+                                setSelfTruckRateStr(fmtDecimal(defaultTruckRate, 2));
                               }
                             }}
                           />
@@ -1462,10 +1495,9 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                             type="text"
                             inputMode="decimal"
                             placeholder={defaultTruckRate > 0 ? fmtDecimal(defaultTruckRate, 2) : 'VD: 180.00'}
-                            disabled={!selfTruckChecked}
-                            value={selfTruckChecked && !selfTruckRateStr && defaultTruckRate > 0 ? fmtDecimal(defaultTruckRate, 2) : selfTruckRateStr}
+                            value={selfTruckRateStr !== '' ? selfTruckRateStr : (defaultTruckRate > 0 ? fmtDecimal(defaultTruckRate, 2) : '')}
                             onChange={(e) => setSelfTruckRateStr(e.target.value)}
-                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
+                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono"
                           />
                         </td>
                         <td className="p-1.5 text-center">
@@ -1473,13 +1505,9 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                             type="text"
                             inputMode="decimal"
                             placeholder="VD: 200.00"
-                            disabled={selfTruckChecked}
                             value={fwdTruckStr}
-                            onChange={(e) => {
-                              setFwdTruckStr(e.target.value);
-                              if (parseLocaleNumber(e.target.value) > 0) setSelfTruckChecked(false);
-                            }}
-                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
+                            onChange={(e) => setFwdTruckStr(e.target.value)}
+                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono"
                           />
                         </td>
                       </tr>
@@ -1488,27 +1516,22 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                         <td className="p-1.5 text-center">
                           <input
                             type="checkbox"
-                            disabled={fwdCustoms > 0}
-                            checked={selfCustomsChecked && fwdCustoms === 0}
+                            checked={selfCustomsChecked}
                             onChange={(e) => {
                               setSelfCustomsChecked(e.target.checked);
-                              if (e.target.checked) setFwdCustomsStr('');
+                              setExecOption('HYBRID');
                             }}
                           />
                         </td>
-                        <td className="p-1.5 text-center font-mono">{fmtUSD(customsSplit.customsExportUsd)}</td>
+                        <td className="p-1.5 text-center font-mono font-semibold">{fmtUSD(customsSplit.customsExportUsd)}</td>
                         <td className="p-1.5 text-center">
                           <input
                             type="text"
                             inputMode="decimal"
                             placeholder="VD: 120.00"
-                            disabled={selfCustomsChecked}
                             value={fwdCustomsStr}
-                            onChange={(e) => {
-                              setFwdCustomsStr(e.target.value);
-                              if (parseLocaleNumber(e.target.value) > 0) setSelfCustomsChecked(false);
-                            }}
-                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
+                            onChange={(e) => setFwdCustomsStr(e.target.value)}
+                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono"
                           />
                         </td>
                       </tr>
@@ -1517,27 +1540,22 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                         <td className="p-1.5 text-center">
                           <input
                             type="checkbox"
-                            disabled={fwdPermits > 0}
-                            checked={selfPermitsChecked && fwdPermits === 0}
+                            checked={selfPermitsChecked}
                             onChange={(e) => {
                               setSelfPermitsChecked(e.target.checked);
-                              if (e.target.checked) setFwdPermitsStr('');
+                              setExecOption('HYBRID');
                             }}
                           />
                         </td>
-                        <td className="p-1.5 text-center font-mono">{fmtUSD(customsSplit.permitsUsd)}</td>
+                        <td className="p-1.5 text-center font-mono font-semibold">{fmtUSD(customsSplit.permitsUsd)}</td>
                         <td className="p-1.5 text-center">
                           <input
                             type="text"
                             inputMode="decimal"
                             placeholder="VD: 150.00"
-                            disabled={selfPermitsChecked}
                             value={fwdPermitsStr}
-                            onChange={(e) => {
-                              setFwdPermitsStr(e.target.value);
-                              if (parseLocaleNumber(e.target.value) > 0) setSelfPermitsChecked(false);
-                            }}
-                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono disabled:opacity-45"
+                            onChange={(e) => setFwdPermitsStr(e.target.value)}
+                            className="w-24 px-1.5 py-0.5 rounded border border-[#186635] text-center font-mono"
                           />
                         </td>
                       </tr>
@@ -1552,16 +1570,9 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                       onClick={() => {
                         setExecOption('SELF');
                         setSelfOceanChecked(true);
+                        setSelfTruckChecked(true);
                         setSelfCustomsChecked(true);
                         setSelfPermitsChecked(true);
-                        if (defaultTruckRate > 0) {
-                          setSelfTruckChecked(true);
-                          if (selfTruckRate === 0) setSelfTruckRateStr(fmtDecimal(defaultTruckRate, 2));
-                        }
-                        setFwdOceanStr('');
-                        setFwdTruckStr('');
-                        setFwdCustomsStr('');
-                        setFwdPermitsStr('');
                       }}
                       className={`p-2 rounded-lg border text-left transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed ${
                         execOption === 'SELF' && !mix.hasLcl
@@ -1614,11 +1625,11 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
             </div>
           </div>
 
-          {/* Right Column: TỔNG HỢP CẤU TRÚC GIÁ NỘI BỘ (Exact Cent Reconciliation) */}
+          {/* Right Column: TỔNG HỢP CẤU TRÚC GIÁ NỘI BỘ (USD) (Exact Cent Reconciliation) */}
           <div className="lg:col-span-5 dash-xnk-dark p-4 flex flex-col justify-between space-y-3">
             <div className="space-y-1.5 text-xs">
               <div className="text-[11px] font-extrabold uppercase text-[#f4d98a] tracking-wide mb-2">
-                TỔNG HỢP CẤU TRÚC GIÁ NỘI BỘ ({recIncoterm})
+                TỔNG HỢP CẤU TRÚC GIÁ NỘI BỘ (USD) · {recIncoterm}
               </div>
               <div className="flex justify-between">
                 <span>1. Giá vốn hàng hóa:</span>
@@ -1657,7 +1668,7 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
               </div>
 
               <div className="border-t border-white/25 pt-2 flex justify-between text-base font-extrabold text-[#f4d98a]">
-                <span>= GIÁ BÁN ĐỀ XUẤT:</span>
+                <span>= GIÁ BÁN ĐỀ XUẤT (USD):</span>
                 <span className="font-mono">{fmtUSD(costing.finalSelling)}</span>
               </div>
               <div className="flex justify-between text-[11px] text-[#9bccb8]">
@@ -1709,10 +1720,10 @@ export const XnkCostingView: React.FC<XnkCostingViewProps> = ({
                 <th className="text-center">Số Báo giá / Đơn</th>
                 <th className="text-left">NV XNK</th>
                 <th className="text-left">Tuyến / Container</th>
-                <th className="text-center">Giá vốn</th>
-                <th className="text-center">Cước + BB + BH</th>
+                <th className="text-center">Giá vốn (USD)</th>
+                <th className="text-center">Cước + BB + BH (USD)</th>
                 <th className="text-center">Incoterm</th>
-                <th className="text-center">Giá chào chốt</th>
+                <th className="text-center">Giá chào chốt (USD)</th>
                 <th className="text-center">Trạng thái &amp; Chứng từ</th>
               </tr>
             </thead>

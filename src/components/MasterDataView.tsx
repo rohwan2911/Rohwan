@@ -157,7 +157,7 @@ interface RateDraft {
   max_per_pallet: string;
 }
 
-const RATE_CATEGORY_OPTIONS = ['LOCAL_CHARGE', 'CUSTOMS_FEE', 'INSURANCE', 'PACKING', 'CONTAINER'] as const;
+const RATE_CATEGORY_OPTIONS = ['CUSTOMS_FEE', 'INSURANCE', 'PACKING', 'CONTAINER'] as const;
 
 const createBlankProductDraft = (lockedGroup: string): ProductDraft => ({
   product_group: lockedGroup,
@@ -688,7 +688,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                   <th className="text-center whitespace-nowrap">SKU</th>
                   <th className="text-left">NHÓM HÀNG</th>
                   <th className="text-left">TÊN TIẾNG VIỆT / ENGLISH</th>
-                  <th className="text-center whitespace-nowrap">GIÁ VỐN ($/KG)</th>
+                  <th className="text-center whitespace-nowrap">GIÁ VỐN (USD/KG)</th>
                   <th className="text-center whitespace-nowrap">HS CODE</th>
                   <th className="text-center">LOẠI CONT / NHIỆT ĐỘ</th>
                   <th className="text-center">THAO TÁC</th>
@@ -1155,17 +1155,18 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
               <Ship className="w-4 h-4 text-[#f4d98a]" /> Lịch tàu &amp; Biểu cước 6 loại Cont ({list.length})
             </h3>
           </div>
-          <div className="agri-table-scroll">
+          <div className="agri-table-scroll" style={{ maxHeight: '64vh', overflowY: 'auto' }}>
             <table className="agri-table">
-              <thead>
+              <thead className="sticky top-0 z-10">
                 <tr>
                   <th className="text-center">MÃ LỊCH</th>
                   <th className="text-center w-[64px]">LOGO</th>
                   <th className="text-left">HÃNG TÀU / TÀU</th>
                   <th className="text-left">TUYẾN (POL → POD · QUỐC GIA)</th>
                   <th className="text-left">ETD / ETA</th>
-                  <th className="text-left">20'DC / 40'DC / 40'HC</th>
-                  <th className="text-left">20'RF / 40'RF / 40'RH</th>
+                  <th className="text-left">20'DC / 40'DC / 40'HC (USD)</th>
+                  <th className="text-left">20'RF / 40'RF / 40'RH (USD)</th>
+                  <th className="text-left">PHỤ PHÍ TÀU (USD)</th>
                   <th className="text-center">HẾT HẠN</th>
                   <th className="text-center">THAO TÁC</th>
                 </tr>
@@ -1179,46 +1180,79 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                       : exp.state === 'EXPIRING'
                       ? 'text-amber-700 font-bold group-hover:text-yellow-300'
                       : 'text-emerald-950 font-semibold group-hover:text-white';
+                  const thcDryTxt =
+                    s.thc_20_dry > 0 || s.thc_40_dry > 0
+                      ? `THC Khô: ${fmtUSD(s.thc_20_dry)} / ${fmtUSD(s.thc_40_dry)}`
+                      : '';
+                  const thcRfTxt =
+                    s.thc_20_reefer > 0 || s.thc_40_reefer > 0
+                      ? `THC Lạnh: ${fmtUSD(s.thc_20_reefer)} / ${fmtUSD(s.thc_40_reefer)}`
+                      : '';
+                  const fuelParts = [
+                    s.baf_fee > 0 ? `BAF ${fmtUSD(s.baf_fee)}` : '',
+                    s.lss_fee > 0 ? `LSS ${fmtUSD(s.lss_fee)}` : '',
+                    s.pss_fee > 0 ? `PSS ${fmtUSD(s.pss_fee)}` : '',
+                  ].filter(Boolean);
+                  const docSealVal =
+                    s.bill_seal_fee_shipment > 0
+                      ? s.bill_seal_fee_shipment
+                      : s.b_l_fee + s.seal_fee;
                   return (
                     <tr key={s.schedule_id} className="group">
-                      <td className="text-center font-mono font-bold whitespace-nowrap">{s.schedule_id}</td>
-                      <td className="text-center">
+                      <td className="py-2.5 text-center font-mono font-bold whitespace-nowrap">{s.schedule_id}</td>
+                      <td className="py-2.5 text-center">
                         <ShippingLineLogoBadge
                           shippingLine={s.shipping_line}
                           logoUrl={s.logo_url}
                           cacheBust={schLogoCacheBust}
                         />
                       </td>
-                      <td className="text-left">
+                      <td className="py-2.5 text-left">
                         <div className="font-bold">{s.shipping_line}</div>
                         <div className="text-[11px] opacity-80">{s.vessel} / {s.voyage}</div>
                       </td>
-                      <td className="text-left">
+                      <td className="py-2.5 text-left">
                         <div className="font-semibold">
                           {deduplicatePortName(s.pol)} → {deduplicatePortName(s.pod)}
                         </div>
                         <div className="text-[11px]">{s.country} {s.pot && s.pot !== '-' ? `· POT: ${s.pot}` : ''}</div>
                       </td>
-                      <td className="text-left font-mono text-xs whitespace-nowrap leading-5">
+                      <td className="py-2.5 text-left font-mono text-xs whitespace-nowrap leading-5">
                         <div>ETD: {formatDateDDMMYYYY(s.etd)}</div>
                         <div>ETA: {formatDateDDMMYYYY(s.eta)}</div>
                       </td>
-                      <td className="text-left font-mono text-xs whitespace-nowrap leading-5">
+                      <td className="py-2.5 text-left font-mono text-xs whitespace-nowrap leading-5">
                         <div>20'DC: {fmtUSD(s.rate_20_dc)}</div>
                         <div>40'DC: {fmtUSD(s.rate_40_dc)}</div>
                         <div>40'HC: {fmtUSD(s.rate_40_hc)}</div>
                       </td>
-                      <td className="text-left font-mono text-xs whitespace-nowrap leading-5">
+                      <td className="py-2.5 text-left font-mono text-xs whitespace-nowrap leading-5">
                         <div>20'RF: {fmtUSD(s.rate_20_rf)}</div>
                         <div>40'RF: {fmtUSD(s.rate_40_rf)}</div>
                         <div>40'RH: {fmtUSD(s.rate_40_rh)}</div>
                       </td>
-                      <td className="keep-hover-color text-center whitespace-nowrap">
+                      <td className="py-2.5 text-left font-mono text-[11px] whitespace-nowrap leading-4 space-y-0.5">
+                        {thcDryTxt && <div>{thcDryTxt}</div>}
+                        {thcRfTxt && <div>{thcRfTxt}</div>}
+                        {fuelParts.length > 0 && <div>{fuelParts.join(' · ')}</div>}
+                        {docSealVal > 0 && (
+                          <div>
+                            B/L+Seal: {fmtUSD(docSealVal)}
+                            {s.bill_seal_fee_shipment <= 0 && (s.b_l_fee > 0 || s.seal_fee > 0)
+                              ? ` (${fmtUSD(s.b_l_fee)}+${fmtUSD(s.seal_fee)})`
+                              : ''}
+                          </div>
+                        )}
+                        {!thcDryTxt && !thcRfTxt && fuelParts.length === 0 && docSealVal <= 0 && (
+                          <span className="opacity-60 italic">Chưa nhập phụ phí</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 keep-hover-color text-center whitespace-nowrap">
                         <span className={`keep-hover-color font-mono text-xs ${expiryColorClass}`}>
                           {formatDateDDMMYYYY(s.expiry_date)}
                         </span>
                       </td>
-                      <td className="text-center">
+                      <td className="py-2.5 text-center">
                         <div className="inline-flex flex-wrap items-center justify-center gap-1">
                           <button
                             type="button"
@@ -1856,7 +1890,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                   <th className="text-center">Mã phí</th>
                   <th className="text-left">Tên Tiếng Việt / ENG</th>
                   <th className="text-center">Phạm vi / ĐVT</th>
-                  <th className="text-center">Đơn giá chuẩn</th>
+                  <th className="text-center">Đơn giá chuẩn (USD)</th>
                   <th className="text-center">Thao tác</th>
                 </tr>
               </thead>

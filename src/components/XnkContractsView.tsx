@@ -371,7 +371,7 @@ export const XnkContractsView: React.FC<XnkContractsViewProps> = ({
                 <th className="text-left">Sản phẩm · KL</th>
                 <th className="text-center">Incoterm / TT</th>
                 <th className="text-left">POL → POD / Booking</th>
-                <th className="text-center">Giá trị HĐ</th>
+                <th className="text-center">Giá trị HĐ (USD)</th>
                 <th className="text-center">Trạng thái</th>
                 <th className="text-center">Thao tác</th>
               </tr>

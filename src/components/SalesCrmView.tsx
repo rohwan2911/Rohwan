@@ -180,6 +180,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
   const [quickNote, setQuickNote] = useState('');
   const [quickSelections, setQuickSelections] = useState<Record<string, string[]>>({});
   const [quickPickerOpen, setQuickPickerOpen] = useState(false);
+  const [quickPickerShowAll, setQuickPickerShowAll] = useState(true);
   const [quickPickerSearch, setQuickPickerSearch] = useState('');
   const [quickPickerStyle, setQuickPickerStyle] = useState<React.CSSProperties>({});
   const [quickSaving, setQuickSaving] = useState(false);
@@ -252,7 +253,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
     const rect = anchor.getBoundingClientRect();
     const viewportH = window.innerHeight;
     const viewportW = window.innerWidth;
-    const maxMenuH = 360;
+    const maxMenuH = 290;
     const spaceBelow = viewportH - rect.bottom - 12;
     const spaceAbove = rect.top - 12;
     const openUpward = spaceBelow < 220 && spaceAbove > spaceBelow;
@@ -1120,134 +1121,188 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
           {quickPickerOpen &&
             typeof document !== 'undefined' &&
             createPortal(
-              <div
-                ref={quickPickerMenuRef}
-                style={quickPickerStyle}
-                className="flex flex-col rounded-xl bg-[#f4fbf7] border-2 border-[#0f4a33] shadow-2xl text-[#07281c] overflow-hidden"
-              >
-                <div className="p-2 bg-[#d7eee4] border-b border-[#186635]/30 space-y-1.5 shrink-0">
-                  <div className="flex items-center justify-between text-[11px] font-extrabold text-[#0f4a33]">
-                    <span className="inline-flex items-center gap-1">
-                      <Package className="w-3.5 h-3.5" /> Chọn Sản phẩm &amp; Quy cách đóng gói
-                    </span>
-                    <span className="text-[10px] font-bold opacity-80">
-                      {Object.keys(quickSelections).length} SP đã chọn
-                    </span>
-                  </div>
-                  <div className="relative flex items-center">
-                    <Search className="w-3.5 h-3.5 absolute left-2.5 text-[#0f4a33]/70 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={quickPickerSearch}
-                      onChange={(e) => setQuickPickerSearch(e.target.value)}
-                      placeholder="VD: Tìm tên sản phẩm, SKU hoặc quy cách..."
-                      className="w-full pl-8 pr-7 py-1.5 text-xs rounded-lg bg-white border border-[#186635]/50 text-[#07281c] placeholder:text-[#0b2418]/45 placeholder:italic outline-none focus:border-[#0f4a33]"
-                    />
-                    {quickPickerSearch && (
-                      <button
-                        type="button"
-                        onClick={() => setQuickPickerSearch('')}
-                        className="absolute right-2 text-[#0f4a33] hover:text-[#8c3b3b] cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto overscroll-contain divide-y divide-[#186635]/15">
-                  {filteredQuickPickerProducts.map((p) => {
-                    const isProdSelected = quickSelections[p.sku_code] !== undefined;
-                    const selectedPacks = quickSelections[p.sku_code] || [];
-                    const packOpts = getPackingOptionsForProduct(p, data.pricingRates, data.lookups);
-                    return (
-                      <div key={p.sku_code} className={isProdSelected ? 'bg-[#e6f5ee]' : ''}>
-                        <label className="flex items-start gap-2.5 px-3 py-2 cursor-pointer hover:bg-[#d7eee4]/70 transition-colors">
-                          <input
-                            type="checkbox"
-                            checked={isProdSelected}
-                            onChange={() => toggleQuickProduct(p.sku_code)}
-                            className="mt-0.5 accent-[#0f4a33] w-3.5 h-3.5 cursor-pointer shrink-0"
-                          />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-xs font-bold text-[#07281c] leading-snug">
-                                {p.product_name_vie}
-                              </span>
-                              <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#0f4a33]/10 text-[#0f4a33] shrink-0">
-                                {p.sku_code}
-                              </span>
-                            </div>
-                            <div className="text-[10.5px] text-[#0f4a33]/80 truncate">
-                              {p.product_name_eng}
-                              {p.container_type ? ` · ${p.container_type}` : ''}
-                            </div>
-                          </div>
-                        </label>
-
-                        {isProdSelected && (
-                          <div className="ml-6 mr-2.5 mb-2 pl-2.5 py-1.5 border-l-2 border-[#16977f] bg-white/80 rounded-r-lg space-y-1">
-                            <div className="text-[10px] font-extrabold text-[#0f4a33] uppercase tracking-wide">
-                              Quy cách đóng gói cho {p.product_name_vie}:
-                            </div>
-                            {packOpts.map((pk) => {
-                              const pkChecked = selectedPacks.includes(pk.code);
-                              return (
-                                <label
-                                  key={pk.code}
-                                  className={`flex items-start gap-2 px-2 py-1 rounded-md cursor-pointer text-[11px] transition-colors ${
-                                    pkChecked
-                                      ? 'bg-[#0f4a33] text-[#fff5d6] font-bold'
-                                      : 'hover:bg-[#d7eee4] text-[#07281c]'
-                                  }`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={pkChecked}
-                                    onChange={() => toggleQuickPackaging(p.sku_code, pk.code)}
-                                    className="mt-0.5 accent-[#f4d98a] w-3.5 h-3.5 cursor-pointer shrink-0"
-                                  />
-                                  <span className="leading-snug flex-1">
-                                    {pk.name}{' '}
-                                    <span className={`font-mono text-[10px] ${pkChecked ? 'text-[#f4d98a]' : 'opacity-70'}`}>
-                                      ({pk.code})
-                                    </span>
-                                  </span>
-                                </label>
-                              );
-                            })}
-                          </div>
+              (() => {
+                const selectedSkuCount = Object.keys(quickSelections).length;
+                const showingSelectedOnly = !quickPickerShowAll && selectedSkuCount > 0 && !quickPickerSearch.trim();
+                const visibleProducts = showingSelectedOnly
+                  ? filteredQuickPickerProducts.filter((p) => quickSelections[p.sku_code] !== undefined)
+                  : filteredQuickPickerProducts;
+                return (
+                  <div
+                    ref={quickPickerMenuRef}
+                    style={quickPickerStyle}
+                    className="flex flex-col rounded-xl bg-[#f4fbf7] border-2 border-[#0f4a33] shadow-2xl text-[#07281c] overflow-hidden"
+                  >
+                    <div className="px-2.5 py-1.5 bg-[#d7eee4] border-b border-[#186635]/30 space-y-1 shrink-0">
+                      <div className="flex items-center justify-between gap-2 text-[11px] font-extrabold text-[#0f4a33]">
+                        <span className="inline-flex items-center gap-1">
+                          <Package className="w-3 h-3" /> Sản phẩm &amp; Quy cách
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold opacity-85">
+                            {selectedSkuCount} SP
+                          </span>
+                          {selectedSkuCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setQuickPickerShowAll((v) => !v)}
+                              className="px-1.5 py-0.5 rounded bg-[#0f4a33] text-[#f4d98a] text-[10px] font-bold cursor-pointer hover:bg-[#07281c]"
+                            >
+                              {showingSelectedOnly ? '+ Chọn thêm' : 'Chỉ xem đã chọn'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="relative flex items-center">
+                        <Search className="w-3 h-3 absolute left-2 text-[#0f4a33]/70 pointer-events-none" />
+                        <input
+                          type="text"
+                          value={quickPickerSearch}
+                          onChange={(e) => {
+                            setQuickPickerSearch(e.target.value);
+                            if (e.target.value.trim()) setQuickPickerShowAll(true);
+                          }}
+                          placeholder="Tìm SP, SKU hoặc quy cách..."
+                          className="w-full pl-6 pr-6 py-1 text-[11px] rounded-md bg-white border border-[#186635]/50 text-[#07281c] placeholder:text-[#0b2418]/45 placeholder:italic outline-none focus:border-[#0f4a33]"
+                        />
+                        {quickPickerSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setQuickPickerSearch('')}
+                            className="absolute right-1.5 text-[#0f4a33] hover:text-[#8c3b3b] cursor-pointer"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
                         )}
                       </div>
-                    );
-                  })}
-                  {filteredQuickPickerProducts.length === 0 && (
-                    <div className="px-3 py-5 text-center text-xs text-[#0f4a33]/70 italic">
-                      Không tìm thấy sản phẩm hoặc quy cách phù hợp.
                     </div>
-                  )}
-                </div>
 
-                <div className="px-3 py-2 bg-[#d7eee4] border-t border-[#186635]/30 flex items-center justify-between gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setQuickSelections({});
-                      syncQuickNoteFromSelections({});
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-white border border-[#186635]/40 text-[#8c3b3b] text-[11px] font-bold hover:bg-[#fee2e2] cursor-pointer"
-                  >
-                    Bỏ chọn hết
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setQuickPickerOpen(false)}
-                    className="px-3 py-1 rounded-lg bg-[#0f4a33] text-[#f4d98a] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer hover:bg-[#07281c]"
-                  >
-                    <Check className="w-3.5 h-3.5" /> Xong
-                  </button>
-                </div>
-              </div>,
+                    <div className="flex-1 overflow-y-auto overscroll-contain divide-y divide-[#186635]/15">
+                      {visibleProducts.map((p) => {
+                        const isProdSelected = quickSelections[p.sku_code] !== undefined;
+                        const selectedPacks = quickSelections[p.sku_code] || [];
+                        const packOpts = getPackingOptionsForProduct(p, data.pricingRates, data.lookups);
+                        const displayedPacks =
+                          showingSelectedOnly && selectedPacks.length > 0
+                            ? packOpts.filter((pk) => selectedPacks.includes(pk.code))
+                            : packOpts;
+                        return (
+                          <div key={p.sku_code} className={isProdSelected ? 'bg-[#e6f5ee]' : ''}>
+                            <label className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-[#d7eee4]/70 transition-colors">
+                              <input
+                                type="checkbox"
+                                checked={isProdSelected}
+                                onChange={() => toggleQuickProduct(p.sku_code)}
+                                className="accent-[#0f4a33] w-3 h-3 cursor-pointer shrink-0"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between gap-1.5">
+                                  <span className="text-[11.5px] font-bold text-[#07281c] leading-tight truncate">
+                                    {p.product_name_vie}
+                                  </span>
+                                  <span className="font-mono text-[10px] font-bold px-1 py-0.2 rounded bg-[#0f4a33]/10 text-[#0f4a33] shrink-0">
+                                    {p.sku_code}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-[#0f4a33]/80 truncate leading-tight">
+                                  {p.product_name_eng}
+                                  {p.container_type ? ` · ${p.container_type}` : ''}
+                                </div>
+                              </div>
+                            </label>
+
+                            {isProdSelected && (
+                              <div className="ml-5 mr-2 mb-1.5 pl-2 py-1 border-l-2 border-[#16977f] bg-white/80 rounded-r-md space-y-0.5">
+                                <div className="flex items-center justify-between text-[10px] font-extrabold text-[#0f4a33]">
+                                  <span>Quy cách đóng gói:</span>
+                                  {showingSelectedOnly && selectedPacks.length > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setQuickPickerShowAll(true)}
+                                      className="text-[10px] underline cursor-pointer"
+                                    >
+                                      Đổi quy cách
+                                    </button>
+                                  )}
+                                </div>
+                                {displayedPacks.map((pk) => {
+                                  const pkChecked = selectedPacks.includes(pk.code);
+                                  return (
+                                    <label
+                                      key={pk.code}
+                                      className={`flex items-center gap-1.5 px-1.5 py-0.5 rounded cursor-pointer text-[11px] transition-colors ${
+                                        pkChecked
+                                          ? 'bg-[#0f4a33] text-[#fff5d6] font-bold'
+                                          : 'hover:bg-[#d7eee4] text-[#07281c]'
+                                      }`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={pkChecked}
+                                        onChange={() => {
+                                          toggleQuickPackaging(p.sku_code, pk.code);
+                                          if (!pkChecked) setQuickPickerShowAll(false);
+                                        }}
+                                        className="accent-[#f4d98a] w-3 h-3 cursor-pointer shrink-0"
+                                      />
+                                      <span className="leading-tight flex-1 truncate">
+                                        {pk.name}{' '}
+                                        <span className={`font-mono text-[10px] ${pkChecked ? 'text-[#f4d98a]' : 'opacity-70'}`}>
+                                          ({pk.code})
+                                        </span>
+                                      </span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {visibleProducts.length === 0 && (
+                        <div className="px-3 py-4 text-center text-[11px] text-[#0f4a33]/70 italic">
+                          Không tìm thấy sản phẩm hoặc quy cách phù hợp.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="px-2.5 py-1.5 bg-[#d7eee4] border-t border-[#186635]/30 flex items-center justify-between gap-2 shrink-0">
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQuickSelections({});
+                            syncQuickNoteFromSelections({});
+                            setQuickPickerShowAll(true);
+                          }}
+                          className="px-2 py-0.5 rounded bg-white border border-[#186635]/40 text-[#8c3b3b] text-[10.5px] font-bold hover:bg-[#fee2e2] cursor-pointer"
+                        >
+                          Bỏ chọn hết
+                        </button>
+                        {showingSelectedOnly && (
+                          <button
+                            type="button"
+                            onClick={() => setQuickPickerShowAll(true)}
+                            className="px-2 py-0.5 rounded bg-white border border-[#186635]/40 text-[#0f4a33] text-[10.5px] font-bold hover:bg-[#e6f5ee] cursor-pointer"
+                          >
+                            Hiện tất cả SP
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (selectedSkuCount > 0) setQuickPickerShowAll(false);
+                          setQuickPickerOpen(false);
+                        }}
+                        className="px-2.5 py-0.5 rounded bg-[#0f4a33] text-[#f4d98a] text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer hover:bg-[#07281c]"
+                      >
+                        <Check className="w-3 h-3" /> Xong
+                      </button>
+                    </div>
+                  </div>
+                );
+              })(),
               document.body
             )}
         </div>
@@ -1396,10 +1451,22 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                           <span className="italic opacity-75">-</span>
                         )}
                       </td>
-                      <td className="text-center font-mono font-bold">{fmtNumber(inq.net_weight_kgs)} KG</td>
+                      <td className="text-center font-mono font-bold whitespace-nowrap">{fmtNumber(inq.net_weight_kgs)} KG</td>
                       <td className="text-center">
-                        <div className="font-mono font-bold">{inq.desired_incoterm}</div>
-                        <div className="text-[10.5px] opacity-80 max-w-[160px] mx-auto truncate">{inq.proposed_payment_term}</div>
+                        {inq.desired_incoterm?.trim() || inq.proposed_payment_term?.trim() ? (
+                          <>
+                            {inq.desired_incoterm?.trim() && (
+                              <div className="font-mono font-bold">{inq.desired_incoterm.trim()}</div>
+                            )}
+                            {inq.proposed_payment_term?.trim() && (
+                              <div className="text-[10.5px] opacity-85 max-w-[160px] mx-auto truncate">
+                                {inq.proposed_payment_term.trim()}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <span className="opacity-60">-</span>
+                        )}
                       </td>
                       <td className="text-center">
                         <span className="keep-badge-color inline-block px-2 py-0.5 rounded bg-[#0f4a33] text-[#fff5d6] text-[11px] font-bold">
@@ -2434,7 +2501,7 @@ export const SalesCrmView: React.FC<SalesCrmViewProps> = ({
                       </td>
                       <td className="text-left">
                         <div className="font-bold">{cus?.consignee_name || ord.consignee_id}</div>
-                        <div className="text-[11px] opacity-80">{ord.pol} → {ord.pod}</div>
+                        <div className="text-[11px] opacity-80">{deduplicatePortName(ord.pol)} → {deduplicatePortName(ord.pod)}</div>
                       </td>
                       <td className="text-left">
                         <div className="font-mono font-bold">{ord.sku_code}</div>
